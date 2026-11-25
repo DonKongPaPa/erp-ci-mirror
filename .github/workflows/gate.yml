@@ -1,0 +1,305 @@
+name: gate
+
+# 三线模型（对应 wiki/项目决策/发布与质量流程.md）：
+#   单测线 unit-<sha>  每次 push/PR 自动跑，只出判据不部署
+#   beta 线 beta-<seq>  单测线全绿后自动跑 build，产出可部署产物
+#   主线 v<x.y.z>      只能人工建 tag 触发，需要 beta 判据作依据
+#
+# 另有一条文档快道（R-043）：主线上只改了文档的推送不跑单测线与 beta 基线，
+# 只跑文档守门、证据、合规三样。判断看改了哪些文件，不看提交说明。
+#
+# YAML 只负责装环境和触发；真正跑的闸门是 scripts/ci/gate.sh，
+# 本地 `scripts/ci/gate.sh unit` 跑的是同一份逻辑。
+#
+# R-049：同一份工作流两个仓库通用。脱敏镜像仓库设仓库变量 CI_MIRROR=1，
+# 文档快道与文档守门在镜像里不跑（那里没有 wiki/、HANDOFF、.agents），
+# 单测线与 beta 基线照跑。主仓库不设这个变量，文档纪律照旧。
+
+on:
+  # 镜像里合并请求的分支叫 pr/<主仓库的合并请求号>（见 scripts/dev/ci-mirror.sh）。
+  # 同步到这些分支的 push 也要触发单测线，否则按分支名回查不到运行结果。
+  # beta 基线仍只在 main 上跑（见下面 beta 作业的 if）。
+  push:
+    branches: [main, 'pr/**']
+  pull_request:
+  workflow_dispatch:
+
+# 主仓库私有、CI 镜像是脱敏的公开仓库（R-049）：工作流只拿读权限 —— 合并请求可能来自任何人，这里也不引用仓库密钥。
+permissions:
+  contents: read
+
+# 注意：不要加 paths-ignore 跳过 md。
+# 八个守门测试查的正是 md（handoff-freshness / compliance-audit / timestamp-precision /
+# mermaid-only / adr / requirements-tracking / requirements-weight / root-agents-md），
+# 跳过 md 就等于让整套文档纪律在 CI 上永不执行。文档快道不是跳过：它照跑文档守门。
+
+concurrency:
+  # 合并请求各自是 refs/pull/<n>/merge：同一个请求有新推送时取消旧的运行，避免排队堆积。
+  # 主线不取消正在跑的运行，改为排队（同一个分组最多一个在跑、一个等着，后来的替换等着的那个）。
+  # 取消的代价实测过：2026-11-24 晚主线上的七次运行里六次被后来的推送取消，一晚上只拿到一次结论；
+  # 合并代码之后紧接着推一次文档，也会把合并那一次的完整运行取消掉。
+  group: gate-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # 与 app-local/package.json 的 engines 一致。Node 26 会让 client 测试假失败。
+  NODE_VERSION: '24'
+
+jobs:
+  # 只改了文档的推送走快道：单测线与 beta 基线不启动，另跑 docs 档。
+  # 这一步只算「改了哪些文件、是不是全在文档集合里」，不改任何东西。
+  changes:
+    name: 改动范围（是否只改了文档）
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      # 要 diff 事件的两端，浅克隆只有 HEAD，取不到基线就会被判成「算不出来」。
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 算出这次事件改了哪些文件
+        id: classify
+        env:
+          CI_MIRROR: ${{ vars.CI_MIRROR }}
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_HEAD: ${{ github.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        # 不用 set -e：算不出来时也必须有输出。任何异常一律落到 docs_only=false，
+        # 宁可多跑单测线，也不要让一个代码改动因为判断脚本出错而漏检。
+        run: |
+          set -uo pipefail
+
+          # 文档路径集合：与 .agents/rules/workflow-dispatch.md 第十节一致。
+          is_doc() {
+            case "$1" in
+              HANDOFF.md|AGENTS.md|README.md) return 0 ;;
+              wiki/*|raw/*|.agents/*|docs/*) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          # 输出 "true" 当且仅当两端之间至少有一个文件、且每一个都在文档集合里。
+          classify() {
+            local base="$1" head="$2"
+            if [ -z "$base" ] || [ -z "$head" ]; then
+              echo "事件里没有 diff 的两端，按全量处理" >&2
+              echo "false"
+              return 0
+            fi
+            if printf '%s' "$base" | grep -Eq '^0+$'; then
+              echo "基线是全零（新分支或强推），按全量处理" >&2
+              echo "false"
+              return 0
+            fi
+            local files
+            # 关掉路径转义：仓库里的文档全在中文目录下，Git 默认把这种路径输出成
+            # 带引号的八进制转义（"wiki/\351\241\271…"），开头的引号会让下面的模式全部落空。
+            # 2026-11-25 实测：快道上线的第一次真实使用就是这样判成了「不是只改了文档」。
+            if ! files="$(git -c core.quotepath=false diff --name-only --no-renames "$base" "$head")"; then
+              echo "git diff $base..$head 失败，按全量处理" >&2
+              echo "false"
+              return 0
+            fi
+            if [ -z "$files" ]; then
+              echo "这次事件没有改动的文件，按全量处理" >&2
+              echo "false"
+              return 0
+            fi
+            local file docs_only=true
+            while IFS= read -r file; do
+              if ! is_doc "$file"; then
+                echo "非文档改动：$file" >&2
+                docs_only=false
+                break
+              fi
+            done <<< "$files"
+            echo "$docs_only"
+          }
+
+          result=false
+          case "$EVENT_NAME" in
+            pull_request) result="$(classify "$PR_BASE" "$PR_HEAD")" || result=false ;;
+            push) result="$(classify "$PUSH_BEFORE" "$PUSH_HEAD")" || result=false ;;
+            *) echo "事件 $EVENT_NAME 没有 diff 的两端，按全量处理" >&2 ;;
+          esac
+          # 脱敏镜像里没有仓库级文档，文档快道不适用：一律按全量跑单测线。
+          if [ "${CI_MIRROR:-0}" = "1" ]; then
+            echo "CI_MIRROR=1：镜像仓库没有文档快道，按全量处理" >&2
+            result=false
+          fi
+          echo "docs_only=$result"
+          echo "docs_only=$result" >> "$GITHUB_OUTPUT"
+
+  unit:
+    name: 单测线
+    runs-on: ubuntu-latest
+    needs: changes
+    # 只改了文档的推送走文档快道，单测线不启动。
+    if: needs.changes.outputs.docs_only != 'true'
+    # 实测 7.5 分钟。给 3 倍余量，挂死时快速失败而不是白等 30 分钟。
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: hs_erp
+          POSTGRES_PASSWORD: hs_erp_dev_pw
+          POSTGRES_DB: hs_erp_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # 由仓库变量注入 gate.sh：镜像里文档阶段跳过，主仓库照跑。
+      CI_MIRROR: ${{ vars.CI_MIRROR }}
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: '5432'
+      POSTGRES_USER: hs_erp
+      POSTGRES_PASSWORD: hs_erp_dev_pw
+      POSTGRES_DATABASE: hs_erp_test
+    steps:
+      # fetch-depth: 0 —— handoff-freshness 检查要比对最近若干次提交。
+      # 默认浅克隆只取 1 个提交，那个检查在 CI 上就只能看到 HEAD，形同虚设。
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: app-local/pnpm-lock.yaml
+      - name: 安装依赖
+        working-directory: app-local
+        run: pnpm install --frozen-lockfile
+      - name: 跑单测线闸门
+        run: ./scripts/ci/gate.sh unit
+      - name: 上传判据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verdict-unit-${{ github.sha }}
+          path: .ci/
+          if-no-files-found: warn
+
+  beta:
+    name: beta 基线
+    timeout-minutes: 25
+    # 单测线全绿才进 beta：promote 需要人工判断，自动最远到这一层。
+    needs: [changes, unit]
+    # 只在 main 上跑，且只改了文档的推送不跑。PR 阶段 unit 足够，
+    # beta 的 build+e2e 不产生 PR 需要的信号。
+    if: needs.changes.outputs.docs_only != 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: hs_erp
+          POSTGRES_PASSWORD: hs_erp_dev_pw
+          POSTGRES_DB: hs_erp_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # 由仓库变量注入 gate.sh：镜像里文档阶段跳过，主仓库照跑。
+      CI_MIRROR: ${{ vars.CI_MIRROR }}
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: '5432'
+      POSTGRES_USER: hs_erp
+      POSTGRES_PASSWORD: hs_erp_dev_pw
+      POSTGRES_DATABASE: hs_erp_test
+    steps:
+      # fetch-depth: 0 —— handoff-freshness 检查要比对最近若干次提交。
+      # 默认浅克隆只取 1 个提交，那个检查在 CI 上就只能看到 HEAD，形同虚设。
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: app-local/pnpm-lock.yaml
+      - name: 安装依赖
+        working-directory: app-local
+        run: pnpm install --frozen-lockfile
+      # 端到端里的稳定性测试要开浏览器，而浏览器二进制不在依赖里。原来那条端到端只走接口，
+      # 所以此前没装也能过；2026-11-25 第一次跑稳定性测试就缺了它。--with-deps 顺带装系统库。
+      - name: 安装端到端要用的浏览器
+        working-directory: app-local
+        run: pnpm exec playwright install --with-deps chromium
+      - name: 跑 beta 闸门（含 build）
+        run: ./scripts/ci/gate.sh beta
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ github.sha }}
+          path: app-local/dist/
+          retention-days: 14
+      # 稳定性测试失败时留下的录像与 trace：没有它，远端的 e2e 红了只能看到一句断言。
+      - name: 上传端到端的录像与 trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results-${{ github.sha }}
+          path: app-local/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: 上传判据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verdict-beta-${{ github.sha }}
+          path: .ci/
+          if-no-files-found: warn
+
+  docs:
+    name: 文档快道
+    runs-on: ubuntu-latest
+    needs: changes
+    # 只改了文档的推送才跑；它不依赖单测线，因为单测线这时不启动。
+    # 脱敏镜像仓库（CI_MIRROR=1）没有仓库级文档，不跑文档快道。
+    if: vars.CI_MIRROR != '1' && needs.changes.outputs.docs_only == 'true'
+    # 本地实测约两分钟（tests/project 加证据与合规）。给足余量，挂死时快速失败。
+    timeout-minutes: 15
+    env:
+      CI_MIRROR: ${{ vars.CI_MIRROR }}
+    steps:
+      # 与 unit 相同：handoff-freshness 要比对最近若干次提交，浅克隆看不出漏记。
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: app-local/pnpm-lock.yaml
+      - name: 安装依赖
+        working-directory: app-local
+        run: pnpm install --frozen-lockfile
+      - name: 跑文档快道闸门
+        run: ./scripts/ci/gate.sh docs
+      - name: 上传判据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verdict-docs-${{ github.sha }}
+          path: .ci/
+          if-no-files-found: warn

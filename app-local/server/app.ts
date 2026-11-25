@@ -1,0 +1,55 @@
+import type { Application } from '@nocobase/app-server/application';
+import { DatabaseProvider } from '@nocobase/app-server/database';
+import { I18nProvider, i18nHttpMiddleware } from '@nocobase/app-server/i18n';
+import { CachingProvider } from '@nocobase/app-server/caching';
+import { DriveProvider } from '@nocobase/app-server/drive';
+import { IdGeneratorProvider } from '@nocobase/app-server/id-generator';
+import {
+  LoggingProvider,
+  requestLoggingMiddleware,
+} from '@nocobase/app-server/logging';
+import { QueueServiceProvider } from '@nocobase/app-server/queue';
+import { SecretsProvider } from '@nocobase/app-server/secrets';
+import { JobExecutorServiceProvider } from '@nocobase/app-server/jobs';
+import {
+  SessionProvider,
+  sessionHttpMiddleware,
+} from '@nocobase/app-server/session';
+import { healthCheckApiRoutes } from '@nocobase/app-server/router';
+import {
+  createAppFromRuntime,
+  type AppRuntimeContext,
+} from '@nocobase/app-server/runtime';
+import { spaRootRoutes } from '@nocobase/app-server/spa';
+
+import { aiGuardHttpMiddleware } from './ai-guard.js';
+
+export function createApp(runtime: AppRuntimeContext): Application {
+  const app = createAppFromRuntime(runtime);
+
+  app.addServiceProvider(DatabaseProvider);
+  app.addServiceProvider(I18nProvider);
+  app.addServiceProvider(LoggingProvider);
+  app.addServiceProvider(CachingProvider);
+  app.addServiceProvider(IdGeneratorProvider);
+  app.addServiceProvider(SecretsProvider);
+  app.addServiceProvider(SessionProvider);
+  app.addServiceProvider(DriveProvider);
+  app.addServiceProvider(QueueServiceProvider, {
+    nodeEnv: runtime.env.NODE_ENV,
+  });
+  app.addServiceProvider(JobExecutorServiceProvider, {
+    nodeEnv: runtime.env.NODE_ENV,
+  });
+  app.addHttpMiddleware(requestLoggingMiddleware);
+  app.addHttpMiddleware(sessionHttpMiddleware);
+  app.addHttpMiddleware(i18nHttpMiddleware);
+  // R-045：紧跟着上面三个注册。HTTP 中间件先注册，再挂路由；挂成应用自己的路由拦不住
+  // 框架贡献的 `/api/agents/*`（框架的路由先入、先匹配先应答）。
+  app.addHttpMiddleware(aiGuardHttpMiddleware);
+  app.addRoutes(healthCheckApiRoutes);
+  app.addRuntimeContributions(runtime);
+  app.addRoutes(spaRootRoutes);
+
+  return app;
+}

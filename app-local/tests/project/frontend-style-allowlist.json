@@ -1,0 +1,336 @@
+[
+  {
+    "file": "client/components/attachment-list.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "max-h-[75dvh]": 1,
+      "max-h-[calc(100dvh-2rem)]": 1,
+      "max-w-[calc(100%-2rem)]": 1
+    },
+    "reason": "附件浮层的视口上限（100dvh / 100vw 减去边距），界面规范 F7 允许的固定值，保留。"
+  },
+  {
+    "file": "client/components/attachment-list.tsx",
+    "rule": "space",
+    "tokens": {
+      "space-y-3": 1
+    },
+    "reason": "存量的纵向堆叠；改成 flex-col + gap 会改变子元素布局，随页面整改过一次界面检查再改。"
+  },
+  {
+    "file": "client/components/data-table/filters.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "max-h-[calc(100dvh-2rem)]": 1,
+      "pb-[max(1rem,env(safe-area-inset-bottom))]": 1
+    },
+    "reason": "手机筛选面板的视口上限与安全区内边距，属于 F7 的固定值。"
+  },
+  {
+    "file": "client/components/data-table/pagination.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "w-[70px]": 1
+    },
+    "reason": "每页条数选择器的固定宽度；换成令牌档位会改变控件宽度，按 F7 保留。"
+  },
+  {
+    "file": "client/components/default-access-editor.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "grid-cols-[repeat(auto-fit,minmax(min(100%,16rem),1fr))]": 1
+    },
+    "reason": "自动填充的列宽下限（16rem），属于版式固定值。"
+  },
+  {
+    "file": "client/components/feedback-form.tsx",
+    "rule": "space",
+    "tokens": {
+      "space-y-2": 1
+    },
+    "reason": "存量的纵向堆叠；改成 flex-col + gap 会改变子元素布局，随页面整改过一次界面检查再改。"
+  },
+  {
+    "file": "client/components/flow-diagram.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "max-w-[35%]": 1
+    },
+    "reason": "流程图节点标签的最大宽度占比，属于版式固定值。"
+  },
+  {
+    "file": "client/components/inbox-button.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "text-[9px]": 1,
+      "text-[11px]": 1
+    },
+    "reason": "99+ 徽标要比 text-xs 更小才保持胶囊形，字号表没有这一档；属于 F7 的固定值。"
+  },
+  {
+    "file": "client/components/loading.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "max-w-[calc(100%-1rem)]": 1
+    },
+    "reason": "加载占位的最大宽度随视口收缩，属于视口限制。"
+  },
+  {
+    "file": "client/components/long-text.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "max-h-[min(36rem,70vh)]": 1,
+      "max-w-[calc(100vw-2rem)]": 1,
+      "w-[28rem]": 1
+    },
+    "reason": "长文本浮层的固定宽度与视口上限，属于 F7 的固定值。"
+  },
+  {
+    "file": "client/components/page-container.tsx",
+    "rule": "space",
+    "tokens": {
+      "space-y-4": 1,
+      "space-y-6": 1
+    },
+    "reason": "页面框架的纵向间距；改成 flex-col 会影响所有页面的子元素布局，随整体版式整改再动。"
+  },
+  {
+    "file": "client/components/page-header.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "tracking-[-0.035em]": 1
+    },
+    "reason": "标题字距的版式微调；字距没有令牌档位，按 F7 保留。"
+  },
+  {
+    "file": "client/components/permission-editor.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "grid-cols-[minmax(0,1fr)_1.5rem]": 2,
+      "max-w-[60rem]": 1,
+      "md:max-h-[min(65dvh,48rem)]": 1,
+      "permissions:grid-cols-[8.5rem_minmax(0,1fr)]": 2
+    },
+    "reason": "权限编辑器的固定列宽与视口上限，属于版式固定值。"
+  },
+  {
+    "file": "client/components/route-overlay.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "max-h-[calc(100dvh-2rem)]": 1,
+      "max-w-[calc(100%-2rem)]": 1
+    },
+    "reason": "路由浮层的视口上限，属于 F7 的固定值。"
+  },
+  {
+    "file": "client/extensions/nocobase-auth-methods/auth-methods.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "grid-cols-[repeat(auto-fit,minmax(3rem,1fr))]": 1
+    },
+    "reason": "登录方式按钮的最小宽度，属于版式固定值。"
+  },
+  {
+    "file": "client/extensions/nocobase-file-component-ui/components/file-preview-dialog.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "max-h-[calc(100dvh-2rem)]": 1,
+      "max-w-[calc(100%-2rem)]": 1
+    },
+    "reason": "文件预览对话框的视口上限，属于 F7 的固定值。"
+  },
+  {
+    "file": "client/extensions/nocobase-file-component-ui/components/file-upload-field.tsx",
+    "rule": "space",
+    "tokens": {
+      "space-y-3": 1
+    },
+    "reason": "存量的纵向堆叠；改成 flex-col + gap 会改变子元素布局，随页面整改过一次界面检查再改。"
+  },
+  {
+    "file": "client/extensions/nocobase-file-component-ui/components/previewers/file-preview-content.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "h-[70vh]": 2,
+      "max-h-[70vh]": 4
+    },
+    "reason": "预览内容按视口高度的七成，属于视口限制。"
+  },
+  {
+    "file": "client/extensions/nocobase-file-component-ui/components/previewers/office-open-xml-preview.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "h-[70vh]": 1
+    },
+    "reason": "Office 预览按视口高度的七成，属于视口限制。"
+  },
+  {
+    "file": "client/extensions/nocobase-inbox/decision-actions-bar.tsx",
+    "rule": "space",
+    "tokens": {
+      "space-y-2": 1
+    },
+    "reason": "存量的纵向堆叠；改成 flex-col + gap 会改变子元素布局，随页面整改过一次界面检查再改。"
+  },
+  {
+    "file": "client/extensions/nocobase-inbox/inbox-list.tsx",
+    "rule": "space",
+    "tokens": {
+      "space-y-0.5": 1,
+      "space-y-1": 1,
+      "space-y-2": 1,
+      "space-y-5": 1
+    },
+    "reason": "收件箱列表的纵向堆叠；改成 flex-col + gap 会改变子元素布局，随页面整改过一次界面检查再改。"
+  },
+  {
+    "file": "client/extensions/nocobase-inbox/inbox-page.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "lg:w-[26rem]": 1
+    },
+    "reason": "收件箱详情栏的固定宽度，属于版式固定值。"
+  },
+  {
+    "file": "client/extensions/nocobase-workflow-management/definition-list.tsx",
+    "rule": "space",
+    "tokens": {
+      "space-y-4": 1
+    },
+    "reason": "存量的纵向堆叠；改成 flex-col + gap 会改变子元素布局，随页面整改过一次界面检查再改。"
+  },
+  {
+    "file": "client/pages/auth/forgot-password.tsx",
+    "rule": "space",
+    "tokens": {
+      "space-y-4": 2
+    },
+    "reason": "登录类页面的纵向堆叠；随认证页面整改过一次界面检查再改。"
+  },
+  {
+    "file": "client/pages/auth/register.tsx",
+    "rule": "space",
+    "tokens": {
+      "space-y-4": 1
+    },
+    "reason": "登录类页面的纵向堆叠；随认证页面整改过一次界面检查再改。"
+  },
+  {
+    "file": "client/pages/auth/reset-password.tsx",
+    "rule": "space",
+    "tokens": {
+      "space-y-4": 3
+    },
+    "reason": "登录类页面的纵向堆叠；随认证页面整改过一次界面检查再改。"
+  },
+  {
+    "file": "client/pages/auth/shared.tsx",
+    "rule": "space",
+    "tokens": {
+      "space-y-8": 1
+    },
+    "reason": "品牌面板的纵向堆叠；随认证页面整改过一次界面检查再改。"
+  },
+  {
+    "file": "client/pages/auth/shared.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "tracking-[0.16em]": 1
+    },
+    "reason": "品牌面板小标题的字距；字距没有令牌档位，属于 F7 的固定值。"
+  },
+  {
+    "file": "client/pages/home/index.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "tracking-[-0.035em]": 1
+    },
+    "reason": "首页大标题的字距；字距没有令牌档位，属于 F7 的固定值。"
+  },
+  {
+    "file": "client/pages/quality/index.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]": 1
+    },
+    "reason": "质量看板的侧栏宽度，属于版式固定值。"
+  },
+  {
+    "file": "client/pages/settings/database-explorer/fields.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "max-w-[45%]": 1,
+      "w-[14%]": 1,
+      "w-[30%]": 1,
+      "w-[32%]": 1
+    },
+    "reason": "数据库浏览器表格的列宽百分比，属于版式固定值。"
+  },
+  {
+    "file": "client/pages/settings/database-explorer/index.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "lg:grid-cols-[minmax(15rem,19rem)_minmax(0,1fr)]": 1,
+      "lg:min-h-[36rem]": 1
+    },
+    "reason": "数据库浏览器面板的固定列宽与高度，属于版式固定值。"
+  },
+  {
+    "file": "client/pages/settings/database-explorer/index.tsx",
+    "rule": "space",
+    "tokens": {
+      "space-y-0": 1
+    },
+    "reason": "`space-y-0` 是关掉父级 spacing 的重置，和 `gap-4` 并用；随页面整改一起删。"
+  },
+  {
+    "file": "client/pages/settings/settings-home.tsx",
+    "rule": "space",
+    "tokens": {
+      "space-y-3": 1,
+      "space-y-8": 1
+    },
+    "reason": "设置首页的纵向堆叠；改成 flex-col + gap 会改变卡片布局，随页面整改过一次界面检查再改。"
+  },
+  {
+    "file": "client/pages/settings/settings-module-page.tsx",
+    "rule": "space",
+    "tokens": {
+      "space-y-6": 1
+    },
+    "reason": "设置模块页的纵向堆叠；随页面整改过一次界面检查再改。"
+  },
+  {
+    "file": "client/routing/client-route.tsx",
+    "rule": "arbitrary-value",
+    "tokens": {
+      "min-h-[calc(100svh-4rem)]": 1
+    },
+    "reason": "错误与加载占位页面的最小高度扣掉页头，属于视口限制。"
+  },
+  {
+    "file": "client/routing/client-route.tsx",
+    "rule": "space",
+    "tokens": {
+      "space-y-3": 1,
+      "space-y-4": 2
+    },
+    "reason": "路由占位页面的纵向堆叠（含并入主线后新增的页面加载失败态）；随页面整改过一次界面检查再改。"
+  },
+  {
+    "file": "client/routing/session-preparation.tsx",
+    "rule": "space",
+    "tokens": {
+      "space-y-4": 1
+    },
+    "reason": "会话准备页面的纵向堆叠；随页面整改过一次界面检查再改。"
+  },
+  {
+    "file": "client/startup.tsx",
+    "rule": "space",
+    "tokens": {
+      "space-y-4": 1
+    },
+    "reason": "启动占位页面的纵向堆叠；随页面整改过一次界面检查再改。"
+  }
+]

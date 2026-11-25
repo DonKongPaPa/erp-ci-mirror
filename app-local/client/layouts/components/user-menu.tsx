@@ -1,0 +1,170 @@
+import { useAuthenticationErrorResolver } from '@nocobase/app-plugin-authentication/client/actions';
+import {
+  getAvatarInitials,
+  useClientApplication,
+  useToaster,
+} from '@nocobase/app-client';
+import { useTranslation } from '@nocobase/i18n/client';
+import { useAuthentication } from '@nocobase/app-plugin-authentication/client';
+import { KeyRound, LogOut, UserRound } from 'lucide-react';
+import { createElement, useState, type ReactElement } from 'react';
+import { Link } from 'react-router';
+
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '#components/ui/dropdown-menu';
+
+import { ThemeSettings } from '../../theme/index.js';
+import {
+  allowHoverAfterOverlayClose,
+  useHoverAllowedAfterOverlayClose,
+} from '../../lib/overlay-hover-guard.js';
+import { devAccountSwitcherSectionToken } from '../user-menu-section.js';
+import { LanguageSwitcher } from './language-switcher.js';
+
+export function UserMenu(): ReactElement {
+  const app = useClientApplication();
+  const hoverAllowed = useHoverAllowedAfterOverlayClose();
+  const [open, setOpen] = useState(false);
+  const {
+    client,
+    session,
+    isPending: isLoading,
+    refresh,
+  } = useAuthentication();
+  const identity = session?.user
+    ? {
+        id: session.user.id,
+        fullName: session.user.name,
+        email: session.user.email,
+        avatar: session.user.image ?? undefined,
+      }
+    : null;
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const { t } = useTranslation();
+  const toaster = useToaster();
+  const resolveError = useAuthenticationErrorResolver();
+
+  const name =
+    identity?.fullName ||
+    identity?.email ||
+    t('account.fallback', { defaultValue: 'Account' });
+  const initials = getAvatarInitials(name, {
+    cjk: Boolean(identity?.fullName),
+  });
+
+  // 开发工具的头像菜单段只在开发构建里登记（client/plugins.ts）；正式构建里没有这个服务。
+  // 用 createElement 而不是在渲染里造一个组件标签：这段 UI 由扩展提供，菜单自己不认识它。
+  const section = app.container.has(devAccountSwitcherSectionToken)
+    ? createElement(app.container.resolve(devAccountSwitcherSectionToken))
+    : null;
+
+  return (
+    <DropdownMenu
+      open={open}
+      onOpenChange={(next, details) => {
+        // While the guard is armed, a hover or click that lands on this button
+        // because an overlay just unmounted must not open the menu. Deliberate
+        // use resumes after the hold or when the pointer leaves the trigger.
+        if (
+          next &&
+          !hoverAllowed &&
+          (details.reason === 'trigger-hover' ||
+            details.reason === 'trigger-press')
+        )
+          return;
+        setOpen(next);
+      }}
+    >
+      <DropdownMenuTrigger
+        openOnHover={hoverAllowed}
+        onPointerLeave={allowHoverAfterOverlayClose}
+        delay={0}
+        aria-label={t('account.openMenu', {
+          defaultValue: 'Open account menu',
+        })}
+        className='flex size-10 cursor-pointer items-center justify-center rounded-full border border-border bg-background/60 text-left text-sm outline-none transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50'
+      >
+        {identity?.avatar ? (
+          <img
+            src={identity.avatar}
+            alt=''
+            className='size-full rounded-full object-cover'
+          />
+        ) : (
+          <span className='grid size-full place-items-center rounded-full bg-muted text-xs font-medium text-muted-foreground'>
+            {isLoading ? <UserRound className='size-4' /> : initials}
+          </span>
+        )}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align='end' className='w-64'>
+        <div className='px-2 py-1.5'>
+          <p className='truncate text-sm font-medium'>{name}</p>
+          {identity?.email ? (
+            <p className='truncate text-xs text-muted-foreground'>
+              {identity.email}
+            </p>
+          ) : null}
+        </div>
+        {section}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          className='gap-2'
+          closeOnClick
+          render={<Link to='/account/api-keys' />}
+        >
+          <KeyRound className='size-4' />
+          {t('account.apiKeys', { defaultValue: 'API keys' })}
+        </DropdownMenuItem>
+        <LanguageSwitcher />
+        <ThemeSettings />
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          disabled={isLoggingOut}
+          onClick={() => {
+            void (async () => {
+              setIsLoggingOut(true);
+              try {
+                // Better Auth returns API failures as data rather than throwing.
+                const result = await client.signOut();
+                if (result.error) {
+                  toaster.show({
+                    type: 'error',
+                    title:
+                      resolveError(result.error)?.message ??
+                      t('account.signOutFailed', {
+                        defaultValue: 'Unable to sign out. Please try again.',
+                      }),
+                  });
+                  return;
+                }
+                await refresh();
+              } catch (error) {
+                toaster.show({
+                  type: 'error',
+                  title:
+                    resolveError(error)?.message ??
+                    t('account.signOutFailed', {
+                      defaultValue: 'Unable to sign out. Please try again.',
+                    }),
+                });
+              } finally {
+                setIsLoggingOut(false);
+              }
+            })();
+          }}
+          className='gap-2'
+        >
+          <LogOut className='size-4' />
+          {isLoggingOut
+            ? t('account.signingOut', { defaultValue: 'Signing out…' })
+            : t('account.signOut', { defaultValue: 'Sign out' })}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}

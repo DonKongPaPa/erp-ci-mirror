@@ -1,0 +1,174 @@
+import { authorizationToken } from '@nocobase/app-plugin-authorization';
+import { createAppTest } from '../helpers/test-app.js';
+import { expect } from 'vitest';
+
+import businessPermissionSetsSeed, {
+  businessPermissionSets,
+  persistBusinessPermissionSets,
+} from '../../database/main/seeds/202611240001_seed_business_permission_sets.js';
+import { createStandaloneServer } from '../../server/standalone.js';
+
+/**
+ * R-013 四个业务角色的 seed（验收标准第 1 条与第 11 条的前一半）。
+ *
+ * 角色的定义写在 seed 文件里，先在这里断言它的形状与设计一致（key、名称、授权、
+ * 数据范围全部填 allRecords、没有「用户」资源的任何动作），再让 seed 写进库。
+ * seed 的行为另测三件：重复执行不重复建、管理员改过的角色不被覆盖、已有的角色
+ * 被跳过之后其余的角色仍要建出来（循环里用 continue，不是 return）。
+ */
+const allFqcScopes = {
+  fqcMessages: 'allRecords',
+  fqcScreenings: 'allRecords',
+  fqcTickets: 'allRecords',
+};
+
+const pageGrant = {
+  resource: { type: 'page', id: 'quality' },
+  actions: [{ action: 'access' }],
+};
+
+const fqcViewAndHandle = {
+  resource: { type: 'composite', id: 'fqc' },
+  actions: [
+    { action: 'view', policy: { type: 'composite', scopes: allFqcScopes } },
+    { action: 'handle', policy: { type: 'composite', scopes: allFqcScopes } },
+  ],
+};
+
+const fqcViewOnly = {
+  resource: { type: 'composite', id: 'fqc' },
+  actions: [
+    { action: 'view', policy: { type: 'composite', scopes: allFqcScopes } },
+  ],
+};
+
+const expectedRoles = {
+  quality_manager: {
+    title: { key: 'permissionSets.business.qualityManager', ns: 'app-local' },
+    grants: [pageGrant, fqcViewAndHandle],
+  },
+  quality_inspector: {
+    title: { key: 'permissionSets.business.qualityInspector', ns: 'app-local' },
+    grants: [pageGrant, fqcViewAndHandle],
+  },
+  dept_manager: {
+    title: { key: 'permissionSets.business.deptManager', ns: 'app-local' },
+    grants: [pageGrant, fqcViewOnly],
+  },
+  staff: {
+    title: { key: 'permissionSets.business.staff', ns: 'app-local' },
+    grants: [],
+  },
+} as const;
+
+const roleKeys = Object.keys(expectedRoles);
+
+const test = createAppTest({
+  createServer: createStandaloneServer,
+  config: {
+    app: { publicOrigin: 'http://localhost' },
+    auth: { secret: 'test-auth-secret-at-least-32-characters' },
+  },
+});
+
+test('R-013: declares the keys, titles and grants of the four designed roles', () => {
+  expect(businessPermissionSets.map((set) => set.key)).toEqual(roleKeys);
+  for (const set of businessPermissionSets) {
+    const expected = expectedRoles[set.key as keyof typeof expectedRoles];
+    expect(set.title).toEqual(expected.title);
+    expect(set.grants).toEqual(expected.grants);
+  }
+});
+
+test('R-013: the seed creates the four roles as the design describes them', async ({
+  app,
+}) => {
+  const sets = app.container.resolve(authorizationToken).permissionSets;
+  const stored = await sets.list();
+  for (const [key, expected] of Object.entries(expectedRoles)) {
+    const set = stored.find((entry) => entry.key === key);
+    expect(set, `seed 没有建出角色 ${key}`).toBeDefined();
+    expect(set?.title).toEqual(expected.title);
+    expect(set?.grants).toEqual(expected.grants);
+  }
+});
+
+test('R-013: does not create the same role twice and keeps administrator changes', async ({
+  app,
+  connection,
+}) => {
+  const sets = app.container.resolve(authorizationToken).permissionSets;
+
+  // 重复执行：除了 seed 的历史表，seed 自己也不重复建。
+  expect(await persistBusinessPermissionSets(connection.query)).toEqual([]);
+
+  const rowsFor = async () =>
+    connection.query
+      .selectFrom('authorizationPermissionSets')
+      .select(['key', 'grants'])
+      .where('key', 'in', roleKeys)
+      .execute();
+  expect((await rowsFor()).length).toBe(4);
+
+  // 管理员改了 quality_manager 的授权，删掉另外两个角色，模拟“一部分已存在”。
+  const changedGrants = [
+    {
+      resource: { type: 'page', id: 'quality' },
+      actions: [{ action: 'access' }],
+    },
+  ];
+  await sets.update('quality_manager', {
+    key: 'quality_manager',
+    grants: changedGrants,
+  });
+  await sets.delete('quality_inspector');
+  await sets.delete('dept_manager');
+
+  // 循环里跳过已存在的角色要用 continue：改了的不覆盖，缺的要补回来。
+  expect(
+    (await persistBusinessPermissionSets(connection.query)).sort(),
+  ).toEqual(['dept_manager', 'quality_inspector']);
+
+  const rows = await rowsFor();
+  expect(rows.length).toBe(4);
+  expect(rows.filter((row) => row.key === 'quality_manager').length).toBe(1);
+  const stored = await sets.list();
+  expect(stored.find((set) => set.key === 'quality_manager')?.grants).toEqual(
+    changedGrants,
+  );
+  for (const key of ['quality_inspector', 'dept_manager']) {
+    expect(stored.find((set) => set.key === key)?.grants).toEqual(
+      expectedRoles[key as keyof typeof expectedRoles].grants,
+    );
+  }
+});
+
+test('R-013: writes no grant on the user resource for any business role', async ({
+  connection,
+}) => {
+  const rows = await connection.query
+    .selectFrom('authorizationPermissionSets')
+    .select(['key', 'grants'])
+    .where('key', 'in', roleKeys)
+    .execute();
+  expect(rows.length).toBe(4);
+  for (const row of rows) {
+    const grants = JSON.parse(String(row.grants)) as {
+      resource: { type: string; id: string };
+      actions: { action: string }[];
+    }[];
+    for (const grant of grants) {
+      expect(
+        grant.resource.type,
+        `角色 ${String(row.key)} 授予了「用户」资源：${JSON.stringify(grant)}`,
+      ).not.toBe('user');
+    }
+  }
+});
+
+test('R-013: names the seed after its file so the loader can find it', () => {
+  expect(businessPermissionSetsSeed.name).toBe(
+    '202611240001_seed_business_permission_sets',
+  );
+  expect(typeof businessPermissionSetsSeed.run).toBe('function');
+});
