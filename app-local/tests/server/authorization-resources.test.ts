@@ -59,13 +59,28 @@ const json = (body: unknown, method = 'POST') => ({
 });
 
 const FQC_TABLES = ['fqcMessages', 'fqcScreenings', 'fqcTickets'];
+/** R-002：确认记录表。只追加，只登记读与建。 */
+const REVIEW_TABLE = 'fqcScreeningReviews';
 const PASSWORD = 'R013-test-123!';
 
-/** 人工复核能改的列。设计：主键、创建时间、两个溯源指针、消息原文都不给改。 */
-const SCREENING_UPDATE_FIELDS = [
+/** 人工复核能改的列（R-002）：只改结论、指过去的确认记录与更新时间。 */
+const SCREENING_UPDATE_FIELDS = ['outcome', 'reviewId', 'updatedAt'];
+
+/** 投递能改的十五列（R-002）：模型版草稿值、依据、六个出处列、结论与更新时间。 */
+const INTAKE_SCREENING_UPDATE_FIELDS = [
   'category',
   'severity',
   'suggestedOwner',
+  'summary',
+  'confidence',
+  'evidence',
+  'modelName',
+  'engine',
+  'promptVersion',
+  'degraded',
+  'degradeReason',
+  'knowledgeRefs',
+  'redacted',
   'outcome',
   'updatedAt',
 ];
@@ -87,7 +102,7 @@ const isAllowed = (value: unknown): boolean =>
 
 /** 一个写动作允许的列；没有这个动作、或动作被拒时返回 undefined。 */
 const writableFields = (
-  node: RepositoryPolicy['update'] | undefined,
+  node: RepositoryPolicy['update'] | RepositoryPolicy['create'] | undefined,
 ): readonly string[] | undefined => {
   if (node === undefined || typeof node === 'boolean') {
     return undefined;
@@ -97,14 +112,24 @@ const writableFields = (
     : [...node.fields].sort();
 };
 
-/** 「查看」：三张表都有读，三个写动作都不放行。 */
-const expectView = (decision: FqcDecision) => {
+/**
+ * 「查看」：三张业务表都有读，写动作都不放行。
+ *
+ * 确认记录表另说：两个质量角色的查看带它的读；部门主管的查看**不带**（没配范围
+ * 就是拒绝，R-003 的收窄靠这一点）。范围键仍在，只是读被折成 false。
+ */
+const expectView = (
+  decision: FqcDecision,
+  options: { readonly readsConfirmations: boolean },
+) => {
   expect(decision.effect, '查看应当是「有条件放行」').toBe('conditional');
   const policies = databasePolicies(decision);
-  expect(Object.keys(policies).sort()).toEqual([...FQC_TABLES].sort());
-  for (const table of FQC_TABLES) {
+  expect(Object.keys(policies).sort()).toEqual(
+    [...FQC_TABLES, REVIEW_TABLE].sort(),
+  );
+  for (const table of [...FQC_TABLES, REVIEW_TABLE]) {
     expect(isAllowed(policies[table]?.read), `${table} 的查看没有读`).toBe(
-      true,
+      table === REVIEW_TABLE ? options.readsConfirmations : true,
     );
     expect(isAllowed(policies[table]?.create), `${table} 的查看带了新建`).toBe(
       false,
@@ -118,22 +143,39 @@ const expectView = (decision: FqcDecision) => {
   }
 };
 
-/** 「处理」：三张表都读；只有初筛表能改，且可写列恰好是那五列。 */
+/** 「处理」：四张表都读；初筛表只能改三列，确认记录表只能建。 */
 const expectHandle = (decision: FqcDecision) => {
   expect(decision.effect, '处理应当是「有条件放行」').toBe('conditional');
   const policies = databasePolicies(decision);
-  expect(Object.keys(policies).sort()).toEqual([...FQC_TABLES].sort());
-  for (const table of FQC_TABLES) {
+  expect(Object.keys(policies).sort()).toEqual(
+    [...FQC_TABLES, REVIEW_TABLE].sort(),
+  );
+  for (const table of [...FQC_TABLES, REVIEW_TABLE]) {
     expect(isAllowed(policies[table]?.read), `${table} 的处理没有读`).toBe(
       true,
-    );
-    expect(isAllowed(policies[table]?.create), `${table} 的处理带了新建`).toBe(
-      false,
     );
     expect(isAllowed(policies[table]?.delete), `${table} 的处理带了删除`).toBe(
       false,
     );
   }
+  for (const table of FQC_TABLES) {
+    expect(isAllowed(policies[table]?.create), `${table} 的处理带了新建`).toBe(
+      false,
+    );
+  }
+  // 确认记录只追加：处理可以建，不能改也不能删。
+  expect(
+    isAllowed(policies[REVIEW_TABLE]?.create),
+    '处理没有建确认记录的权利',
+  ).toBe(true);
+  expect(
+    isAllowed(policies[REVIEW_TABLE]?.update),
+    '处理不该能改确认记录',
+  ).toBe(false);
+  expect(
+    writableFields(policies[REVIEW_TABLE]?.update),
+    '处理不该能改确认记录',
+  ).toBeUndefined();
   expect(
     writableFields(policies.fqcMessages?.update),
     '处理不该能改客户消息：消息原文要留痕',
@@ -144,7 +186,7 @@ const expectHandle = (decision: FqcDecision) => {
   ).toBeUndefined();
   expect(
     writableFields(policies.fqcScreenings?.update),
-    '处理只该改初筛表的五列',
+    '处理只该改初筛表的结论、确认记录指针与更新时间',
   ).toEqual([...SCREENING_UPDATE_FIELDS].sort());
 };
 
@@ -206,6 +248,15 @@ test('R-013: registers the three FQC tables with three actions, the fqc actions,
       `${table} 的登记动作应当只有查看、新建、修改`,
     ).toEqual(['read', 'create', 'update']);
   }
+  // R-002：确认记录表只追加，登记的动作只有读与建。
+  const reviews = authz.database.collections
+    .list()
+    .find((collection) => collection.name === REVIEW_TABLE);
+  expect(reviews, `${REVIEW_TABLE} 没有注册`).toBeDefined();
+  expect(reviews?.actions, '确认记录表只登记读与建').toEqual([
+    'read',
+    'create',
+  ]);
   expect(authz.compositeResources.getAction('fqc', 'view')?.title).toEqual({
     key: 'authorization.fqc.actions.view',
     ns: 'app-local',
@@ -266,18 +317,29 @@ test('R-013: the role editor catalogue lists the three FQC actions and no depart
     'handle',
     'intake',
   ]);
-  for (const action of ['view', 'handle', 'intake']) {
+  for (const action of ['view', 'handle']) {
     const scopes = fqc?.dataScopes?.[action] ?? [];
     expect(scopes.map((scope) => scope.collection).sort()).toEqual(
-      [...FQC_TABLES].sort(),
+      [...FQC_TABLES, REVIEW_TABLE].sort(),
     );
     for (const scope of scopes) {
       expect(scope.recordAccess).toContain('allRecords');
-      // FQC 三张表没有 departmentId 列，部门范围键不该出现在这里（验收第 5 条的适用面）。
-      expect(scope.recordAccess).not.toContain('org.myDepartments');
-      expect(scope.recordAccess).not.toContain('org.myDepartmentsAndBelow');
+      if (scope.collection === REVIEW_TABLE) {
+        // R-002 的确认记录表带 departmentId 列，两把部门范围键在它上面是可用的。
+        expect(scope.recordAccess).toContain('org.myDepartments');
+        expect(scope.recordAccess).toContain('org.myDepartmentsAndBelow');
+      } else {
+        // 三张业务表没有 departmentId 列，部门范围键不该出现在这里（验收第 5 条的适用面）。
+        expect(scope.recordAccess).not.toContain('org.myDepartments');
+        expect(scope.recordAccess).not.toContain('org.myDepartmentsAndBelow');
+      }
     }
   }
+  // 投递只写三张业务表，不该出现确认记录表的数据范围。
+  const intakeScopes = fqc?.dataScopes?.intake ?? [];
+  expect(intakeScopes.map((scope) => scope.collection).sort()).toEqual(
+    [...FQC_TABLES].sort(),
+  );
 });
 
 test('R-013: an unregistered collection or business action is denied even for root', async ({
@@ -326,6 +388,7 @@ test('R-013: quality roles view and handle as designed and may not intake', asyn
         resource: { type: 'composite', id: 'fqc' },
         action: 'view',
       }),
+      { readsConfirmations: true },
     );
     expectHandle(
       await context.authorize({
@@ -368,6 +431,7 @@ test('R-013: a department manager views and neither handles nor intakes', async 
       resource: { type: 'composite', id: 'fqc' },
       action: 'view',
     }),
+    { readsConfirmations: false },
   );
   for (const action of ['handle', 'intake']) {
     const denied = await context.authorize({
@@ -439,10 +503,13 @@ test('R-013: root is unrestricted on the business actions, may read the tables a
     expect(decision.effect, `root 被拒了 fqc.${action}`).toBe('conditional');
     expect(codes(decision)).toContain('UNRESTRICTED_ACCESS');
     expect(Object.keys(decision.conditions?.database ?? {}).sort()).toEqual(
-      [...FQC_TABLES].sort(),
+      (action === 'intake'
+        ? [...FQC_TABLES]
+        : [...FQC_TABLES, REVIEW_TABLE]
+      ).sort(),
     );
   }
-  for (const table of FQC_TABLES) {
+  for (const table of [...FQC_TABLES, REVIEW_TABLE]) {
     const read = await root.authorize({
       resource: { type: 'database.collection', id: table },
       action: 'read',
@@ -450,7 +517,7 @@ test('R-013: root is unrestricted on the business actions, may read the tables a
     expect(read.effect, `root 读不了 ${table}`).not.toBe('deny');
     expect(codes(read)).toContain('UNRESTRICTED_ACCESS');
 
-    // 删除没有登记，连 root 也拒：这是「三张表不登记删除」在运行期的样子。
+    // 删除没有登记，连 root 也拒：这是「表不登记删除」在运行期的样子。
     const remove = await root.authorize({
       resource: { type: 'database.collection', id: table },
       action: 'delete',
@@ -458,6 +525,13 @@ test('R-013: root is unrestricted on the business actions, may read the tables a
     expect(remove.effect, `root 删得了 ${table}`).toBe('deny');
     expect(codes(remove)).toContain('RESOURCE_ACTION_NOT_SUPPORTED');
   }
+  // 确认记录表只追加：修改与删除都没有登记。
+  const updateReview = await root.authorize({
+    resource: { type: 'database.collection', id: REVIEW_TABLE },
+    action: 'update',
+  });
+  expect(updateReview.effect, '确认记录表不该登记修改').toBe('deny');
+  expect(codes(updateReview)).toContain('RESOURCE_ACTION_NOT_SUPPORTED');
 });
 
 test('R-013: a grant holding only intake creates rows and cannot read the tables', async ({
@@ -516,6 +590,117 @@ test('R-013: a grant holding only intake creates rows and cannot read the tables
   }
 });
 
+test('R-002 21: 投递对初筛表能改的十五列逐项固定，reviewId 与溯源列写不进去', async ({
+  testApp,
+  app,
+  connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const authz = app.container.resolve(authorizationToken);
+  await authz.permissionSets.create({
+    key: 'r002-intake-columns',
+    grants: [
+      {
+        resource: { type: 'composite', id: 'fqc' },
+        actions: [
+          {
+            action: 'intake',
+            policy: {
+              type: 'composite',
+              scopes: {
+                fqcMessages: 'allRecords',
+                fqcScreenings: 'allRecords',
+                fqcTickets: 'allRecords',
+              },
+            },
+          },
+        ],
+      },
+    ],
+  });
+  const proxy = await createUser(admin, 'r002intakecolumns', {
+    app: ['r002-intake-columns'],
+  });
+  const context = authz.for({ principal: { type: 'user', id: proxy.id } });
+  const intake = await context.authorize({
+    resource: { type: 'composite', id: 'fqc' },
+    action: 'intake',
+  });
+  const policy = databasePolicies(intake).fqcScreenings;
+  expect(policy, '投递没有给出初筛表的范围').toBeDefined();
+
+  // 二十五列之外都不给改：可写列恰好是设计列出的那十五列。
+  expect(writableFields(policy?.update), '投递能改的列与设计不一致').toEqual(
+    [...INTAKE_SCREENING_UPDATE_FIELDS].sort(),
+  );
+
+  const screeningId = randomUUID();
+  const now = new Date('2026-11-20T10:00:00');
+  await connection.repository('fqcScreenings').createOne({
+    values: {
+      id: screeningId,
+      messageId: randomUUID(),
+      category: 'dimension',
+      severity: 'major',
+      suggestedOwner: 'quality-dimension',
+      summary: '规则版摘要',
+      confidence: '0.4500',
+      evidence: ['尺寸'],
+      modelName: 'rule-baseline',
+      outcome: 'needs-review',
+      engine: 'rules',
+      promptVersion: null,
+      degraded: false,
+      degradeReason: 'model-disabled',
+      knowledgeRefs: [],
+      redacted: false,
+      reviewId: null,
+      createdAt: now,
+      updatedAt: now,
+    },
+  });
+  const repo = connection
+    .repository('fqcScreenings')
+    .withPolicy(policy as RepositoryPolicy);
+
+  // 十五列里的四个能写。用 updateMany：投递不带读，updateOne 会先按读策略取那一行。
+  await repo.updateMany({
+    filter: { id: screeningId },
+    values: {
+      summary: '模型版摘要',
+      confidence: '0.8000',
+      outcome: 'auto',
+      updatedAt: new Date('2026-11-20T10:01:00'),
+    },
+  });
+  const updated = await connection
+    .repository('fqcScreenings')
+    .findOne({ filter: { id: screeningId } });
+  expect(updated).toMatchObject({
+    summary: '模型版摘要',
+    outcome: 'auto',
+  });
+
+  // 主键、创建时间、两个溯源指针写不进去：授权层在仓库写入之前拒绝。
+  for (const forbidden of [
+    { id: randomUUID() },
+    { createdAt: new Date() },
+    { messageId: randomUUID() },
+    { reviewId: randomUUID() },
+  ]) {
+    await expect(
+      repo.updateMany({ filter: { id: screeningId }, values: forbidden }),
+      `${Object.keys(forbidden)[0]} 不该写得进去`,
+    ).rejects.toThrow();
+  }
+  // 被拒的写入一行都没改。
+  expect(
+    await connection
+      .repository('fqcScreenings')
+      .findOne({ filter: { id: screeningId } }),
+  ).toMatchObject({ summary: '模型版摘要' });
+});
+
 test('R-013: booting the authorization resources provider twice registers once', async () => {
   // 用一个空的授权模型起 provider：应用自己那份已经注册过 fqc，再定义一次会抛
   // 「already defined」。这里验证守卫本身 —— 同一个应用上连续两次 boot() 不抛错、
@@ -532,12 +717,21 @@ test('R-013: booting the authorization resources provider twice registers once',
   const registered = registrationSnapshot(authz);
   expect(registered.collections.map((collection) => collection.name)).toEqual([
     ...FQC_TABLES,
+    REVIEW_TABLE,
     'departments',
     'departmentMembers',
     'departmentMemberHistory',
+    // R-011：provider 现在还注册四张员工表。
+    'employees',
+    'employeeChanges',
+    'positions',
+    'jobGrades',
   ]);
   expect(registered.composites.map((composite) => composite.name)).toContain(
     'fqc',
+  );
+  expect(registered.composites.map((composite) => composite.name)).toContain(
+    'employees',
   );
 
   await expect(provider.boot()).resolves.toBeUndefined();

@@ -29,7 +29,19 @@ import { randomUUID } from 'node:crypto';
  */
 const NAMESPACE = 'app-local';
 
-const allFqcScopes = {
+/** 两个质量角色持有确认记录表的全量范围：确认要读要写这张表。 */
+const qualityFqcScopes = {
+  fqcMessages: 'allRecords',
+  fqcScreenings: 'allRecords',
+  fqcTickets: 'allRecords',
+  fqcScreeningReviews: 'allRecords',
+} as const;
+
+/**
+ * 其余角色只覆盖三张业务表。确认记录表没配范围就是拒绝：它是「人的判断」，
+ * 部门主管不该读到质量人员确认成什么（R-003 的收窄）。
+ */
+const readFqcScopes = {
   fqcMessages: 'allRecords',
   fqcScreenings: 'allRecords',
   fqcTickets: 'allRecords',
@@ -43,12 +55,15 @@ const allFqcScopes = {
  * 悄悄生效：启动扫描会拿 `fqc` 的当前定义逐条展开存量的授权，展开不了就直接拒绝
  * 启动（开发环境），测试也断言了这份形状。
  */
-function fqcGrant(actions: readonly string[]): PermissionGrant {
+function fqcGrant(
+  actions: readonly string[],
+  scopes: Readonly<Record<string, string>>,
+): PermissionGrant {
   return {
     resource: { type: 'composite', id: 'fqc' },
     actions: actions.map((action) => ({
       action,
-      policy: { type: 'composite', scopes: allFqcScopes },
+      policy: { type: 'composite', scopes },
     })),
   };
 }
@@ -58,21 +73,43 @@ const qualityPage = {
   actions: [{ action: 'access' }],
 };
 
+const knowledgePage = {
+  resource: { type: 'page', id: 'knowledge' },
+  actions: [{ action: 'access' }],
+};
+
+/**
+ * R-002：知识库的业务键是 `{ type: 'kb', id: 'kb.knowledge' }`，动作名带档位
+ * （`manage.related` / `propose.related`）。`kb.knowledge/manage` 是业务键，不是授权
+ * 动作名；知识库插件登记到授权插件的才是这些档位。
+ *
+ * 用 `.related` 不用 `.all`：本应用只有一个质量标准空间、把它关联到所有账号，两者
+ * 今天等价；`.all` 会覆盖以后新加的空间。
+ */
+const knowledgeGrant = (action: 'manage.related' | 'propose.related') => ({
+  resource: { type: 'kb', id: 'kb.knowledge' },
+  actions: [{ action }],
+});
+
 export const businessPermissionSets: readonly PermissionSet[] = [
   definePermissionSet('quality_manager')
     .title({ key: 'permissionSets.business.qualityManager', ns: NAMESPACE })
     .grant(qualityPage)
-    .grant(fqcGrant(['view', 'handle']))
+    .grant(fqcGrant(['view', 'handle'], qualityFqcScopes))
+    .grant(knowledgePage)
+    .grant(knowledgeGrant('manage.related'))
     .build(),
   definePermissionSet('quality_inspector')
     .title({ key: 'permissionSets.business.qualityInspector', ns: NAMESPACE })
     .grant(qualityPage)
-    .grant(fqcGrant(['view', 'handle']))
+    .grant(fqcGrant(['view', 'handle'], qualityFqcScopes))
+    .grant(knowledgePage)
+    .grant(knowledgeGrant('propose.related'))
     .build(),
   definePermissionSet('dept_manager')
     .title({ key: 'permissionSets.business.deptManager', ns: NAMESPACE })
     .grant(qualityPage)
-    .grant(fqcGrant(['view']))
+    .grant(fqcGrant(['view'], readFqcScopes))
     .build(),
   definePermissionSet('staff')
     .title({ key: 'permissionSets.business.staff', ns: NAMESPACE })

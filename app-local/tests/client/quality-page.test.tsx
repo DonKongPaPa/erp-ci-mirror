@@ -23,6 +23,15 @@ const ALL_FQC_SCOPES = {
   fqcMessages: 'allRecords',
   fqcScreenings: 'allRecords',
   fqcTickets: 'allRecords',
+  // R-002：确认要读写确认记录表；没配范围就是拒绝。
+  fqcScreeningReviews: 'allRecords',
+} as const;
+
+/** 投递只写三张业务表：它的动作没有确认记录表的范围。 */
+const INTAKE_FQC_SCOPES = {
+  fqcMessages: 'allRecords',
+  fqcScreenings: 'allRecords',
+  fqcTickets: 'allRecords',
 } as const;
 
 /** 一个业务动作的授权；数据范围照 seed，全部填「全部」。 */
@@ -30,7 +39,10 @@ const fqcGrant = (...actions: string[]): PermissionGrant => ({
   resource: { type: 'composite', id: 'fqc' },
   actions: actions.map((action) => ({
     action,
-    policy: { type: 'composite', scopes: ALL_FQC_SCOPES },
+    policy: {
+      type: 'composite',
+      scopes: action === 'intake' ? INTAKE_FQC_SCOPES : ALL_FQC_SCOPES,
+    },
   })),
 });
 

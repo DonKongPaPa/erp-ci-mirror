@@ -11,7 +11,10 @@ import {
 import type { TestApp } from '@nocobase/app-testing/server';
 
 import DepartmentsPage from '../../client/pages/settings/departments/index.js';
-import { renderAuthenticatedClient } from '../helpers/authenticated-client.js';
+import {
+  createAuthenticatedClientRenderer,
+  renderAuthenticatedClient,
+} from '../helpers/authenticated-client.js';
 
 /**
  * R-012 部门维护页的验收（第 10 条之前在 playwright 里走真应用，这里走真实进程内服务器）。
@@ -21,6 +24,10 @@ import { renderAuthenticatedClient } from '../helpers/authenticated-client.js';
  *
  * 操作之后才出现的元素或状态一律用 `findBy*` / `waitFor` 等（远端机器慢，同步的
  * `getBy*` 会在数据回来之前抓空）；断言「不存在」的 `queryBy*` 是同步的，保持原样。
+ *
+ * 原来「建树 → 加成员 → 设负责人 → 停用」是一条测试，远端负载高时所有步骤一起变慢，
+ * 总和会越过默认的 30 秒。拆成三条共享同一服务端前置的小测试：每条有自己的超时预算，
+ * 前置数据走真实接口在 `prepare` 里建好，被测的那一步仍然走页面。
  */
 const PASSWORD = 'R012-page-123!';
 const APPLICATION_ORIGIN = 'http://localhost';
@@ -28,6 +35,8 @@ const APPLICATION_ORIGIN = 'http://localhost';
 /** 一次写操作之后要等的数据往返；远端 CI 比本机慢一个量级。 */
 const SLOW = { timeout: 30_000 } as const;
 const WAIT = { timeout: 15_000 } as const;
+
+const renderShared = createAuthenticatedClientRenderer();
 
 const unique = (): string => randomUUID().replaceAll('-', '').slice(0, 8);
 
@@ -81,6 +90,26 @@ const createUser = async (
   const text = await response.text();
   expect(response.status, `${text}`).toBe(201);
   return (JSON.parse(text) as { data: UserRow }).data;
+};
+
+/** 小测试的前置：用真实接口建一棵根 + 子部门，把页面操作留给被测的那一步。 */
+const seedTree = async (
+  session: TestSession,
+  rootTitle: string,
+  rootCode: string,
+  childTitle: string,
+  childCode: string,
+): Promise<{ root: DepartmentRow; child: DepartmentRow }> => {
+  const root = await createDepartment(session, {
+    title: rootTitle,
+    code: rootCode,
+  });
+  const child = await createDepartment(session, {
+    title: childTitle,
+    code: childCode,
+    parentId: root.id,
+  });
+  return { root, child };
 };
 
 const addMembers = async (
@@ -138,7 +167,7 @@ const dialogClosed = async (): Promise<void> => {
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull(), WAIT);
 };
 
-it('creates a department tree, adds a member, makes them manager and deactivates a department', async () => {
+it('creates a department tree, adds a member and makes them primary', async () => {
   const user = userEvent.setup();
   const suffix = unique();
   const rootTitle = `Root${suffix}`;
@@ -148,7 +177,7 @@ it('creates a department tree, adds a member, makes them manager and deactivates
   const memberName = `Alice${suffix}`;
   const memberUsername = `alice${suffix}`;
 
-  await renderAuthenticatedClient(<DepartmentsPage />, {
+  await renderShared(<DepartmentsPage />, {
     route: '/settings/departments',
     prepare: async (_server: TestApp, session: TestSession) => {
       await createUser(session, memberName, memberUsername);
@@ -223,6 +252,38 @@ it('creates a department tree, adds a member, makes them manager and deactivates
   expect(
     await within(members).findByText('Primary', undefined, SLOW),
   ).toBeVisible();
+});
+
+it('makes a member of a department its manager', async () => {
+  const user = userEvent.setup();
+  const suffix = unique();
+  const rootTitle = `Root${suffix}`;
+  const rootCode = `ROOT${suffix}`;
+  const childTitle = `Child${suffix}`;
+  const childCode = `CHILD${suffix}`;
+  const memberName = `Alice${suffix}`;
+  const memberUsername = `alice${suffix}`;
+
+  await renderShared(<DepartmentsPage />, {
+    route: '/settings/departments',
+    prepare: async (_server: TestApp, session: TestSession) => {
+      const { root } = await seedTree(
+        session,
+        rootTitle,
+        rootCode,
+        childTitle,
+        childCode,
+      );
+      const member = await createUser(session, memberName, memberUsername);
+      await addMembers(session, root.id, [member.id]);
+    },
+  });
+
+  await user.click(await treeRow(rootTitle));
+  const members = await screen.findByRole('region', { name: 'Members' }, SLOW);
+  expect(
+    await within(members).findByText(memberName, undefined, SLOW),
+  ).toBeVisible();
 
   // 设为负责人。
   await user.click(
@@ -254,6 +315,22 @@ it('creates a department tree, adds a member, makes them manager and deactivates
       ).toHaveLength(2),
     { timeout: 20_000 },
   );
+});
+
+it('deactivates an empty department', async () => {
+  const user = userEvent.setup();
+  const suffix = unique();
+  const rootTitle = `Root${suffix}`;
+  const rootCode = `ROOT${suffix}`;
+  const childTitle = `Child${suffix}`;
+  const childCode = `CHILD${suffix}`;
+
+  await renderShared(<DepartmentsPage />, {
+    route: '/settings/departments',
+    prepare: async (_server: TestApp, session: TestSession) => {
+      await seedTree(session, rootTitle, rootCode, childTitle, childCode);
+    },
+  });
 
   // 停用子部门：它空着，可以直接停用。详情切到子部门之后才能点它的按钮。
   await user.click(await treeRow(childTitle));
@@ -271,7 +348,7 @@ it('creates a department tree, adds a member, makes them manager and deactivates
       await screen.findByRole('region', { name: 'Department details' }, SLOW),
     ).getByRole('button', { name: 'Deactivate' }),
   );
-  dialog = await screen.findByRole('dialog', undefined, SLOW);
+  const dialog = await screen.findByRole('dialog', undefined, SLOW);
   await user.click(within(dialog).getByRole('button', { name: 'Deactivate' }));
   await dialogClosed();
   await waitFor(

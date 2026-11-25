@@ -7,6 +7,7 @@ import { expect, test, vi } from 'vitest';
 
 import AuthzExport from '../../cli/authz/export.js';
 import AuthzImport from '../../cli/authz/import.js';
+import AuthzUpgradeR002 from '../../cli/authz/upgrade-r002.js';
 import cliPlugins from '../../cli/plugins.js';
 import {
   appRoot,
@@ -25,9 +26,16 @@ import {
 test('R-013: the authz commands are registered under their own topic', () => {
   const plugin = cliPlugins.plugins.find((entry) => entry.topic === 'authz');
   expect(plugin).toBeDefined();
-  expect(Object.keys(plugin!.commands).sort()).toEqual(['export', 'import']);
+  expect(Object.keys(plugin!.commands).sort()).toEqual([
+    'export',
+    'import',
+    'upgrade-r002',
+  ]);
   expect(plugin!.commands.export).toBe(AuthzExport);
   expect(plugin!.commands.import).toBe(AuthzImport);
+  // R-002 的升级步骤：合并之后在已有环境里跑一次，只补两个质量角色的确认记录范围。
+  expect(plugin!.commands['upgrade-r002']).toBe(AuthzUpgradeR002);
+  expect(AuthzUpgradeR002.description).toContain('fqcScreeningReviews');
 });
 
 test('R-013: the import help explains how to unblock rules that exchange resources', () => {

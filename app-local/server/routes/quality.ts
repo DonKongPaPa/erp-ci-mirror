@@ -34,19 +34,23 @@ import { randomUUID } from 'node:crypto';
 
 import {
   ApproveScreeningBody,
+  DraftingStatsQuery,
+  DraftingStatsSchema,
   IngestMessageBody,
   IngestResultSchema,
   ListTicketsQuery,
   MessageSchema,
   ScreeningListItemSchema,
-  ScreeningSchema,
+  ScreeningReviewResultSchema,
   TicketSchema,
   type IngestMessageInput,
 } from './schemas.js';
+import { computeDraftingStats } from '../providers/quality-drafting.js';
 import { qualityScreeningToken } from '../providers/quality-screening.js';
 
 type FqcAction = 'view' | 'handle' | 'intake';
-type FqcTable = 'fqcMessages' | 'fqcScreenings' | 'fqcTickets';
+type FqcTable =
+  'fqcMessages' | 'fqcScreenings' | 'fqcTickets' | 'fqcScreeningReviews';
 type FqcDecision = AuthorizationDecision<CompositeResourceConditions>;
 
 /**
@@ -189,6 +193,15 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         confidence: confidenceText(result.confidence, transaction.dialect),
         evidence: result.evidence,
         modelName: 'rule-baseline',
+        // R-002 的六个出处列与确认记录指针。这一段只出规则版：开关默认关着，模型那一步
+        // 在事务提交之后由第二个切片接上；写 model-disabled 与设计里「开关关着」的取值一致。
+        engine: 'rules',
+        promptVersion: null,
+        degraded: false,
+        degradeReason: 'model-disabled',
+        knowledgeRefs: [],
+        redacted: false,
+        reviewId: null,
         outcome: result.confidence >= 0.5 ? 'auto' : 'needs-review',
         createdAt: storedNow,
         updatedAt: storedNow,
@@ -235,6 +248,7 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
     router.use('/quality/messages', auth.required(), authz.middleware());
     router.use('/quality/screenings', auth.required(), authz.middleware());
     router.use('/quality/screenings/*', auth.required(), authz.middleware());
+    router.use('/quality/drafting/stats', auth.required(), authz.middleware());
 
     // 外部渠道回调：企业微信/微信网关把客户消息推到这里。
     // 授权一次「投递」；三张表的写入在同一个事务里完成，写入的内容与以前一致。
@@ -422,18 +436,23 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
       },
     );
 
-    // 人工复核：低置信度初筛由质量人员确认或改判。读与改都走带范围的仓储。
+    // 人工确认（R-002 起语义改了）：不再原地改写草稿。读初筛、写一行确认记录、把
+    // outcome 记成 reviewed 并把 reviewId 指过去，三件事在同一个事务里。
+    // 确认可以不止一次，每一次都留一行；响应里的 review 是刚读回来的那一行（读权不是
+    // 可选的：少了它，这个端点会在写完之前被仓库层拒绝）。
     router.post(
       '/quality/screenings/:screeningId/review',
       describeRoute({
         tags: ['Quality'],
-        summary: 'Review and correct an AI screening',
+        summary: 'Confirm an AI screening and record the human decision',
         operationId: 'reviewQualityScreening',
         responses: {
-          '200': dataResponse(ScreeningSchema),
+          '200': dataResponse(ScreeningReviewResultSchema),
+          '400': apiErrorResponse(400),
           '401': apiErrorResponse(401),
           '403': apiErrorResponse(403),
           '404': apiErrorResponse(404),
+          '409': apiErrorResponse(409),
           '500': apiErrorResponse(500),
         },
       }),
@@ -442,36 +461,180 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         const screeningId = context.req.param('screeningId');
         const body = context.req.valid('json');
         const decision = await authorizeFqc(context, 'handle');
-        const repo = database
-          .repository('fqcScreenings')
-          .withPolicy(policyOf(decision, 'fqcScreenings'));
-        const existing = await repo.findOne({
-          filter: { id: screeningId },
-        });
-        if (!existing) {
+        const session = context.get('auth');
+        if (!session?.user?.id) {
           throw new ApiError({
-            status: 'NOT_FOUND',
-            reason: 'SCREENING_NOT_FOUND',
+            status: 'PERMISSION_DENIED',
+            reason: 'PRINCIPAL_REQUIRED',
             domain: 'quality',
-            message: `Screening ${screeningId} was not found.`,
+            message: 'An authenticated principal is required.',
           });
         }
-        await repo.updateOne({
-          filter: { id: screeningId },
-          values: {
-            ...(body.category ? { category: body.category } : {}),
-            ...(body.severity ? { severity: body.severity } : {}),
-            ...(body.ownerDepartment
-              ? { suggestedOwner: body.ownerDepartment }
-              : {}),
-            outcome: 'reviewed',
-            updatedAt: new Date(),
-          },
+        const actorId = String(session.user.id);
+        const result = await database
+          .connection()
+          .transaction(async (transaction) => {
+            const screenings = transaction
+              .repository('fqcScreenings')
+              .withPolicy(policyOf(decision, 'fqcScreenings'));
+            const reviews = transaction
+              .repository('fqcScreeningReviews')
+              .withPolicy(policyOf(decision, 'fqcScreeningReviews'));
+            const existing = await screenings.findOne({
+              filter: { id: screeningId },
+            });
+            if (!existing) {
+              // 不存在与不在调用者的范围里同形：不给范围外的行留探测口。
+              throw new ApiError({
+                status: 'NOT_FOUND',
+                reason: 'SCREENING_NOT_FOUND',
+                domain: 'quality',
+                message: `Screening ${screeningId} was not found.`,
+              });
+            }
+            // 请求体缺省时用草稿里的值：人没有改，就是确认 AI 的判断。
+            const category = body.category ?? existing.category;
+            const severity = body.severity ?? existing.severity;
+            if (!category || !severity) {
+              throw new ApiError({
+                status: 'INVALID_ARGUMENT',
+                reason: 'SCREENING_DRAFT_INCOMPLETE',
+                domain: 'quality',
+                message:
+                  'The screening has no category or severity; pass them in the request body.',
+              });
+            }
+            const reviewId = randomUUID();
+            const reviewValues = {
+              id: reviewId,
+              screeningId,
+              kind: 'confirm',
+              category,
+              severity,
+              departmentId: body.departmentId ?? null,
+              actorId,
+              createdAt: new Date(),
+            };
+            await reviews.createMany({ values: [reviewValues] });
+            // 版本前提：只在这一行还是我们读到的那个 reviewId 时更新。两个人同时确认
+            // 同一份初筛时，后到的那一个在这里匹配不到行（Postgres 的 UPDATE 在行锁
+            // 之后重算谓词），整笔事务回滚，它的确认记录也不落库，得到 409。
+            // 顺序确认（同一人再确认一次）读到的已经是新 reviewId，照常成功。
+            const observedReviewId =
+              typeof existing.reviewId === 'string' &&
+              existing.reviewId.length > 0
+                ? existing.reviewId
+                : null;
+            const updatedRows = await screenings.updateMany({
+              filter: (filter) =>
+                filter.and([
+                  filter.string('id').eq(screeningId),
+                  observedReviewId === null
+                    ? filter.string('reviewId').empty()
+                    : filter.string('reviewId').eq(observedReviewId),
+                ]),
+              values: {
+                outcome: 'reviewed',
+                reviewId,
+                updatedAt: new Date(),
+              },
+            });
+            if (updatedRows.updatedCount !== 1) {
+              throw new ApiError({
+                status: 'ABORTED',
+                reason: 'SCREENING_REVIEW_CONFLICT',
+                domain: 'quality',
+                message:
+                  'This screening was confirmed by someone else while this request was running. Reload it and confirm again.',
+              });
+            }
+            const updated = await screenings.findOne({
+              filter: { id: screeningId },
+            });
+            const review = await reviews.findOne({ filter: { id: reviewId } });
+            if (!updated || !review) {
+              throw new ApiError({
+                status: 'INTERNAL',
+                reason: 'REVIEW_NOT_WRITTEN',
+                domain: 'quality',
+                message: 'The confirmation record could not be read back.',
+              });
+            }
+            return { screening: updated, review };
+          });
+        return context.json({
+          data: { ...result.screening, review: result.review },
         });
-        const updated = await repo.findOne({
-          filter: { id: screeningId },
-        });
-        return context.json({ data: updated });
+      },
+    );
+
+    /**
+     * 代填效果（R-002）：草稿与人工确认的对照。
+     *
+     * 范围由调用方带策略的仓储带进服务：服务自己不知道「调用方是谁」，也只会经这两个
+     * 仓储查；范围之外的行不计入。日期两端都从 query 来，缺一端、起点晚于终点、
+     * 跨度超过一年都是 400。返回只有汇总的数字。
+     */
+    router.get(
+      '/quality/drafting/stats',
+      describeRoute({
+        tags: ['Quality'],
+        summary: 'Compare drafting engines with the human confirmations',
+        operationId: 'getQualityDraftingStats',
+        responses: {
+          '200': dataResponse(DraftingStatsSchema),
+          '400': apiErrorResponse(400),
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '500': apiErrorResponse(500),
+        },
+      }),
+      apiValidator('query', DraftingStatsQuery),
+      async (context) => {
+        const { from, to } = context.req.valid('query');
+        // 先授权再校验区间：没有查看资格的人一律 403，不因参数不全先得到 400。
+        const decision = await authorizeFqc(context, 'view');
+        if (from === undefined || to === undefined) {
+          throw new ApiError({
+            status: 'INVALID_ARGUMENT',
+            reason: 'INVALID_DATE_RANGE',
+            domain: 'quality',
+            message: 'Both `from` and `to` are required.',
+          });
+        }
+        const fromDate = new Date(from);
+        const toDate = new Date(to);
+        if (fromDate.getTime() > toDate.getTime()) {
+          throw new ApiError({
+            status: 'INVALID_ARGUMENT',
+            reason: 'INVALID_DATE_RANGE',
+            domain: 'quality',
+            message: '`from` must not be later than `to`.',
+          });
+        }
+        // 「一年」按 365 天算：区间是闭区间，端点相差超过 365 天就拒绝。
+        if (toDate.getTime() - fromDate.getTime() > 365 * 24 * 60 * 60 * 1000) {
+          throw new ApiError({
+            status: 'INVALID_ARGUMENT',
+            reason: 'INVALID_DATE_RANGE',
+            domain: 'quality',
+            message: 'The range must not span more than one year.',
+          });
+        }
+        const reviewPolicy = policyOf(decision, 'fqcScreeningReviews');
+        const stats = await computeDraftingStats(
+          database
+            .repository('fqcScreenings')
+            .withPolicy(policyOf(decision, 'fqcScreenings')),
+          // 确认记录表的读被范围折成 false：当成没有确认记录，不把整张统计卡变成 403。
+          reviewPolicy.read === false
+            ? null
+            : database
+                .repository('fqcScreeningReviews')
+                .withPolicy(reviewPolicy),
+          { from: fromDate, to: toDate },
+        );
+        return context.json({ data: { from, to, ...stats } });
       },
     );
 

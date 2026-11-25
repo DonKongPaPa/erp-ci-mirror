@@ -392,6 +392,8 @@ test('R-013 3b: a restricted record scope filters the list and hides excluded ro
               fqcMessages: scoped('fqcMessages'),
               fqcScreenings: scoped('fqcScreenings'),
               fqcTickets: scoped('fqcTickets'),
+              // R-002：确认要读写确认记录表；范围与业务表分开给。
+              fqcScreeningReviews: 'allRecords',
             },
           },
         })),
@@ -706,6 +708,19 @@ test('R-013: the intake response matches the stored message, screening and ticke
     ingested.data.screening.confidence,
     '201 响应里的置信度应当与库里一致，是字符串',
   ).toBe(storedScreening?.confidence);
+  // R-002：投递的响应带上六个出处列与 reviewId。这一段只会出规则版，开关默认关着。
+  expect(
+    ingested.data.screening,
+    '投递的初筛应当带上 R-002 的七个字段',
+  ).toMatchObject({
+    engine: 'rules',
+    promptVersion: null,
+    degraded: false,
+    degradeReason: 'model-disabled',
+    knowledgeRefs: [],
+    redacted: false,
+    reviewId: null,
+  });
 
   const ticketRows = (
     (await expectJson(await viewer.fetch('/quality/tickets'), 200)) as {

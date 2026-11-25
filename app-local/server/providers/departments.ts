@@ -397,6 +397,11 @@ export interface DepartmentService {
   subtreeIds(departmentId: string): Promise<readonly string[]>;
   /** 这个人所属的全部未停用部门。 */
   departmentIdsOfUser(userId: string): Promise<readonly string[]>;
+  /**
+   * 某个未停用部门的成员账号 id。部门已停用或不存在时返回空数组
+   * （R-011 验收15 前半）。给「按部门筛列表」与「搜同事限定在几个部门里」用。
+   */
+  memberIdsOf(departmentId: string): Promise<readonly string[]>;
   /** 负责人的用户 id，没有就返回空。 */
   managerOf(departmentId: string): Promise<string | null>;
   /** 主部门 id，没有就返回空。 */
@@ -479,6 +484,22 @@ export class DatabaseDepartmentService implements DepartmentService {
     ].sort();
   }
 
+  public async memberIdsOf(departmentId: string): Promise<readonly string[]> {
+    const department = await this.database
+      .repository<Department>('departments')
+      .findOne({ filter: { id: departmentId } });
+    // 停用的部门一定是空的，不存在也一样：两种情况都不读成员表。
+    if (department?.active !== true) {
+      return [];
+    }
+    const memberships = await this.database
+      .repository<DepartmentMembership>('departmentMembers')
+      .findMany({ filter: { departmentId } });
+    return [
+      ...new Set(memberships.map((membership) => membership.userId)),
+    ].sort();
+  }
+
   public async managerOf(departmentId: string): Promise<string | null> {
     const department = await this.database
       .repository<Department>('departments')
@@ -530,7 +551,8 @@ export class DatabaseDepartmentService implements DepartmentService {
       .findMany();
     // 同码且没撤销的优先：它才是现在占用这个编码的部门。
     const live = departments.find(
-      (department) => department.code === code && department.successorId === null,
+      (department) =>
+        department.code === code && department.successorId === null,
     );
     if (live !== undefined) {
       return live.id;
@@ -607,8 +629,127 @@ export function resolveSuccessorOf(
   return last;
 }
 
+/**
+ * 搜人与取姓名共用的账号读服务（R-011「给别的模块用的内部服务」）。
+ *
+ * 原先这段直读用户的查询写在两个 R-012 端点里，现在收在这里，R-012 自己的两个端点、
+ * R-017、R-003 走同一份口径。邮箱绝不在返回里（R-028 的选择性暴露）：匹配时不按邮箱，
+ * 读取时也不取邮箱列。
+ */
+
+/** 三列账号视图；邮箱不在其中。 */
+export interface PersonAccount {
+  readonly id: string;
+  readonly name: string | null;
+  readonly username: string | null;
+}
+
+export interface PeopleQuery {
+  /** 1 到 64 个字符，调用方（端点的 zod）已校验。 */
+  readonly q: string;
+  /** 只在这批账号里搜；缺省表示不限。 */
+  readonly userIds?: readonly string[];
+  /** 排除这批账号；缺省表示不排除。 */
+  readonly excludeUserIds?: readonly string[];
+  readonly page: number;
+  readonly pageSize: number;
+}
+
+export interface PeopleQueryResult {
+  readonly rows: readonly PersonAccount[];
+  readonly total: number;
+}
+
+export interface PeopleQueryService {
+  /**
+   * 只按姓名、用户名不分大小写匹配，不按邮箱；停用与删除的账户不出现。
+   * 只取三列，按姓名再按 id 排序，供端点分页。
+   */
+  search(query: PeopleQuery): Promise<PeopleQueryResult>;
+  /**
+   * 按一批标识取三列；不按账号状态过滤 —— 成员列表要给已停用的人显示姓名。
+   * 空批次不发查询、返回空。
+   */
+  byIds(ids: readonly string[]): Promise<readonly PersonAccount[]>;
+}
+
+export class DatabasePeopleQueryService implements PeopleQueryService {
+  public constructor(private readonly database: DatabaseManager) {}
+
+  public async search(query: PeopleQuery): Promise<PeopleQueryResult> {
+    const term = `%${query.q.toLowerCase()}%`;
+    const db = this.database.connection().query;
+    const build = () => {
+      let select = db
+        .selectFrom('user')
+        .where('deletedAt', 'is', null)
+        .where('disabledAt', 'is', null)
+        .where((eb) =>
+          eb.or([
+            eb(eb.fn.lower('name'), 'like', term),
+            eb(eb.fn.lower('username'), 'like', term),
+          ]),
+        );
+      if (query.userIds !== undefined) {
+        select = select.where('id', 'in', [...query.userIds]);
+      }
+      if (
+        query.excludeUserIds !== undefined &&
+        query.excludeUserIds.length > 0
+      ) {
+        select = select.where('id', 'not in', [...query.excludeUserIds]);
+      }
+      return select;
+    };
+
+    const [rows, totalRow] = await Promise.all([
+      build()
+        .select(['id', 'name', 'username'])
+        .orderBy('name', 'asc')
+        .orderBy('id', 'asc')
+        .limit(query.pageSize)
+        .offset((query.page - 1) * query.pageSize)
+        .execute(),
+      build()
+        .select((eb) => [eb.fn.countAll<number>().as('total')])
+        .executeTakeFirst<{ total: number }>(),
+    ]);
+
+    return {
+      rows: rows.map((row) => ({
+        id: String(row.id),
+        name: typeof row.name === 'string' ? row.name : null,
+        username: typeof row.username === 'string' ? row.username : null,
+      })),
+      total: Number(totalRow?.total ?? 0),
+    };
+  }
+
+  public async byIds(
+    ids: readonly string[],
+  ): Promise<readonly PersonAccount[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+    const rows = await this.database
+      .connection()
+      .query.selectFrom('user')
+      .where('id', 'in', [...ids])
+      .select(['id', 'name', 'username'])
+      .execute();
+    return rows.map((row) => ({
+      id: String(row.id),
+      name: typeof row.name === 'string' ? row.name : null,
+      username: typeof row.username === 'string' ? row.username : null,
+    }));
+  }
+}
+
 export const departmentServiceToken: ServiceToken<DepartmentService> =
   createServiceToken<DepartmentService>('app/departments');
+
+export const peopleQueryServiceToken: ServiceToken<PeopleQueryService> =
+  createServiceToken<PeopleQueryService>('app/people-query');
 
 export default class DepartmentProvider extends ServiceProvider<Application> {
   public readonly name: string = 'app.departments';
@@ -617,6 +758,10 @@ export default class DepartmentProvider extends ServiceProvider<Application> {
     this.app.container.singleton(departmentServiceToken, () => {
       const database = this.app.container.resolve(databaseManagerToken);
       return new DatabaseDepartmentService(database);
+    });
+    this.app.container.singleton(peopleQueryServiceToken, () => {
+      const database = this.app.container.resolve(databaseManagerToken);
+      return new DatabasePeopleQueryService(database);
     });
   }
 }

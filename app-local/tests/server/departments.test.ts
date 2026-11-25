@@ -222,6 +222,23 @@ describe('R-012 部门内部服务', () => {
     await expect(service.departmentIdsOfUser('nobody')).resolves.toEqual([]);
   });
 
+  test('R-012 验收15：memberIdsOf 返回未停用部门的成员账号，停用或不存在回空', async ({
+    connection,
+    database,
+  }) => {
+    // company 有 u-1 与 u-manager；closed 虽挂着 u-1、u-3，但已停用，按契约回空。
+    await seedTree(connection);
+    const service = new DatabaseDepartmentService(database);
+
+    await expect(service.memberIdsOf('company')).resolves.toEqual([
+      'u-1',
+      'u-manager',
+    ]);
+    await expect(service.memberIdsOf('hr')).resolves.toEqual(['u-2']);
+    await expect(service.memberIdsOf('closed')).resolves.toEqual([]);
+    await expect(service.memberIdsOf('missing')).resolves.toEqual([]);
+  });
+
   test('R-012 验收6：managerOf 返回负责人，停用的部门返回 null', async ({
     connection,
     database,
@@ -272,7 +289,9 @@ describe('R-012 部门内部服务', () => {
     await expect(service.titlesByIds([])).resolves.toEqual({});
   });
 
-  test('R-012 验收9：空表与没有部门的用户返回空、不抛错', async ({ database }) => {
+  test('R-012 验收9：空表与没有部门的用户返回空、不抛错', async ({
+    database,
+  }) => {
     const service = new DatabaseDepartmentService(database);
 
     await expect(service.subtreeIds('missing')).resolves.toEqual([]);

@@ -282,6 +282,20 @@ const zhCN: AppResource = {
         manage: '管理部门',
       },
     },
+    // R-011：员工业务资源，以及两个动作展开的四张表。
+    employees: {
+      title: '员工',
+      tables: {
+        employees: '员工档案',
+        changes: '员工变动记录',
+        positions: '岗位',
+        jobGrades: '职级',
+      },
+      actions: {
+        view: '查看员工',
+        manage: '管理员工',
+      },
+    },
     recordAccess: {
       myDepartments: '本部门',
       myDepartmentsAndBelow: '本部门及下级',

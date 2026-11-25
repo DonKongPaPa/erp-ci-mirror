@@ -20,6 +20,7 @@ import scheduler from '@nocobase/app-plugin-scheduler/server';
 import file from '@nocobase/app-plugin-file/server';
 import mail from '@nocobase/app-plugin-mail/server';
 import agents from '@nocobase/app-plugin-agents/server';
+import { createKnowledgePlugin } from '@nocobase/app-plugin-knowledge/server';
 
 const serverPlugins: AppServerPlugins = defineServerPlugins([
   concurrency,
@@ -40,6 +41,9 @@ const serverPlugins: AppServerPlugins = defineServerPlugins([
   mail,
   agents,
   foundation,
+  // R-002：质量知识库。语义索引第一版不开（硬约束 2）：不注册索引后端、不开
+  // `/knowledge` 的索引管理路由，第一版就不会加载按平台预编译的原生模块。
+  createKnowledgePlugin({ indexing: false }),
 ]);
 
 export default serverPlugins;

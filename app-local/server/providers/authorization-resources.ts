@@ -7,15 +7,21 @@ import {
   departments as departmentsResource,
 } from '../department-resources.js';
 import { defineDepartmentRecordAccess } from '../department-record-access.js';
+import {
+  EMPLOYEE_COLLECTIONS,
+  employees as employeesResource,
+} from '../employees-resources.js';
 import { FQC_COLLECTIONS, fqc } from '../fqc-resources.js';
 import { departmentServiceToken } from './departments.js';
 
 /**
- * R-013 的启动注册：把 FQC 接进授权模型；R-012 的部门资源也在这里登记。
+ * R-013 的启动注册：把 FQC 接进授权模型；R-012 的部门资源、R-011 的员工资源
+ * 也在这里登记。
  *
- * 声明在 server/fqc-resources.ts、server/department-resources.ts 与
- * server/department-record-access.ts，这里只做注册：三张 FQC 表、三张部门表、
- * `fqc` 与 `departments` 两个业务资源、两把部门范围键、工作区的分节与条目。
+ * 声明在 server/fqc-resources.ts、server/department-resources.ts、
+ * server/employees-resources.ts 与 server/department-record-access.ts，这里只做注册：
+ * 三张 FQC 表、三张部门表、四张员工表、`fqc`、`departments` 与 `employees`
+ * 三个业务资源、两把部门范围键、工作区的分节与条目。
  * 注册只描述能做什么，不给任何人授权；初始角色由 seed 建。
  */
 export default class AuthorizationResourcesProvider extends ServiceProvider<AppPluginApplication> {
@@ -31,12 +37,19 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
       return Promise.resolve();
     }
     const authz = this.app.container.resolve(authorizationToken);
-    for (const collection of [...FQC_COLLECTIONS, ...DEPARTMENT_COLLECTIONS]) {
+    for (const collection of [
+      ...FQC_COLLECTIONS,
+      ...DEPARTMENT_COLLECTIONS,
+      ...EMPLOYEE_COLLECTIONS,
+    ]) {
       authz.database.collections.add(collection);
     }
     const reference = authz.compositeResources.define(fqc);
     const departmentsReference = authz.compositeResources.define(
       departmentsResource,
+    );
+    const employeesReference = authz.compositeResources.define(
+      employeesResource,
     );
     const departmentService = this.app.container.resolve(
       departmentServiceToken,
@@ -56,6 +69,7 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
     });
     authz.ui.place(reference, { section: 'quality' });
     authz.ui.place(departmentsReference, { section: 'organization' });
+    authz.ui.place(employeesReference, { section: 'organization' });
     this.registered = true;
     return Promise.resolve();
   }

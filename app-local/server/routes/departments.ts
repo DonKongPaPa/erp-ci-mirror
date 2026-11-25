@@ -53,6 +53,7 @@ import {
 import {
   DepartmentRuleError,
   type DepartmentRuleCode,
+  peopleQueryServiceToken,
 } from '../providers/departments.js';
 
 type DepartmentAction = 'view' | 'manage';
@@ -230,6 +231,7 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
     const authz = app.container.resolve(authorizationToken);
     const database = app.container.resolve(databaseManagerToken);
     const mutations = app.container.resolve(departmentMutationsToken);
+    const people = app.container.resolve(peopleQueryServiceToken);
 
     router.use('/departments', auth.required(), authz.middleware());
     router.use('/departments/*', auth.required(), authz.middleware());
@@ -303,44 +305,19 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
                   .findMany({ filter: { departmentId: excludeDepartmentId } })
               ).map((membership) => membership.userId);
 
-        // 读用户表走服务端内部读，不经授权（R-028：读人员信息只做选择性暴露）。
-        // 只取三列；停用与删除的账户不出现。`fn.lower` 是两种方言都可用的写法。
-        const term = `%${q.toLowerCase()}%`;
-        const query = database.connection().query;
-        const build = () => {
-          let select = query
-            .selectFrom('user')
-            .where('deletedAt', 'is', null)
-            .where('disabledAt', 'is', null)
-            .where((eb) =>
-              eb.or([
-                eb(eb.fn.lower('name'), 'like', term),
-                eb(eb.fn.lower('username'), 'like', term),
-              ]),
-            );
-          if (excluded.length > 0) {
-            select = select.where('id', 'not in', excluded);
-          }
-          return select;
-        };
-
-        const rows = await build()
-          .select(['id', 'name', 'username'])
-          .orderBy('name', 'asc')
-          .orderBy('id', 'asc')
-          .limit(pageSize)
-          .offset((page - 1) * pageSize)
-          .execute();
-        const totalRow = await build()
-          .select((eb) => [eb.fn.countAll<number>().as('total')])
-          .executeTakeFirst<{ total: number }>();
-        const total = Number(totalRow?.total ?? 0);
+        // 搜人查询收在共用读服务里：只按姓名、用户名匹配，只回三列（R-011）。
+        const { rows, total } = await people.search({
+          q,
+          excludeUserIds: excluded,
+          page,
+          pageSize,
+        });
 
         return context.json({
           data: rows.map((row) => ({
-            userId: String(row.id),
-            name: typeof row.name === 'string' ? row.name : null,
-            username: typeof row.username === 'string' ? row.username : null,
+            userId: row.id,
+            name: row.name,
+            username: row.username,
           })),
           meta: { page, pageSize, total },
         });
@@ -396,26 +373,16 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         });
         const total = await repo.count({ filter: { departmentId } });
 
-        // 姓名与用户名走服务端内部读，不经授权（R-028：读人员信息只做选择性暴露）。
+        // 按一批标识取姓名走同一个共用读服务，只回三列（R-011）。
         const userIds = [...new Set(memberships.map((row) => row.userId))];
-        const users =
-          userIds.length === 0
-            ? []
-            : await database
-                .connection()
-                .query.selectFrom('user')
-                .where('id', 'in', userIds)
-                .select(['id', 'name', 'username'])
-                .execute();
-        const byId = new Map(
-          users.map((user) => [String(user.id), user] as const),
-        );
+        const users = await people.byIds(userIds);
+        const byId = new Map(users.map((user) => [user.id, user] as const));
         const data = memberships.map((membership) => {
           const user = byId.get(membership.userId);
           return {
             userId: membership.userId,
-            name: typeof user?.name === 'string' ? user.name : null,
-            username: typeof user?.username === 'string' ? user.username : null,
+            name: user?.name ?? null,
+            username: user?.username ?? null,
             // 成员关系的事实，不是个人属性；页面的「主部门」标记靠它。
             isPrimary: membership.isPrimary,
           };

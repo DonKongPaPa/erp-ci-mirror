@@ -311,6 +311,20 @@ const enUS = {
         manage: 'Manage departments',
       },
     },
+    // R-011: the employee business resource and the four tables its two actions expand to.
+    employees: {
+      title: 'Employees',
+      tables: {
+        employees: 'Employee profiles',
+        changes: 'Employee changes',
+        positions: 'Positions',
+        jobGrades: 'Job grades',
+      },
+      actions: {
+        view: 'View employees',
+        manage: 'Manage employees',
+      },
+    },
     recordAccess: {
       myDepartments: 'My departments',
       myDepartmentsAndBelow: 'My departments and below',
