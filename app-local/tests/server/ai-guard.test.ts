@@ -2,6 +2,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { agentsToken } from '@nocobase/app-plugin-agents/server/tokens';
+import { scopedApiKeysToken } from '@nocobase/app-plugin-api-keys/server';
 import {
   DEFAULT_ADMIN_CREDENTIALS,
   signIn,
@@ -800,4 +801,108 @@ test('R-045: 会话令牌走 Authorization: Bearer 时判法相同（含设备�
     (await bearer(rootToken, '/agents/runners/registrationTokens', json({})))
       .status,
   ).toBe(201);
+});
+
+/**
+ * 行为：安装脚本这条公开路径只对匿名与机器凭据公开；带了用户会话就按人判 ——
+ * 无 AI 授权 403、持一项 200、root 200。设计按凭据形态判，不按路径开白名单。
+ */
+test('R-045: 带用户会话取安装脚本也要过底线', async ({ testApp, app }) => {
+  const { nobody, pageReader, admin } = await setupIdentities(
+    testApp,
+    app,
+    'e7',
+  );
+
+  const anonymous = await testApp.request('/agents/dist/installScript');
+  expect(anonymous.status, `${(await anonymous.clone().text()).slice(0, 200)}`).toBe(
+    200,
+  );
+
+  await expectGuardDenial(
+    await nobody.session.fetch('/agents/dist/installScript'),
+    'AI_ACCESS_REQUIRED',
+    'GET /api/agents/dist/installScript（无授权 cookie 会话）',
+  );
+  const withGrant = await pageReader.session.fetch(
+    '/agents/dist/installScript',
+  );
+  expect(withGrant.status, `${await withGrant.clone().text()}`).toBe(200);
+  const asRoot = await admin.fetch('/agents/dist/installScript');
+  expect(asRoot.status, `${await asRoot.clone().text()}`).toBe(200);
+});
+
+/**
+ * 行为：`x-api-key` 是把密钥换算成用户会话的形态，按「这次请求是不是人来的」过同一道底线 ——
+ * 无 AI 授权的人用密钥取 agent 清单与安装脚本都是 403 `AI_ACCESS_REQUIRED`，持一项就放行。
+ * 夹具造密钥（服务接口，不走被守卫的 HTTP 路径），密钥串只用于请求头，不写进断言消息。
+ */
+test('R-045: x-api-key 密钥会话按人的 AI 授权判定', async ({
+  testApp,
+  app,
+}) => {
+  const { nobody, pageReader } = await setupIdentities(testApp, app, 'e9');
+  const keys = app.container.resolve(scopedApiKeysToken);
+  const secretFor = async (userId: string, name: string): Promise<string> =>
+    (
+      await keys.create(userId, { name }, await keys.identityOf(userId))
+    ).secret;
+  const nobodyKey = await secretFor(nobody.id, 'r045-e9-no-ai');
+  const readerKey = await secretFor(pageReader.id, 'r045-e9-page-ai');
+
+  const byKey = (
+    secret: string,
+    path: string,
+    init: RequestInit = {},
+  ): Promise<Response> =>
+    testApp.fetch(
+      new Request(`http://localhost${testApp.publicBasePath}/api${path}`, {
+        ...init,
+        headers: {
+          ...(init.headers as Record<string, string> | undefined),
+          'x-api-key': secret,
+        },
+      }),
+    );
+
+  await expectGuardDenial(
+    await byKey(nobodyKey, '/agents'),
+    'AI_ACCESS_REQUIRED',
+    'x-api-key：GET /api/agents（无 AI 授权）',
+  );
+  await expectGuardDenial(
+    await byKey(nobodyKey, '/agents/dist/installScript'),
+    'AI_ACCESS_REQUIRED',
+    'x-api-key：GET /api/agents/dist/installScript（无 AI 授权）',
+  );
+  const list = await byKey(readerKey, '/agents');
+  expect(list.status, `${await list.clone().text()}`).toBe(200);
+  const script = await byKey(readerKey, '/agents/dist/installScript');
+  expect(script.status, `${await script.clone().text()}`).toBe(200);
+});
+
+// 行为：守 R-045.md 变更记录（2026-11-25T09:21:05 裁决）「带着用户凭据却解析不出会话的，按用户会话处理、不放行」——垃圾 x-api-key 要拿守卫的 403 AI_ACCESS_REQUIRED（不是框架的 INVALID_API_KEY），同一个请求不带这个头是匿名 401。
+test('R-045: 带 x-api-key 却解析不出会话时取严拒绝，区别于匿名请求', async ({
+  testApp,
+}) => {
+  const anonymous = await testApp.request('/agents');
+  const anonymousText = await anonymous.clone().text();
+  expect(anonymous.status, `${anonymousText}`).toBe(401);
+  expect(
+    ((await anonymous.json()) as ApiErrorBody).error.reason,
+    '匿名 GET /api/agents 的原因码',
+  ).toBe('AUTHENTICATION_REQUIRED');
+
+  for (const path of ['/agents', '/agents/dist/installScript']) {
+    const refused = await testApp.fetch(
+      new Request(`http://localhost${testApp.publicBasePath}/api${path}`, {
+        headers: { 'x-api-key': 'r045-not-a-real-api-key' },
+      }),
+    );
+    await expectGuardDenial(
+      refused,
+      'AI_ACCESS_REQUIRED',
+      `x-api-key 解析不出会话：GET /api${path}`,
+    );
+  }
 });

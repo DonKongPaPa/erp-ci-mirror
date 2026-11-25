@@ -18,6 +18,25 @@ import { renderAuthenticatedClient } from '../helpers/authenticated-client.js';
 
 beforeEach(() => window.sessionStorage.clear());
 
+/**
+ * R-034 第 5 条的补强：只读页面没有任何 Send / Resend / Delete 入口。
+ *
+ * 必须连背景一起查（`hidden: true`）：详情对话框打开后 Radix 把背景设成 `aria-hidden`，
+ * 默认的 `queryByRole` 只看得到对话框里的 Close —— 往页面加一个 Resend 按钮那条断言仍然绿。
+ * 调用处都已先等到列表行或对话框详情出现，查「不存在」之前处于稳定态。
+ */
+function expectNoWriteEntryPoints(when: string): void {
+  for (const role of ['button', 'menuitem'] as const) {
+    expect(
+      screen.queryAllByRole(role, {
+        name: /^(send|resend|delete)$/iu,
+        hidden: true,
+      }),
+      `${when}不该有 Send/Resend/Delete 的 ${role} 入口`,
+    ).toEqual([]);
+  }
+}
+
 async function seedFailedNotification(server: TestApp): Promise<void> {
   const now = new Date();
   const logId = randomUUID();
@@ -175,6 +194,8 @@ it('lists a failed notification read-only and never shows recipients or message 
     screen.getAllByText(enUS.notificationLogs.statusLabel.failed).length,
   ).toBeGreaterThan(0);
   expect(screen.getByText('inbox × 1')).toBeVisible();
+  // 行为：列表稳定后也不该出现任何写入口（背景与对话框两处都查）。
+  expectNoWriteEntryPoints('列表稳定后');
 
   await user.click(
     screen.getByRole('button', {
@@ -237,13 +258,8 @@ it('lists a failed notification read-only and never shows recipients or message 
       ),
     ).toBe(true),
   );
-  // 页面上没有发送、重发、删除的入口。
-  for (const label of ['Send', 'Resend', 'Delete']) {
-    expect(
-      screen.queryByRole('button', { name: label }),
-      `不该有「${label}」按钮`,
-    ).not.toBeInTheDocument();
-  }
+  // 行为：详情对话框打开后整页（含被 aria-hidden 的背景）都没有写入口。
+  expectNoWriteEntryPoints('详情对话框打开后');
 });
 
 it('shows no recipient address in delivery errors, masked or not at all', async () => {

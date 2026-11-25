@@ -1,8 +1,10 @@
+import { requireSignInSession } from '@nocobase/app-plugin-api-keys/server';
 import {
   authenticationToken,
   type AuthEnv,
 } from '@nocobase/app-plugin-authentication/server';
 import type { Application } from '@nocobase/app-server/application';
+import { loggingToken } from '@nocobase/app-server/logging';
 import { databaseManagerToken } from '@nocobase/db';
 import {
   ApiError,
@@ -14,10 +16,13 @@ import {
   getClientAddress,
   type AppApiRouteContribution,
 } from '@nocobase/app-server/router';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { z } from 'zod';
 
-import { readDemoAccounts } from '../dev-tools/demo-accounts.js';
+import {
+  type DevAccount,
+  readDemoAccounts,
+} from '../dev-tools/demo-accounts.js';
 import { isDevAccountSwitcherEnabled } from '../dev-tools/settings.js';
 
 /**
@@ -28,9 +33,10 @@ import { isDevAccountSwitcherEnabled } from '../dev-tools/settings.js';
  * 给出不同的答案。框架不在启动之后接受新的路由贡献，所以条件放在路由工厂里，而不是在
  * provider 里事后挂载。
  *
- * 两个接口都要求已登录；写操作照例校验来源（`auth.required()` 对带 cookie 的写校验 Origin，
- * 缺了 403）。切换的本质是重新登录成目标账户：先注销当前会话，再用框架的 `signInUser`
- * 给目标账户签发一份新会话，把响应里的 `Set-Cookie` 透传给客户端。
+ * 两个接口都要求用户会话（`auth.required()` 之外再挡住个人密钥）；写操作照例校验来源
+ * （`auth.required()` 对带 cookie 的写校验 Origin，缺了 403）。切换的本质是重新登录成目标账户：
+ * 先注销当前会话，注销失败就在签发之前拒绝（旧会话留着会破坏验收第 5 条，且不能没有痕迹），
+ * 成功后才用框架的 `signInUser` 给目标账户签发新会话，把 `Set-Cookie` 透传给客户端。
  */
 
 const DevAccountSchema = z.object({
@@ -53,6 +59,39 @@ function demoAccountNotFound(): ApiError {
   });
 }
 
+/**
+ * 注销旧会话失败：记一条警告就拒绝切换，绝不走到签发那一步。
+ *
+ * 日志只记谁在切、切到哪个演示账户、注销失败的原因（HTTP 状态或错误类型），不记请求头、
+ * cookie 或令牌。响应是一个带 reason 的 503：这是下游认证端点没完成，不是调用方写错了。
+ */
+function signOutFailed(
+  app: Application,
+  context: Context<AuthEnv>,
+  target: DevAccount,
+  detail: string,
+): ApiError {
+  const caller = context.get('auth');
+  app.container
+    .resolve(loggingToken)
+    .getLogger('app')
+    .warn(
+      {
+        reason: 'DEMO_ACCOUNT_SIGN_OUT_FAILED',
+        callerId: caller?.user?.id ?? 'unknown',
+        targetUsername: target.username,
+        signOutFailure: detail,
+      },
+      'Switching to a demo account failed because the previous session could not be signed out.',
+    );
+  return new ApiError({
+    status: 'UNAVAILABLE',
+    reason: 'DEMO_ACCOUNT_SIGN_OUT_FAILED',
+    domain: 'devTools',
+    message: `Could not end the current session before switching to demo account "${target.username}".`,
+  });
+}
+
 export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
   (app) => {
     if (!isDevAccountSwitcherEnabled(app)) {
@@ -63,8 +102,13 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
     const auth = app.container.resolve(authenticationToken);
     const database = app.container.resolve(databaseManagerToken);
 
-    router.use('/dev-tools/accounts', auth.required());
-    router.use('/dev-tools/switch-account', auth.required());
+    // 只在这两个开发工具接口上收紧：个人密钥不算「已登录」，别处对密钥的态度不动。
+    router.use('/dev-tools/accounts', auth.required(), requireSignInSession());
+    router.use(
+      '/dev-tools/switch-account',
+      auth.required(),
+      requireSignInSession(),
+    );
 
     router.get(
       '/dev-tools/accounts',
@@ -106,6 +150,7 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
             },
           },
           '500': apiErrorResponse(500),
+          '503': apiErrorResponse(503),
         },
       }),
       apiValidator('json', SwitchAccountBody),
@@ -123,15 +168,31 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         const headers = new Headers(request.headers);
         headers.delete('content-length');
 
-        // `signInUser` 不会注销当前会话；旧会话不主动结束就会一直挂着直到过期。
-        // 与官方演示插件一致，退出是尽力而为，失败也继续签发。
+        // `signInUser` 不会注销当前会话。注销失败就停在这里：继续签发会让旧的管理员
+        // 会话一直有效、且没有任何痕迹，验收第 5 条在那条路径上就不成立了。
         const signOut = new URL('/api/auth/sign-out', request.url);
-        await auth
-          .handler(
+        let signOutResponse: Response;
+        try {
+          signOutResponse = await auth.handler(
             new Request(signOut, { method: 'POST', headers }),
             clientAddress === undefined ? {} : { clientAddress },
-          )
-          .catch(() => undefined);
+          );
+        } catch (error) {
+          throw signOutFailed(
+            app,
+            context,
+            target,
+            error instanceof Error ? error.name : 'unknown',
+          );
+        }
+        if (!signOutResponse.ok) {
+          throw signOutFailed(
+            app,
+            context,
+            target,
+            `http-${signOutResponse.status}`,
+          );
+        }
 
         const signedIn = await auth.signInUser(
           target.id,

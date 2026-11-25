@@ -118,6 +118,91 @@ describe('GitHub Actions workflow', () => {
 });
 
 /**
+ * R-039 验收 8：按需对一个分支跑端到端。
+ *
+ * 用 PyYAML 解析后的结构断言，不在原文里找字符串 —— 注释里提到同样的
+ * 字面量不算数；重复键也另有一条测试守着（GitHub 遇到重复键会拒绝整份文件）。
+ */
+const DISPATCH_SUMMARY = `
+import json, sys, yaml
+doc = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+# PyYAML 按 YAML 1.1 把 on 解析成布尔 True，两种键都要认。
+triggers = doc.get('on')
+if triggers is None:
+    triggers = doc.get(True)
+triggers = triggers or {}
+dispatch = triggers.get('workflow_dispatch')
+dispatch = dispatch if isinstance(dispatch, dict) else {}
+inputs = dispatch.get('inputs')
+inputs = inputs if isinstance(inputs, dict) else {}
+definition = inputs.get('run_e2e')
+definition = definition if isinstance(definition, dict) else None
+beta = (doc.get('jobs') or {}).get('beta') or {}
+push = triggers.get('push')
+push = push if isinstance(push, dict) else {}
+result = {
+    'has_input': definition is not None,
+    'type': definition.get('type') if definition else None,
+    'default': definition.get('default') if definition else None,
+    'beta_if': beta.get('if'),
+    'push_branches': push.get('branches'),
+}
+print(json.dumps(result, ensure_ascii=False))
+`;
+
+type DispatchSummary = {
+  has_input: boolean;
+  type: string | null;
+  default: boolean | string | null;
+  beta_if: string | null;
+  push_branches: string[] | null;
+};
+
+function dispatchSummary(): DispatchSummary | null {
+  try {
+    const stdout = execFileSync(
+      'python3',
+      ['-I', '-c', DISPATCH_SUMMARY, path.join(workflowDir, 'gate.yml')],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    return JSON.parse(stdout) as DispatchSummary;
+  } catch (error) {
+    // 与重复键检查一致：python3 或 PyYAML 不可用时跳过这条附加检查。
+    if ((error as { stderr?: string }).stderr?.includes('ModuleNotFoundError')) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+const summary = dispatchSummary();
+
+describe.skipIf(summary === null)('按需对一个分支跑端到端（R-039 验收 8）', () => {
+  const parsed = summary as DispatchSummary;
+
+  it('workflow_dispatch 有布尔输入 run_e2e，默认 false', () => {
+    expect(parsed.has_input, 'workflow_dispatch.inputs 里没有 run_e2e。').toBe(true);
+    expect(parsed.type, 'run_e2e 必须是 boolean 输入。').toBe('boolean');
+    expect(
+      parsed.default,
+      'run_e2e 默认必须是布尔 false，不是字符串 false。',
+    ).toBe(false);
+  });
+
+  it('beta 保留自动触发的原条件，并放行手动点名', () => {
+    const condition = parsed.beta_if ?? '';
+    // 推送与 pr/** 的自动行为不变：原来的两个条件一个字不能丢。
+    expect(condition).toContain("needs.changes.outputs.docs_only != 'true'");
+    expect(condition).toContain("github.ref == 'refs/heads/main'");
+    // 手动触发且打开开关时任意分支都跑 —— 人点名要跑就照跑，连「只改文档不跑」也例外。
+    expect(condition).toContain("github.event_name == 'workflow_dispatch'");
+    expect(condition).toContain('inputs.run_e2e');
+    expect(parsed.push_branches).toContain('main');
+    expect(parsed.push_branches).toContain('pr/**');
+  });
+});
+
+/**
  * 「改动范围」那一步的判定脚本要拿真的提交跑一遍（2026-11-25 踩过）。
  *
  * 仓库里的文档全在中文目录下。Git 默认把这种路径输出成带引号的八进制转义

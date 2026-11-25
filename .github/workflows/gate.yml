@@ -18,11 +18,18 @@ name: gate
 on:
   # 镜像里合并请求的分支叫 pr/<主仓库的合并请求号>（见 scripts/dev/ci-mirror.sh）。
   # 同步到这些分支的 push 也要触发单测线，否则按分支名回查不到运行结果。
-  # beta 基线仍只在 main 上跑（见下面 beta 作业的 if）。
+  # beta 基线默认仍只在 main 上跑；手动触发且打开 run_e2e 时可在任意分支点名跑一次
+  # （见下面 beta 作业的 if）。
   push:
     branches: [main, 'pr/**']
   pull_request:
   workflow_dispatch:
+    inputs:
+      run_e2e:
+        # 人点名要跑就照跑：手动触发不受「只改了文档的推送不跑」那半句限制。
+        description: '手动触发时对本分支跑一次 beta 端到端（默认否；推送与 PR 的自动行为不变）'
+        type: boolean
+        default: false
 
 # 主仓库私有、CI 镜像是脱敏的公开仓库（R-049）：工作流只拿读权限 —— 合并请求可能来自任何人，这里也不引用仓库密钥。
 permissions:
@@ -195,9 +202,11 @@ jobs:
     timeout-minutes: 25
     # 单测线全绿才进 beta：promote 需要人工判断，自动最远到这一层。
     needs: [changes, unit]
-    # 只在 main 上跑，且只改了文档的推送不跑。PR 阶段 unit 足够，
-    # beta 的 build+e2e 不产生 PR 需要的信号。
-    if: needs.changes.outputs.docs_only != 'true' && github.ref == 'refs/heads/main'
+    # 默认只在 main 上跑，且只改了文档的推送不跑：PR 阶段 unit 足够，
+    # beta 的 build+e2e 不产生 PR 需要的信号，一次十三分钟。
+    # 手动触发且 run_e2e 为真时任意分支照跑 —— 人点名要跑，就压过「只改文档不跑」那半句；
+    # 自动触发（push / pr/**）的行为不变。
+    if: (needs.changes.outputs.docs_only != 'true' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.run_e2e == true)
     runs-on: ubuntu-latest
     services:
       postgres:

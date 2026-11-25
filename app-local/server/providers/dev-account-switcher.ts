@@ -34,8 +34,9 @@ export default class DevAccountSwitcherProvider extends ServiceProvider<Applicat
   }
 
   /**
-   * 按用户名查重，已存在就跳过。密码是启动时生成的长随机串，不记录、不输出：
-   * 这些账户不能靠密码登录，只能靠切换进入。
+   * 按用户名查重，已存在就跳过；只建还没有的账户。
+   * 查重不过滤停用与删除：按设计「管理员的删除要算数」，重启不自动恢复、也不另建同名用户。
+   * 密码是启动时生成的长随机串，不记录、不输出：这些账户不能靠密码登录，只能靠切换进入。
    */
   private async ensureDemoAccounts(): Promise<void> {
     // 没有认证与用户插件就没有会话可签发、没有账户可建。宁可起不来，也不悄悄少挂一半。

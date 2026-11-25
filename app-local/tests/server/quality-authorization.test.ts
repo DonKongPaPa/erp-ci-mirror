@@ -20,9 +20,10 @@ import { expect } from 'vitest';
 import { createStandaloneServer } from '../../server/standalone.js';
 
 /**
- * R-013 第 2 段：质量五个端点的授权，以及投递端点的资格与幂等键。
+ * R-013 第 2 段：质量五个端点的授权，以及投递端点的资格与幂等键；
+ * 另含验收第 11 条后半的「只持业务角色读用户列表得 403」。
  *
- * 验收标准第 3b、7、10、12 条。断言之前先确认 FQC 的资源已经注册完成：没注册时
+ * 验收标准第 3b、7、10、11、12 条。断言之前先确认 FQC 的资源已经注册完成：没注册时
  * 连 root 也是 403，原因码是 RESOURCE_ACTION_NOT_SUPPORTED，那样的 403 不算数。
  * 应用在 createAppTest 启动时已经跑过 provider 的 boot()，这里只是把前提钉住。
  *
@@ -806,4 +807,28 @@ test('R-013 7: two sessions saving the same revision answer PERMISSION_SET_CONFL
   expect(error.reason, '版本落后应当以 PERMISSION_SET_CONFLICT 报 409').toBe(
     'PERMISSION_SET_CONFLICT',
   );
+});
+
+test('R-013 11: the four business roles are refused on the user list, root is allowed', async ({
+  testApp,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+
+  // 验收第 11 条后半：四个业务角色都不持有「用户 · 读」，用户列表接口一律 403。
+  for (const role of [
+    'quality_manager',
+    'quality_inspector',
+    'dept_manager',
+    'staff',
+  ] as const) {
+    const username = `r013users${role.replace(/_/gu, '')}`;
+    await createUser(admin, username, { app: [role] });
+    const session = await signInAs(testApp, username);
+    const response = await session.fetch('/users');
+    await response.text();
+    expect(response.status, `${role} 不该能读用户列表`).toBe(403);
+  }
+
+  // 同一条请求 root 拿到 200，证明请求本身发对了，上面的 403 来自角色而不是接口。
+  await expectJson(await admin.fetch('/users'), 200);
 });

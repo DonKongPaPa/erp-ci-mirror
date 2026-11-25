@@ -22,6 +22,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import devAccountSwitcher from '../../client/extensions/dev-account-switcher/plugin.js';
 import { UserMenu } from '../../client/layouts/components/user-menu.js';
+import { devAccountSwitcherRegistration } from '../../client/plugins.js';
 import { renderAuthenticatedClient } from '../helpers/authenticated-client.js';
 
 /**
@@ -177,4 +178,15 @@ describe('account switcher in the avatar menu', () => {
       expect(within(other).queryByLabelText('Current account')).toBeNull();
     }
   });
+});
+
+// 客户端 DEV 门的行为：生产构建（DEV=false）不登记切换账户入口，开发构建才登记。
+it('registers the switcher extension only for a development build', () => {
+  const production = devAccountSwitcherRegistration(false);
+  expect(production.options, '生产构建不带扩展选项').toEqual({});
+  expect(production.serviceProviders, '生产构建不登记这段 UI').toHaveLength(0);
+
+  const development = devAccountSwitcherRegistration(true);
+  expect(development.options).toEqual({ enabled: true });
+  expect(development.serviceProviders).toHaveLength(1);
 });

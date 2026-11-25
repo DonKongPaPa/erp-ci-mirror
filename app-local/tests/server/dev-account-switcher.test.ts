@@ -3,11 +3,16 @@ import {
   DEFAULT_ADMIN_CREDENTIALS,
   signIn,
 } from '@nocobase/app-plugin-authentication/testing';
+import { authenticationToken } from '@nocobase/app-plugin-authentication/server';
+import { loggingToken } from '@nocobase/app-server/logging';
+import type { Application } from '@nocobase/app-server/application';
+import type { DatabaseConnection } from '@nocobase/db';
 import type { TestApp } from '@nocobase/app-testing/server';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
 import { createAppTest, createTestApp } from '../helpers/test-app.js';
 import { isDevelopmentNodeEnv } from '../../server/dev-tools/settings.js';
+import DevAccountSwitcherProvider from '../../server/providers/dev-account-switcher.js';
 import { createStandaloneServer } from '../../server/standalone.js';
 
 /**
@@ -246,6 +251,190 @@ describe('enabled in development', () => {
     // 被拒的切换不注销当前会话。
     expect((await admin.fetch('/users/me/preferences')).status).toBe(200);
   });
+
+  // 注销失败就不签发：切换失败并说得出原因、留一条不带令牌的警告，旧会话不被换成新会话。
+  test('a failed sign-out refuses the switch before a new session is signed', async ({
+    testApp,
+    app,
+  }) => {
+    const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+    const accounts = await readAccounts(admin);
+    const staff = accounts.find((account) => account.username === 'demo.staff');
+    expect(staff).toBeDefined();
+
+    const auth = app.container.resolve(authenticationToken);
+    const realHandler = auth.handler.bind(auth);
+    const failedSignOut = vi
+      .spyOn(auth, 'handler')
+      .mockImplementation((request, options) =>
+        new URL(request.url).pathname.endsWith('/auth/sign-out')
+          ? Promise.resolve(new Response('sign-out is down', { status: 503 }))
+          : realHandler(request, options),
+      );
+    const warning = vi.spyOn(
+      app.container.resolve(loggingToken).getLogger('app'),
+      'warn',
+    );
+    try {
+      const response = await admin.fetch(
+        '/dev-tools/switch-account',
+        json({ userId: staff!.id }),
+      );
+      expect(response.status).toBe(503);
+      const body = (await response.json()) as ApiErrorBody;
+      expect(body.error.reason).toBe('DEMO_ACCOUNT_SIGN_OUT_FAILED');
+      expect(response.headers.getSetCookie()).toEqual([]);
+      // 没有签发目标账户的会话：管理员自己的会话仍然可用。
+      expect((await admin.fetch('/users/me/preferences')).status).toBe(200);
+
+      const call = warning.mock.calls.find(
+        ([bindings]) =>
+          (bindings as { reason?: unknown } | undefined)?.reason ===
+          'DEMO_ACCOUNT_SIGN_OUT_FAILED',
+      );
+      expect(call, '注销失败要留一条警告日志').toBeDefined();
+      const bindings = call![0] as Record<string, unknown>;
+      expect(bindings.callerId).toBe(admin.user.id);
+      expect(bindings.targetUsername).toBe('demo.staff');
+      expect(bindings.signOutFailure).toBe('http-503');
+      const logged = JSON.stringify(warning.mock.calls);
+      expect(logged, '日志不带会话 cookie').not.toContain(admin.cookie);
+      expect(logged, '日志不带邮箱').not.toContain(admin.user.email);
+    } finally {
+      failedSignOut.mockRestore();
+      warning.mockRestore();
+    }
+  });
+
+  // 个人密钥不算「已登录」：两个切换接口只认用户会话，持密钥的请求被拒且不发新会话。
+  test('a personal API key is refused by both switcher endpoints', async ({
+    testApp,
+  }) => {
+    const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+    const accounts = await readAccounts(admin);
+    const staff = accounts.find((account) => account.username === 'demo.staff');
+    expect(staff).toBeDefined();
+
+    const created = await admin.fetch(
+      '/auth/api-key/create',
+      json({ name: '切换测试用密钥' }),
+    );
+    expect(created.status).toBe(200);
+    const secret = ((await created.json()) as { key: string }).key;
+    expect(secret).toBeTruthy();
+    const keyHeaders = {
+      'content-type': 'application/json',
+      origin: 'http://localhost',
+      'x-api-key': secret,
+    };
+
+    const listed = await testApp.request('/dev-tools/accounts', {
+      headers: keyHeaders,
+    });
+    expect(listed.status).toBe(403);
+    expect(((await listed.json()) as ApiErrorBody).error.reason).toBe(
+      'API_KEY_SESSION_FORBIDDEN',
+    );
+
+    const switched = await testApp.request('/dev-tools/switch-account', {
+      method: 'POST',
+      headers: keyHeaders,
+      body: JSON.stringify({ userId: staff!.id }),
+    });
+    expect(switched.status).toBe(403);
+    expect(((await switched.json()) as ApiErrorBody).error.reason).toBe(
+      'API_KEY_SESSION_FORBIDDEN',
+    );
+    expect(switched.headers.getSetCookie()).toEqual([]);
+  });
+
+  // 「停用」的过滤：停用的演示账户不列出，也不能切过去。
+  test('a disabled demo account is neither listed nor switchable', async ({
+    testApp,
+    connection,
+  }) => {
+    const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+    const accounts = await readAccounts(admin);
+    const staff = accounts.find((account) => account.username === 'demo.staff');
+    expect(staff).toBeDefined();
+    await markAccount(connection, staff!.id, { disabledAt: new Date() });
+
+    expect((await readAccounts(admin)).map((a) => a.username)).not.toContain(
+      'demo.staff',
+    );
+    const switched = await admin.fetch(
+      '/dev-tools/switch-account',
+      json({ userId: staff!.id }),
+    );
+    expect(switched.status).toBe(422);
+    expect(((await switched.json()) as ApiErrorBody).error.reason).toBe(
+      'DEMO_ACCOUNT_NOT_FOUND',
+    );
+    expect((await admin.fetch('/users/me/preferences')).status).toBe(200);
+  });
+
+  // 「删除」的过滤：删除的演示账户不列出，也不能切过去。
+  test('a deleted demo account is neither listed nor switchable', async ({
+    testApp,
+    connection,
+  }) => {
+    const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+    const accounts = await readAccounts(admin);
+    const staff = accounts.find((account) => account.username === 'demo.staff');
+    expect(staff).toBeDefined();
+    await markAccount(connection, staff!.id, { deletedAt: new Date() });
+
+    expect((await readAccounts(admin)).map((a) => a.username)).not.toContain(
+      'demo.staff',
+    );
+    const switched = await admin.fetch(
+      '/dev-tools/switch-account',
+      json({ userId: staff!.id }),
+    );
+    expect(switched.status).toBe(422);
+    expect(((await switched.json()) as ApiErrorBody).error.reason).toBe(
+      'DEMO_ACCOUNT_NOT_FOUND',
+    );
+    expect((await admin.fetch('/users/me/preferences')).status).toBe(200);
+  });
+
+  // 不自动恢复：停用或删除过的演示账户重跑初始化后仍是停用/删除，也不会另建同名用户。
+  test('startup leaves disabled or deleted demo accounts untouched', async ({
+    testApp,
+    app,
+    connection,
+  }) => {
+    const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+    const accounts = await readAccounts(admin);
+    const staff = accounts.find((account) => account.username === 'demo.staff');
+    const manager = accounts.find(
+      (account) => account.username === 'demo.dept_manager',
+    );
+    expect(staff).toBeDefined();
+    expect(manager).toBeDefined();
+    await markAccount(connection, staff!.id, { deletedAt: new Date() });
+    await markAccount(connection, manager!.id, { disabledAt: new Date() });
+
+    // 再跑一次启动初始化，等价于重启时那一段；管理员的删除与停用要算数。
+    await new DevAccountSwitcherProvider(app).boot();
+    const rows = await connection.query
+      .selectFrom('user')
+      .select(['id', 'username', 'disabledAt', 'deletedAt'])
+      .where('username', 'in', ['demo.staff', 'demo.dept_manager'])
+      .execute();
+    expect(rows, '没有另建同名用户').toHaveLength(2);
+    const byUsername = new Map(rows.map((row) => [String(row.username), row]));
+    expect(byUsername.get('demo.staff')?.deletedAt, '删除标记仍在').not.toBeNull();
+    expect(
+      byUsername.get('demo.dept_manager')?.disabledAt,
+      '停用标记仍在',
+    ).not.toBeNull();
+
+    // 两个账户都不在可切换清单里。
+    const listed = (await readAccounts(admin)).map((a) => a.username);
+    expect(listed).not.toContain('demo.staff');
+    expect(listed).not.toContain('demo.dept_manager');
+  });
 });
 
 describe('off by default', () => {
@@ -306,3 +495,25 @@ test('refuses to start when the switch is on outside development', async () => {
     await opened?.close();
   }
 });
+
+// 启动门的行为：生产配置开着开关时，provider 的 boot 真的拒绝启动（不是查源码文字）。
+test('the provider refuses to boot outside development when configured on', async () => {
+  const productionApp = {
+    nodeEnv: 'production',
+    config: { get: () => ({ accountSwitcher: { enabled: true } }) },
+  } as unknown as Application;
+  await expect(
+    new DevAccountSwitcherProvider(productionApp).boot(),
+  ).rejects.toThrow('开发工具不能在生产环境开启');
+});
+
+/** 直接改库模拟停用与删除：这两条用户管理路径不属于本端点的验收范围。 */
+async function markAccount(
+  connection: DatabaseConnection,
+  userId: string,
+  values: { disabledAt?: Date; deletedAt?: Date },
+): Promise<void> {
+  await connection
+    .repository<{ id: string }>('user')
+    .updateMany({ filter: { id: userId }, values });
+}

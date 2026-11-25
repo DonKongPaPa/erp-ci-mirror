@@ -27,9 +27,14 @@ import devAccountSwitcher from './extensions/dev-account-switcher/plugin.js';
  * R-037 开发工具。只在开发构建里登记它的贡献：生产构建里 `import.meta.env.DEV` 是常量假，
  * 走下面那个空登记项。单独包一层，是为了让构建能把扩展的代码一起摇掉 —— 应用的 Vite
  * 插件要求组合数组里每一项都是显式的工厂调用，条件展开写在数组里会让构建失败。
+ *
+ * 显式参数只给行为测试用：生产构建把 DEV 置假时入口不登记，这条要能真的跑出来，不能只查源码。
+ * 组合数组里的那次调用不带参数，读的仍是构建期的 `import.meta.env.DEV`。
  */
-function devAccountSwitcherRegistration(): AppClientPluginRegistration {
-  return import.meta.env.DEV
+export function devAccountSwitcherRegistration(
+  isDevelopmentBuild: boolean = import.meta.env.DEV,
+): AppClientPluginRegistration {
+  return isDevelopmentBuild
     ? devAccountSwitcher({ enabled: true })
     : defineClientPlugin({ packageName: 'app-local' })();
 }
