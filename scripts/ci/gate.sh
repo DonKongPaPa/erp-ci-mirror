@@ -49,6 +49,18 @@ skip_stage() {
   SKIPPED_STAGES+=("$1")
 }
 
+# 入库文件的三类敏感信息在合并之前就拦，不等镜像同步（R-048 验收 12）。
+# 扫整棵工作树的受跟踪与未忽略文件，规则与 ci-mirror.sh 共用 sensitive-scan.sh。
+# 红了立即停，先按「路径:行号:命中内容」处理，或在共享库里登记带理由的例外。
+if [ "$CI_MIRROR" = "1" ]; then
+  skip_notice "敏感信息预检" "脱敏镜像里没有 scripts/dev/ 与仓库级材料；主仓库合并前由这一步守门"
+else
+  step sensitive-scan
+  if ! bash "$ROOT/scripts/dev/sensitive-scan.sh"; then
+    fail "敏感信息预检未通过，后续阶段不跑。"
+  fi
+fi
+
 # Node 版本是硬前提。package.json 声明 >=24，而 Node 26 的原生 localStorage
 # 会遮蔽 jsdom 的，导致 11 个 client 测试假失败 —— 实测过，不是猜的。
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"

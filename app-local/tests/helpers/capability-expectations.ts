@@ -229,11 +229,12 @@ export const capabilityExpectations: readonly CapabilityExpectation[] = [
     decidedBy: { kind: 'apiKeyPage', scope: 'application' },
     expected: '已提供',
   },
+  // R-002 第一片只注册了服务端；客户端工厂登记 /knowledge 后这一项变「已提供」。
   {
     title: '知识库界面',
     plugin: 'app-plugin-knowledge',
     decidedBy: { kind: 'page', names: ['knowledge'] },
-    expected: '未配置',
+    expected: '已提供',
   },
   {
     title: '通知模板目录',

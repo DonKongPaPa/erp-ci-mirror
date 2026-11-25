@@ -14,7 +14,13 @@ import {
   type LocalizedText,
 } from '@nocobase/app-plugin-authorization/client';
 import { useTranslation } from '@nocobase/i18n/client';
-import { useRef, useState, type ReactElement } from 'react';
+import {
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+} from 'react';
 import { Link, Outlet, useLocation } from 'react-router';
 import { PlusIcon } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
@@ -63,128 +69,160 @@ export default function DefaultAccessPage(): ReactElement {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
   const [conflict, setConflict] = useState(false);
-  const text = (value: LocalizedText): string =>
-    typeof value === 'string'
-      ? value
-      : t(value.key, {
-          ns: value.ns,
-          defaultValue: value.defaultValue ?? value.key,
-        });
-  const resources = catalog.data ? ruleResources(catalog.data.data) : [];
-  const name = (rule: DefaultAccessRule): string =>
-    text(
-      resources.find(
+  // These helpers feed the table's column definitions. Keep their identities
+  // stable: a new function on every render rebuilds every cell and drops the
+  // state it owns, such as an open row menu.
+  const text = useCallback(
+    (value: LocalizedText): string =>
+      typeof value === 'string'
+        ? value
+        : t(value.key, {
+            ns: value.ns,
+            defaultValue: value.defaultValue ?? value.key,
+          }),
+    [t],
+  );
+  const resources = useMemo(
+    () => (catalog.data ? ruleResources(catalog.data.data) : []),
+    [catalog.data],
+  );
+  const name = useCallback(
+    (rule: DefaultAccessRule): string =>
+      text(
+        resources.find(
+          (resource) => resourceKey(resource) === resourceKey(rule.resource),
+        )?.title ?? rule.resource.id,
+      ),
+    [resources, text],
+  );
+  const summary = useCallback(
+    (rule: DefaultAccessRule): string => {
+      const resource = resources.find(
         (resource) => resourceKey(resource) === resourceKey(rule.resource),
-      )?.title ?? rule.resource.id,
-    );
-  const summary = (rule: DefaultAccessRule): string => {
-    const resource = resources.find(
-      (resource) => resourceKey(resource) === resourceKey(rule.resource),
-    );
-    const scopes = catalog.data ? ruleScopes(resource, catalog.data.data) : [];
-    return (
-      rule.actions
-        .map((entry) => {
-          const scope = scopes.find((scope) => scope.id === actionKey(entry));
-          const label =
-            entry.selection.type === 'all'
-              ? t('settings.defaultAccess.all')
-              : entry.selection.type === 'records'
-                ? t('settings.defaultAccess.records', {
-                    count: entry.selection.ids.length,
-                  })
-                : text(
-                    catalog.data?.data.recordAccess.find(
-                      (item) =>
-                        entry.selection.type === 'recordAccess' &&
-                        item.key === entry.selection.key,
-                    )?.title ?? entry.selection.key,
-                  );
-          return `${text(scope?.actionTitle ?? entry.action)}${scope ? ` · ${text(scope.title)}` : entry.scopeKey ? ` · ${entry.scopeKey}` : ''}: ${label}`;
-        })
-        .join('; ') || t('settings.defaultAccess.none')
-    );
-  };
-  const columns: ColumnDef<DefaultAccessRule>[] = [
-    {
-      id: 'resource',
-      accessorFn: name,
-      sortingFn: (a, b) =>
-        name(a.original).localeCompare(name(b.original), i18n.language),
-      header: ({ column }) => (
-        <DataTableColumnHeader
-          column={column}
-          title={t('settings.defaultAccess.resource')}
-        />
-      ),
-      cell: ({ row }) => (
-        <RecordLink
-          to={{
-            pathname: `${encodeURIComponent(row.original.key)}/edit`,
-            search: location.search,
-          }}
-        >
-          {name(row.original)}
-        </RecordLink>
-      ),
+      );
+      const scopes = catalog.data
+        ? ruleScopes(resource, catalog.data.data)
+        : [];
+      return (
+        rule.actions
+          .map((entry) => {
+            const scope = scopes.find((scope) => scope.id === actionKey(entry));
+            const label =
+              entry.selection.type === 'all'
+                ? t('settings.defaultAccess.all')
+                : entry.selection.type === 'records'
+                  ? t('settings.defaultAccess.records', {
+                      count: entry.selection.ids.length,
+                    })
+                  : text(
+                      catalog.data?.data.recordAccess.find(
+                        (item) =>
+                          entry.selection.type === 'recordAccess' &&
+                          item.key === entry.selection.key,
+                      )?.title ?? entry.selection.key,
+                    );
+            return `${text(scope?.actionTitle ?? entry.action)}${scope ? ` · ${text(scope.title)}` : entry.scopeKey ? ` · ${entry.scopeKey}` : ''}: ${label}`;
+          })
+          .join('; ') || t('settings.defaultAccess.none')
+      );
     },
-    {
-      accessorKey: 'key',
-      header: t('settings.key'),
-      enableSorting: false,
-      cell: ({ row }) => (
-        <span
-          className='block max-w-48 truncate text-muted-foreground'
-          title={row.original.key}
-        >
-          {row.original.key}
-        </span>
-      ),
-    },
-    {
-      id: 'scopes',
-      header: t('settings.defaultAccess.scopes'),
-      enableSorting: false,
-      cell: ({ row }) => (
-        <span className='block max-w-96 truncate' title={summary(row.original)}>
-          {summary(row.original)}
-        </span>
-      ),
-    },
-    {
-      id: 'actions',
-      enableSorting: false,
-      header: () => <span className='sr-only'>{t('settings.actions')}</span>,
-      cell: ({ row }) => (
-        <RowActions
-          label={t('settings.actionsFor', { name: name(row.original) })}
-          actions={[
-            {
-              key: 'open',
-              label: t('settings.defaultAccess.open'),
-              render: (
-                <Link
-                  to={{
-                    pathname: `${encodeURIComponent(row.original.key)}/edit`,
-                    search: location.search,
-                  }}
-                />
-              ),
-            },
-            canDelete && {
-              key: 'delete',
-              label: t('settings.defaultAccess.delete'),
-              destructive: true,
-              onClick: () => {
-                setError(undefined);
-                setRemoving(row.original);
+    [catalog.data, resources, t, text],
+  );
+  const columns = useMemo<ColumnDef<DefaultAccessRule>[]>(
+    () => [
+      {
+        id: 'resource',
+        accessorFn: name,
+        sortingFn: (a, b) =>
+          name(a.original).localeCompare(name(b.original), i18n.language),
+        header: ({ column }) => (
+          <DataTableColumnHeader
+            column={column}
+            title={t('settings.defaultAccess.resource')}
+          />
+        ),
+        cell: ({ row }) => (
+          <RecordLink
+            to={{
+              pathname: `${encodeURIComponent(row.original.key)}/edit`,
+              search: location.search,
+            }}
+          >
+            {name(row.original)}
+          </RecordLink>
+        ),
+      },
+      {
+        accessorKey: 'key',
+        header: t('settings.key'),
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span
+            className='block max-w-48 truncate text-muted-foreground'
+            title={row.original.key}
+          >
+            {row.original.key}
+          </span>
+        ),
+      },
+      {
+        id: 'scopes',
+        header: t('settings.defaultAccess.scopes'),
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span
+            className='block max-w-96 truncate'
+            title={summary(row.original)}
+          >
+            {summary(row.original)}
+          </span>
+        ),
+      },
+      {
+        id: 'actions',
+        enableSorting: false,
+        header: () => <span className='sr-only'>{t('settings.actions')}</span>,
+        cell: ({ row }) => (
+          <RowActions
+            label={t('settings.actionsFor', { name: name(row.original) })}
+            actions={[
+              {
+                key: 'open',
+                label: t('settings.defaultAccess.open'),
+                render: (
+                  <Link
+                    to={{
+                      pathname: `${encodeURIComponent(row.original.key)}/edit`,
+                      search: location.search,
+                    }}
+                  />
+                ),
               },
-            },
-          ]}
-        />
-      ),
-    },
-  ];
+              canDelete && {
+                key: 'delete',
+                label: t('settings.defaultAccess.delete'),
+                destructive: true,
+                onClick: () => {
+                  setError(undefined);
+                  setRemoving(row.original);
+                },
+              },
+            ]}
+          />
+        ),
+      },
+    ],
+    [
+      canDelete,
+      i18n.language,
+      location.search,
+      name,
+      setError,
+      setRemoving,
+      summary,
+      t,
+    ],
+  );
   const rows = (rules.data?.data ?? [])
     .filter((rule) =>
       `${name(rule)} ${rule.key}`

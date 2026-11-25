@@ -7,6 +7,7 @@ import {
   type TestAppConfig,
 } from '@nocobase/app-testing/server';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -126,6 +127,8 @@ interface RegisteredTestDisposer {
 const apps: CloseableResource[] = [];
 const servers: Server[] = [];
 const tempDirs: string[] = [];
+/** Queue directory from the current test, asserted gone once teardown has run. */
+let queueDirAwaitingRemoval: string | undefined;
 /** Test databases the applications above ran on, dropped once those applications have closed. */
 const testConfigs: TestAppConfig[] = [];
 const TEST_REALTIME_TOPIC = 'test:realtime';
@@ -165,6 +168,12 @@ afterEach(async () => {
         }),
     ),
   );
+
+  const queueDirToCheck = queueDirAwaitingRemoval;
+  queueDirAwaitingRemoval = undefined;
+  if (queueDirToCheck && existsSync(queueDirToCheck)) {
+    throw new Error(`Queue temporary directory survived teardown: ${queueDirToCheck}`);
+  }
 });
 
 describe('app server', () => {
@@ -1019,6 +1028,15 @@ describe('app server', () => {
       error: 'Not found',
     });
   });
+
+  it('removes the queue temporary directory during teardown', async () => {
+    const queue = createTestQueueConfig();
+    const queueDir = queue.backends?.memory?.persistence?.path;
+    expect(queueDir).toBeDefined();
+    expect(existsSync(queueDir!)).toBe(true);
+    queueDirAwaitingRemoval = queueDir;
+    createTestApp({ queue });
+  });
 });
 
 async function startStandaloneTestServer(
@@ -1168,15 +1186,17 @@ interface CreateTestAppOptions {
 
 /** Queue state files of a test application stay in a temporary directory. */
 function createTestQueueConfig(): AppQueueConfig {
+  const queueDir = mkdtempSync(
+    path.join(tmpdir(), 'nocobase-app-template-default-queue-'),
+  );
+  tempDirs.push(queueDir);
   return {
     default: 'memory',
     backends: {
       memory: {
         adapter: 'inMemory',
         persistence: {
-          path: mkdtempSync(
-            path.join(tmpdir(), 'nocobase-app-template-default-queue-'),
-          ),
+          path: queueDir,
         },
       },
     },

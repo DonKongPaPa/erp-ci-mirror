@@ -116,6 +116,7 @@ ENV NODE_ENV=production \
     APP_BASE_PATH=/main \
     APP_SERVER_HOST=0.0.0.0 \
     APP_SERVER_PORT=13000 \
+    TZ=Asia/Shanghai \
     APP_CONFIG_FILE=/app/config.yml
 
 # The runtime takes the directory above `dist` as its deployment root, so storage resolves to /app/storage.

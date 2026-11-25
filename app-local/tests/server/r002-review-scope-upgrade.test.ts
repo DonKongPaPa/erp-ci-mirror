@@ -8,9 +8,12 @@ import {
   type TestSession,
 } from '@nocobase/app-plugin-authentication/testing';
 import { createAppTest } from '../helpers/test-app.js';
-import { expect } from 'vitest';
+import { expect, vi } from 'vitest';
 
-import { upgradeR002ReviewScope } from '../../cli/authz/upgrade-r002.js';
+import {
+  upgradeR002,
+  upgradeR002ReviewScope,
+} from '../../cli/authz/upgrade-r002.js';
 import { createStandaloneServer } from '../../server/standalone.js';
 
 /**
@@ -87,6 +90,109 @@ const reviewScopeOf = async (
   const action = grant?.actions.find((entry) => entry.action === actionName);
   return action?.policy?.scopes?.[REVIEW_TABLE];
 };
+
+/** 某个资源上的动作名，没有这条授权时是空数组。 */
+const grantActions = (
+  grants: readonly JsonGrant[],
+  type: string,
+  id: string,
+): string[] =>
+  grants.find(
+    (grant) => grant.resource.type === type && grant.resource.id === id,
+  )?.actions.map((action) => action.action) ?? [];
+
+/** 模拟合并之前的环境：两个质量角色没有知识库页面与 kb.knowledge 档位。 */
+const stripKnowledgeAccess = async (
+  authz: AppAuthorization,
+  key: string,
+): Promise<void> => {
+  const set = await authz.permissionSets.get(key);
+  if (!set) {
+    throw new Error(`permission set ${key} is missing`);
+  }
+  const grants = grantsOf(set).filter(
+    (grant) =>
+      !(
+        (grant.resource.type === 'page' && grant.resource.id === 'knowledge') ||
+        (grant.resource.type === 'kb' && grant.resource.id === 'kb.knowledge')
+      ),
+  );
+  await authz.permissionSets.update(key, {
+    key,
+    ...(set.title === undefined ? {} : { title: set.title }),
+    grants,
+  });
+};
+
+/** 旧环境里只有带 policy 的知识库页面授权：框架会过滤它，不能算「已有」。 */
+const setConditionalKnowledgePage = async (
+  authz: AppAuthorization,
+  key: string,
+): Promise<void> => {
+  const set = await authz.permissionSets.get(key);
+  if (!set) {
+    throw new Error(`permission set ${key} is missing`);
+  }
+  await authz.permissionSets.update(key, {
+    key,
+    ...(set.title === undefined ? {} : { title: set.title }),
+    grants: [
+      ...grantsOf(set),
+      {
+        resource: { type: 'page', id: 'knowledge' },
+        actions: [{ action: 'access', policy: { type: 'custom' } }],
+      },
+    ],
+  });
+};
+
+/** 真正能打开页面的授权数：带 policy 的那条不算（grantBacked 过滤）。 */
+const unconditionalPageAccessCount = (grants: readonly JsonGrant[]): number =>
+  grants
+    .filter(
+      (grant) => grant.resource.type === 'page' && grant.resource.id === 'knowledge',
+    )
+    .flatMap((grant) => grant.actions)
+    .filter(
+      (action) => action.action === 'access' && action.policy === undefined,
+    ).length;
+
+/** 旧环境里只有带 policy 的 kb 档位：框架会过滤它，不能算「已有」。 */
+const setConditionalKbGrant = async (
+  authz: AppAuthorization,
+  key: string,
+  action: string,
+): Promise<void> => {
+  const set = await authz.permissionSets.get(key);
+  if (!set) {
+    throw new Error(`permission set ${key} is missing`);
+  }
+  await authz.permissionSets.update(key, {
+    key,
+    ...(set.title === undefined ? {} : { title: set.title }),
+    grants: [
+      ...grantsOf(set),
+      {
+        resource: { type: 'kb', id: 'kb.knowledge' },
+        actions: [{ action, policy: { type: 'custom' } }],
+      },
+    ],
+  });
+};
+
+/** 真正生效的档位数：带 policy 的那条会被 `grantBacked` 过滤，不算。 */
+const unconditionalKbActionCount = (
+  grants: readonly JsonGrant[],
+  action: string,
+): number =>
+  grants
+    .filter(
+      (grant) => grant.resource.type === 'kb' && grant.resource.id === 'kb.knowledge',
+    )
+    .flatMap((grant) => grant.actions)
+    .filter(
+      (entry) => entry.action === action && entry.policy === undefined,
+    ).length;
 
 const json = (body: unknown) => ({
   method: 'POST',
@@ -293,4 +399,336 @@ test('R-002 升级：升级之前确认是拒绝的，跑过命令之后同一�
     .findOne({ filter: { id: body.data.reviewId } });
   expect(review, '响应里的 reviewId 应当指向库里那一行').toBeDefined();
   expect(review?.screeningId).toBe(screeningId);
+});
+
+test('R-002 升级：给两个质量角色补知识库页面与档位，别的角色不动，重跑不写', async ({
+  app,
+}) => {
+  const authz = app.container.resolve(authorizationToken);
+  await stripKnowledgeAccess(authz, 'quality_manager');
+  await stripKnowledgeAccess(authz, 'quality_inspector');
+
+  const beforeManager = grantsOf(
+    (await authz.permissionSets.get('quality_manager'))!,
+  );
+  const beforeInspector = grantsOf(
+    (await authz.permissionSets.get('quality_inspector'))!,
+  );
+  const deptBefore = grantsOf((await authz.permissionSets.get('dept_manager'))!);
+
+  // 前置条件真的成立：升级前两个角色都没有知识库页面与 kb.knowledge 档位。
+  for (const before of [beforeManager, beforeInspector]) {
+    expect(grantActions(before, 'page', 'knowledge')).toEqual([]);
+    expect(grantActions(before, 'kb', 'kb.knowledge')).toEqual([]);
+  }
+
+  const lines: string[] = [];
+  const report = await upgradeR002(authz, {
+    info: (message) => lines.push(message),
+  });
+  expect(report.knowledgeAccess.changed.sort()).toEqual([...TARGETS].sort());
+  expect(report.knowledgeAccess.unchanged).toEqual([]);
+  expect(report.knowledgeAccess.missing).toEqual([]);
+
+  const expectedActions: Record<string, string> = {
+    quality_manager: 'manage.related',
+    quality_inspector: 'propose.related',
+  };
+  for (const key of TARGETS) {
+    const after = grantsOf((await authz.permissionSets.get(key))!);
+    const before = key === 'quality_manager' ? beforeManager : beforeInspector;
+    // 只加页面与档位两样：原有的授权逐条原样保留、条数只多两条。
+    expect(after).toHaveLength(before.length + 2);
+    for (const [index, grant] of before.entries()) {
+      expect(after[index], `${key} 已有的授权被改了`).toEqual(grant);
+    }
+    // 行为断言：档位与 seed 给新环境的一致，质量主管管、质量员提案。
+    expect(grantActions(after, 'page', 'knowledge')).toEqual(['access']);
+    expect(grantActions(after, 'kb', 'kb.knowledge')).toEqual([
+      expectedActions[key]!,
+    ]);
+    // 改前改后各一行日志。
+    expect(
+      lines.filter(
+        (line) =>
+          line.includes('[r002-knowledge]') &&
+          line.includes(key) &&
+          /before/u.test(line),
+      ),
+      `${key} 缺知识库升级的改前日志`,
+    ).toHaveLength(1);
+    expect(
+      lines.filter(
+        (line) =>
+          line.includes('[r002-knowledge]') &&
+          line.includes(key) &&
+          /after/u.test(line),
+      ),
+      `${key} 缺知识库升级的改后日志`,
+    ).toHaveLength(1);
+  }
+
+  // 部门主管前后都不动，也没有被补上知识库页面或档位。
+  expect(grantsOf((await authz.permissionSets.get('dept_manager'))!)).toEqual(
+    deptBefore,
+  );
+  expect(grantActions(deptBefore, 'page', 'knowledge')).toEqual([]);
+  expect(grantActions(deptBefore, 'kb', 'kb.knowledge')).toEqual([]);
+
+  // 幂等：第二次不改、不写、不动版本号。
+  const revisions = [
+    (await authz.permissionSets.get('quality_manager'))?.revision,
+    (await authz.permissionSets.get('quality_inspector'))?.revision,
+  ];
+  const second = await upgradeR002(authz, { info: () => undefined });
+  expect(second.knowledgeAccess.changed).toEqual([]);
+  expect(second.knowledgeAccess.unchanged.sort()).toEqual([...TARGETS].sort());
+  expect(
+    [
+      (await authz.permissionSets.get('quality_manager'))?.revision,
+      (await authz.permissionSets.get('quality_inspector'))?.revision,
+    ],
+    '第二次运行不该改动权限集的版本号',
+  ).toEqual(revisions);
+});
+
+test('R-002 升级：旧环境只有带 policy 的知识库页面授权时补无条件 access，角色能打开页面', async ({
+  app,
+  testApp,
+}) => {
+  const authz = app.container.resolve(authorizationToken);
+  await stripKnowledgeAccess(authz, 'quality_manager');
+  await setConditionalKnowledgePage(authz, 'quality_manager');
+
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const user = await createUser(admin, 'r002conditionalpage', {
+    app: ['quality_manager'],
+  });
+  // 每次新建上下文：authz.for() 会按当时的 grants 组装提供者，升级前后的判定要用新快照。
+  const identity = { principal: { type: 'user', id: user.id } };
+  const canOpen = () =>
+    authz
+      .for(identity)
+      .can({ resource: { type: 'page', id: 'knowledge' }, action: 'access' });
+
+  // 前置条件：带 policy 的那条被框架过滤，角色现在确实打不开页面。
+  expect(await canOpen()).toBe(false);
+  expect(
+    unconditionalPageAccessCount(
+      grantsOf((await authz.permissionSets.get('quality_manager'))!),
+    ),
+  ).toBe(0);
+
+  const lines: string[] = [];
+  const report = await upgradeR002(authz, {
+    info: (message) => lines.push(message),
+  });
+  expect(report.knowledgeAccess.changed).toContain('quality_manager');
+  // 行为断言：升级后角色真的能打开页面，不是只看 grants 里有没有动作名。
+  expect(await canOpen()).toBe(true);
+  const after = grantsOf((await authz.permissionSets.get('quality_manager'))!);
+  expect(unconditionalPageAccessCount(after)).toBe(1);
+  expect(
+    after.some(
+      (grant) =>
+        grant.resource.type === 'page' &&
+        grant.resource.id === 'knowledge' &&
+        grant.actions.some((action) => action.policy?.type === 'custom'),
+    ),
+    '原有的带条件授权不该被删掉',
+  ).toBe(true);
+  expect(
+    lines.some((line) => line.includes('[r002-knowledge] quality_manager after:')),
+    '改后日志要能看到补上的无条件页面授权',
+  ).toBe(true);
+
+  // 幂等：第二次不重复加，版本号不动。
+  const revision = (await authz.permissionSets.get('quality_manager'))?.revision;
+  const second = await upgradeR002(authz, { info: () => undefined });
+  expect(second.knowledgeAccess.changed).not.toContain('quality_manager');
+  expect(
+    unconditionalPageAccessCount(
+      grantsOf((await authz.permissionSets.get('quality_manager'))!),
+    ),
+  ).toBe(1);
+  expect((await authz.permissionSets.get('quality_manager'))?.revision).toBe(
+    revision,
+  );
+});
+
+test('R-002 升级：已有不带 policy 的知识库页面授权时不重复加', async ({ app }) => {
+  const authz = app.container.resolve(authorizationToken);
+  const before = grantsOf((await authz.permissionSets.get('quality_manager'))!);
+  // 前置条件：seed 给的页面授权本来就是无条件的，这条必须算「已有」。
+  expect(unconditionalPageAccessCount(before)).toBe(1);
+  const revision = (await authz.permissionSets.get('quality_manager'))?.revision;
+
+  const report = await upgradeR002(authz, { info: () => undefined });
+  expect(report.knowledgeAccess.changed).toEqual([]);
+  expect(grantActions(before, 'page', 'knowledge')).toEqual(['access']);
+  expect(
+    unconditionalPageAccessCount(
+      grantsOf((await authz.permissionSets.get('quality_manager'))!),
+    ),
+  ).toBe(1);
+  expect((await authz.permissionSets.get('quality_manager'))?.revision).toBe(
+    revision,
+  );
+});
+
+test('R-002 升级：读到版本后别人改了角色，报错退出且不写', async ({ app }) => {
+  const authz = app.container.resolve(authorizationToken);
+  await stripKnowledgeAccess(authz, 'quality_manager');
+
+  const setsApi = authz.permissionSets;
+  const realUpdate = setsApi.update.bind(setsApi);
+  let raced = false;
+  const spy = vi.spyOn(setsApi, 'update').mockImplementation(
+    async (key, input, expectedRevision) => {
+      if (!raced && key === 'quality_manager') {
+        raced = true;
+        const current = await setsApi.get(key);
+        if (!current) {
+          throw new Error(`permission set ${key} is missing`);
+        }
+        // 模拟管理员在角色编辑器里同时保存：版本号先前进了一步。
+        await realUpdate(key, {
+          key,
+          title: { key: 'concurrent.edit', ns: 'app-local' },
+          grants: current.grants,
+        });
+      }
+      return realUpdate(key, input, expectedRevision);
+    },
+  );
+
+  try {
+    const lines: string[] = [];
+    await expect(
+      upgradeR002(authz, { info: (message) => lines.push(message) }),
+    ).rejects.toMatchObject({ name: 'PermissionSetConflictError' });
+    expect(
+      lines.some(
+        (line) =>
+          line.includes('[r002-knowledge] quality_manager') &&
+          line.includes('revision') &&
+          line.includes('nothing written'),
+      ),
+      '冲突时要说明是版本变了、这一步没写',
+    ).toBe(true);
+
+    // 命令没覆盖别人的改动：标题保持管理员写的，知识库授权没被补上。
+    const after = await authz.permissionSets.get('quality_manager');
+    expect(after?.title).toEqual({ key: 'concurrent.edit', ns: 'app-local' });
+    expect(grantActions(grantsOf(after!), 'page', 'knowledge')).toEqual([]);
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test('R-002 升级：质量主管只有带 policy 的 manage.related 时补无条件的，can() 由假变真', async ({
+  app,
+  testApp,
+}) => {
+  const role = 'quality_manager';
+  const action = 'manage.related';
+  const authz = app.container.resolve(authorizationToken);
+  await stripKnowledgeAccess(authz, role);
+  await setConditionalKbGrant(authz, role, action);
+
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const user = await createUser(admin, 'r002condmanage', { app: [role] });
+  const canManage = () =>
+    authz
+      .for({ principal: { type: 'user', id: user.id } })
+      .can({ resource: { type: 'kb', id: 'kb.knowledge' }, action });
+
+  // 前置条件：带 policy 的档位被框架过滤，角色现在确实没有有效档位。
+  expect(await canManage()).toBe(false);
+  expect(
+    unconditionalKbActionCount(
+      grantsOf((await authz.permissionSets.get(role))!),
+      action,
+    ),
+  ).toBe(0);
+
+  const report = await upgradeR002(authz, { info: () => undefined });
+  expect(report.knowledgeAccess.changed).toContain(role);
+  // 行为断言：升级后 can() 真的放开，不是只看 grants 里有动作名。
+  expect(await canManage()).toBe(true);
+  const after = grantsOf((await authz.permissionSets.get(role))!);
+  expect(unconditionalKbActionCount(after, action)).toBe(1);
+  expect(
+    after.some(
+      (grant) =>
+        grant.resource.type === 'kb' &&
+        grant.resource.id === 'kb.knowledge' &&
+        grant.actions.some(
+          (entry) => entry.action === action && entry.policy?.type === 'custom',
+        ),
+    ),
+    '原有的带条件档位不该被删掉',
+  ).toBe(true);
+
+  // 幂等：第二次不重复加，版本不动。
+  const revision = (await authz.permissionSets.get(role))?.revision;
+  const second = await upgradeR002(authz, { info: () => undefined });
+  expect(second.knowledgeAccess.changed).not.toContain(role);
+  expect(
+    unconditionalKbActionCount(
+      grantsOf((await authz.permissionSets.get(role))!),
+      action,
+    ),
+  ).toBe(1);
+  expect((await authz.permissionSets.get(role))?.revision).toBe(revision);
+});
+
+test('R-002 升级：质量员只有带 policy 的 propose.related 时补无条件的，can() 由假变真', async ({
+  app,
+  testApp,
+}) => {
+  const role = 'quality_inspector';
+  const action = 'propose.related';
+  const authz = app.container.resolve(authorizationToken);
+  await stripKnowledgeAccess(authz, role);
+  await setConditionalKbGrant(authz, role, action);
+
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const user = await createUser(admin, 'r002condinspect', { app: [role] });
+  const canPropose = () =>
+    authz
+      .for({ principal: { type: 'user', id: user.id } })
+      .can({ resource: { type: 'kb', id: 'kb.knowledge' }, action });
+
+  // 前置条件：带 policy 的档位被框架过滤，角色现在确实没有有效档位。
+  expect(await canPropose()).toBe(false);
+  expect(
+    unconditionalKbActionCount(
+      grantsOf((await authz.permissionSets.get(role))!),
+      action,
+    ),
+  ).toBe(0);
+
+  const report = await upgradeR002(authz, { info: () => undefined });
+  expect(report.knowledgeAccess.changed).toContain(role);
+  // 行为断言：升级后 can() 真的放开，不是只看 grants 里有动作名。
+  expect(await canPropose()).toBe(true);
+  expect(
+    unconditionalKbActionCount(
+      grantsOf((await authz.permissionSets.get(role))!),
+      action,
+    ),
+  ).toBe(1);
+
+  // 幂等：第二次不重复加。
+  const revision = (await authz.permissionSets.get(role))?.revision;
+  const second = await upgradeR002(authz, { info: () => undefined });
+  expect(second.knowledgeAccess.changed).not.toContain(role);
+  expect(
+    unconditionalKbActionCount(
+      grantsOf((await authz.permissionSets.get(role))!),
+      action,
+    ),
+  ).toBe(1);
+  expect((await authz.permissionSets.get(role))?.revision).toBe(revision);
 });

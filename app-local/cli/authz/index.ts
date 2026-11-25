@@ -18,7 +18,7 @@ const authzCli = defineCliPlugin({
   commands: {
     export: AuthzExport,
     import: AuthzImport,
-    // R-002：给两个质量角色的 `fqc` 授权补上确认记录表的全量范围。可单独跑、可重跑。
+    // R-002：给两个质量角色补上确认记录表的全量范围、知识库页面与 kb.knowledge 档位。可单独跑、可重跑。
     'upgrade-r002': AuthzUpgradeR002,
   },
 });

@@ -21,6 +21,7 @@ import scheduler from '@nocobase/app-plugin-scheduler/client';
 import file from '@nocobase/app-plugin-file/client';
 import mail from '@nocobase/app-plugin-mail/client';
 import agents from '@nocobase/app-plugin-agents/client';
+import knowledge from '@nocobase/app-plugin-knowledge/client';
 import devAccountSwitcher from './extensions/dev-account-switcher/plugin.js';
 
 /**
@@ -57,6 +58,15 @@ const clientPlugins: AppClientPlugins = defineClientPlugins([
   scheduler(),
   mail(),
   agents(),
+  // R-002：质量知识库。索引关着，与服务端 createKnowledgePlugin({ indexing: false })
+  // 配套：不登记索引表单，第一版不加载按平台预编译的原生模块。
+  // 客户端工厂自带 /knowledge 页面，能力项「知识库界面」据此从「未配置」变「已提供」。
+  // 页面首请求必须带解析器认的空间（R-002 只认 quality/standards）：不传就用插件默认的
+  // default/''，解析器回空、/spaces 报 400、首屏红条「无法加载知识库」。
+  knowledge({
+    indexing: false,
+    space: { scope: 'quality', scopeId: 'standards' },
+  }),
   // R-037 开发工具：只在开发构建里登记它的贡献；服务端那边也不会发布开关
   // （正式环境写开启会让应用起不来）。
   devAccountSwitcherRegistration(),

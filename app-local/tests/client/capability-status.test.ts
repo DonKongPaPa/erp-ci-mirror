@@ -139,7 +139,8 @@ it('R-031: keeps the expectation table itself whole', () => {
   // 盘点时是 11 / 16 / 6。第 0 步登记了用户、角色与权限、默认数据范围三组管理页，
   // 授权的 3 项与用户管理的 1 项变成已提供；R-042 登记 AI Agent 插件的五个管理页。
   // R-032 与 R-034 又登记了两个密钥页与通知记录页，模板目录随通知模块出现。
-  expect(tally).toEqual({ 已提供: 24, 未配置: 4, 待确认: 5 });
+  // R-002 的知识库客户端插件登记 /knowledge 后，「知识库界面」从未配置变已提供。
+  expect(tally).toEqual({ 已提供: 25, 未配置: 3, 待确认: 5 });
 });
 
 it('R-032/R-034: names the two API key pages and both notification pages as provided', async () => {
