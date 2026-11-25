@@ -40,6 +40,7 @@ it('uses CJK name endings in the avatar while retaining the full account name an
     expect(trigger).toHaveTextContent(expected);
     await user.keyboard('{Enter}');
     expect(
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
       within(screen.getByRole('menu')).getByText(name, { exact: true }),
     ).toBeVisible();
     await user.keyboard('{Escape}');

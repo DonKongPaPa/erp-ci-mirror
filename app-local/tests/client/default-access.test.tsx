@@ -444,6 +444,7 @@ it('validates a missing key on submit and focuses its inline error without sendi
   );
   await user.click(await screen.findByRole('option', { name: 'Projects' }));
   expect(
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     screen.queryByText(enUS.settings.defaultAccess.keyRequired),
   ).not.toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Save' }));
@@ -710,6 +711,7 @@ it('replaces the saved editor history entry and keeps the list query when going 
       name: enUS.settings.defaultAccess.none,
     }),
   );
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
   const save = screen.getByRole('button', { name: enUS.settings.save });
   expect(save).toBeEnabled();
   await userEvent.click(save);

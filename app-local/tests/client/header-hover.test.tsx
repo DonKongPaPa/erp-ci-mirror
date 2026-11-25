@@ -42,8 +42,10 @@ it.each(panels)(
     const trigger = screen.getByRole('button', { name: label });
 
     await user.hover(trigger);
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     const panel = screen.getByRole(role);
     expect(trigger).not.toHaveAttribute('title');
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
     // Supply the destination because user-event does not set relatedTarget.
     fireEvent.mouseLeave(trigger, { relatedTarget: panel });
@@ -71,6 +73,7 @@ it.each(panels)(
     await user.tab();
     expect(trigger).toHaveFocus();
     await user.keyboard('{Enter}');
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     expect(screen.getByRole(role)).toBeVisible();
     await user.keyboard('{Escape}');
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
@@ -89,24 +92,30 @@ it('offers appearance only inside the account menu with keyboard selection', asy
   ).not.toBeInTheDocument();
   // The inbox entry comes before the account menu in the header.
   await user.tab();
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
   expect(screen.getByRole('link', { name: /inbox/i })).toHaveFocus();
   await user.tab();
   await user.keyboard('{Enter}');
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
   const appearance = screen.getByRole('menuitem', { name: 'Theme' });
   appearance.focus();
   await user.keyboard('{ArrowRight}');
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
   expect(screen.getAllByRole('menuitemradio')).toHaveLength(5);
   await user.keyboard('{ArrowDown}{Enter}');
   expect(document.documentElement).toHaveClass('dark');
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
   expect(screen.getByRole('menuitemradio', { name: 'Dark' })).toHaveAttribute(
     'aria-checked',
     'true',
   );
   await user.keyboard('{Escape}');
   expect(appearance).toHaveFocus();
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
   expect(screen.getByRole('menuitem', { name: 'Sign out' })).toBeVisible();
   await user.keyboard('{Escape}');
   expect(
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     screen.getByRole('button', { name: 'Open account menu' }),
   ).toHaveFocus();
 });
@@ -127,10 +136,12 @@ it('does not open the account menu from the hover a closing overlay leaves behin
     const trigger = screen.getByRole('button', { name: 'Open account menu' });
 
     await user.hover(trigger);
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     // A click-through would arrive as a trigger press, not a hover; it must not
     // open the menu either.
     await user.click(trigger);
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
 
     await user.unhover(trigger);

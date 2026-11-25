@@ -131,12 +131,15 @@ describe('user permission configuration', () => {
         await user.click(toggle);
       }
       expect(
+        // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
         screen.getByRole('heading', { name: words.userInformation }),
       ).toBeVisible();
       expect(
+        // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
         screen.getByRole('heading', { name: words.accountSecurity }),
       ).toBeVisible();
       expect(
+        // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
         screen.getByRole('heading', { name: words.roleAssignment }),
       ).toBeVisible();
       const permissionNames = [
@@ -151,23 +154,29 @@ describe('user permission configuration', () => {
       const permissionCheckboxes = permissionNames.map((name) =>
         screen.getByRole('checkbox', { name, exact: true }),
       );
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
       expect(screen.getAllByRole('checkbox')).toHaveLength(
         permissionNames.length,
       );
       expect(
+        // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
         screen.queryByRole('checkbox', { name: words.inviteUsers }),
       ).not.toBeInTheDocument();
       const rowIds = permissionCheckboxes.map((node) => node.id);
       expect(rowIds).not.toContain('');
       expect(new Set(rowIds).size).toBe(permissionNames.length);
       const status = within(
+        // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
         screen.getByRole('tablist', { name: words.permissionStatus }),
       );
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
       expect(status.getAllByRole('tab')).toHaveLength(3);
       expect(
+        // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
         status.getByRole('tab', { name: words.permissionAll, exact: true }),
       ).toHaveAttribute('aria-selected', 'true');
       for (const name of [words.permissionGranted, words.permissionUngranted])
+        // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
         expect(status.getByRole('tab', { name, exact: true })).toBeVisible();
       await user.click(
         screen.getByRole('button', { name: words.save, exact: true }),

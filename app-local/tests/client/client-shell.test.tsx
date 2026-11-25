@@ -70,13 +70,16 @@ describe('application shell', () => {
       'page',
     );
     expect(
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
       screen
         .getByRole('complementary', { name: 'Application navigation' })
         .querySelector('[data-sidebar="sidebar"]'),
     ).toHaveClass('bg-sidebar');
     expect(
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
       within(sidebar()).getByRole('link', { name: 'Home' }),
     ).toHaveAttribute('data-active');
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     expect(within(sidebar()).getByRole('link', { name: 'Home' })).toHaveClass(
       'data-active:bg-sidebar-primary',
       'data-active:text-sidebar-primary-foreground',
@@ -169,12 +172,15 @@ describe('application shell', () => {
     };
     renderApplication('/orders', true, [parent]);
     expect(await findSidebarLink('Orders')).toHaveAttribute('href', '/orders');
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     const toggle = screen.getByRole('button', { name: 'Orders' });
     fireEvent.click(toggle);
     expect(
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
       within(sidebar()).queryByRole('link', { name: 'Reports' }),
     ).not.toBeInTheDocument();
     expect(
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
       within(sidebar()).getByRole('link', { name: 'Orders' }),
     ).toBeVisible();
     fireEvent.click(toggle);

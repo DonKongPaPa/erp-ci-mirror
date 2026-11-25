@@ -119,6 +119,7 @@ describe('account permission changes without a browser reload', () => {
     await expectMenu(true);
     await changePermissions(view, false);
     invalidate(view);
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     expect(screen.getByText('users content')).not.toBeVisible();
     await expectMenu(false);
     await changePermissions(view, true);

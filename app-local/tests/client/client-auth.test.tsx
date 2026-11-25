@@ -76,6 +76,7 @@ describe('application authentication pages', () => {
     fireEvent.change(screen.getByLabelText('Username or email'), {
       target: { value: 'alice' },
     });
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     const passwordInput = screen.getByLabelText('Password');
     fireEvent.change(passwordInput, { target: { value: 'password' } });
 

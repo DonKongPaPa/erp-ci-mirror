@@ -141,7 +141,9 @@ it.each(['fast', 'slow'] as const)(
           screen.getByRole('button', { name: 'Cancel', exact: true }),
         );
       });
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
       expect(screen.getByRole('link', { name: 'Alice' })).toBeVisible();
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
       expect(screen.queryByRole('status', { name: refreshing })).toBeNull();
       if (speed === 'slow') {
         await act(() => vi.advanceTimersByTimeAsync(1000));

@@ -197,6 +197,7 @@ it('mounts only after the initial handshake and preserves runtime fail-closed po
   const next = Promise.withResolvers<typeof probe.allowed>();
   probe.request.mockReturnValueOnce(next.promise);
   await probe.open();
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(probe.cleaned).toHaveBeenCalledOnce();
   await act(async () => probe.old.resolve());
@@ -231,6 +232,7 @@ it('keeps a timed-out session closed, supports retry, and reports sign-out failu
   expect(screen.getByRole('alert')).toHaveTextContent('Unable to sign out');
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
   expect(probe.realtime.reconnect).toHaveBeenCalledTimes(2);
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
   expect(screen.queryByText('Unable to connect')).toBeNull();
   await probe.open();
   expect(probe.mounted).toHaveBeenCalledOnce();

@@ -128,12 +128,14 @@ it('collects native custom filter parameters before changing the draft, then sav
   }
   render(<Role />);
   await user.click(screen.getByRole('tab', { name: 'Configuration' }));
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
   const scope = screen.getByRole('combobox', {
     name: 'How far View · Records reaches',
   });
   expect(scope).toHaveTextContent('Own');
   await user.click(scope);
   await user.click(await screen.findByRole('option', { name: 'Custom' }));
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
   expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
   expect(save).not.toHaveBeenCalled();
   await user.type(screen.getByRole('textbox', { name: 'Value 1' }), 'Finance');
@@ -164,6 +166,7 @@ it('collects native custom filter parameters before changing the draft, then sav
     unrelated: { keep: true },
   });
   await user.click(screen.getByRole('button', { name: 'Conditions' }));
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
   expect(screen.getByRole('textbox', { name: 'Value 1' })).toHaveValue(
     'Finance',
   );

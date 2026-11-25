@@ -151,10 +151,12 @@ describe('DataTable cards on phones', () => {
     await user.click(
       await screen.findByRole('menuitemradio', { name: 'Amount · Desc' }),
     );
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     expect(screen.getByLabelText('sorting')).toHaveTextContent(
       JSON.stringify([{ id: 'amount', desc: true }]),
     );
     expect(
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
       within(screen.getByRole('list')).getAllByRole('article')[0],
     ).toHaveAccessibleName('row-11');
   });
@@ -191,8 +193,11 @@ describe('DataTable cards on phones', () => {
     await user.click(screen.getByRole('checkbox', { name: 'Select row-0' }));
 
     setPhone(true);
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     expect(screen.getByText('Page 2 of 2')).toBeVisible();
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     const cards = within(screen.getByRole('list')).getAllByRole('article');
     expect(cards.map((card) => card.getAttribute('aria-label'))).toEqual([
       'row-1',
@@ -201,9 +206,12 @@ describe('DataTable cards on phones', () => {
     expect(cards[1]).toHaveTextContent(/^selected$/);
 
     setPhone(false);
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     expect(screen.getByRole('table')).toBeVisible();
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     expect(screen.getByText('Page 2 of 2')).toBeVisible();
     expect(
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
       screen.getByRole('checkbox', { name: 'Select row-0' }),
     ).toBeChecked();
   });
@@ -241,6 +249,7 @@ describe('DataTable cards on phones', () => {
     // The visible label is part of the control, a larger target for a finger.
     await user.click(screen.getByText('Select all on this page'));
     expect(all).toBeChecked();
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     expect(screen.getByText('10 of 12 row(s) selected.')).toBeVisible();
 
     // Select all covers the current page only.
@@ -250,6 +259,7 @@ describe('DataTable cards on phones', () => {
       screen.getByRole('button', { name: 'Go to previous page' }),
     );
     await user.click(all);
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     expect(screen.queryByText(/row\(s\) selected/u)).toHaveTextContent(
       '0 of 12 row(s) selected.',
     );
@@ -320,6 +330,7 @@ describe('DataTable cards on phones', () => {
       const options = await screen.findAllByRole('menuitemradio');
       expect(options.map((option) => option.textContent)).toEqual(items);
       await user.click(screen.getByRole('menuitemradio', { name: choice }));
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
       expect(screen.getByLabelText('search')).toHaveTextContent(
         '?pageSize=10&sort=amount&order=desc',
       );
@@ -440,6 +451,7 @@ describe('DataTable cards on phones', () => {
       />,
     );
     expect(
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
       screen.queryByRole('button', { name: 'Clear filters' }),
     ).not.toBeInTheDocument();
   });

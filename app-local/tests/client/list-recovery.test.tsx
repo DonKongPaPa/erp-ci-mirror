@@ -214,6 +214,7 @@ it('defers detail refresh until returning, then replaces the invalid source page
   await mount(calls);
   await screen.findByText('last');
   await userEvent.click(screen.getByText('Detail'));
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
   expect(screen.getByTestId('url')).toHaveTextContent('/items/last?page=3');
   expect(
     calls.mock.calls.filter(([call]) => call.method === 'GET'),
@@ -368,6 +369,7 @@ it('suspends a root list while its child covers it', async () => {
   );
   await screen.findByText('last');
   await userEvent.click(screen.getByText('Detail'));
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
   expect(screen.getByTestId('url')).toHaveTextContent('/last?page=3');
   expect(calls).toHaveBeenCalledTimes(1);
 });

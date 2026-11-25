@@ -103,9 +103,11 @@ describe('app client theme', () => {
       );
       expect(document.documentElement).toHaveAttribute('data-theme', preset);
       expect(
+        // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
         screen.getByRole('menuitemradio', { name: modeLabel }),
       ).toHaveAttribute('aria-checked', 'true');
       expect(
+        // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
         screen.getByRole('menuitemradio', { name: presetLabel }),
       ).toHaveAttribute('aria-checked', 'true');
     },
@@ -152,10 +154,12 @@ describe('app client theme', () => {
     act(() => compact.focus());
     await userEvent.keyboard('{ArrowDown}{Enter}');
     expect(
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
       screen.getByRole('menuitemradio', { name: 'Default' }),
     ).toHaveAttribute('aria-checked', 'true');
     expect(localStorage.getItem('nocobase:crm:theme:preset')).toBe('default');
     await userEvent.keyboard('{Escape}');
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     expect(screen.getByRole('menuitem', { name: 'Theme' })).toHaveFocus();
   });
 
@@ -169,6 +173,7 @@ describe('app client theme', () => {
     );
     await openTheme();
     expect(
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
       screen.queryByRole('menuitemradio', { name: 'Ant-design' }),
     ).not.toBeInTheDocument();
     expect(
@@ -186,6 +191,7 @@ describe('app client theme', () => {
     );
     await openTheme();
     expect(
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
       screen.queryByRole('menuitemradio', { name: 'Ocean' }),
     ).not.toBeInTheDocument();
     expect(

@@ -115,6 +115,7 @@ it.each(['/settings'])(
     );
     await user.keyboard('{ArrowLeft}');
     expect(
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
       screen.getByRole('tab', { name: 'Roles and permissions' }),
     ).toHaveFocus();
     await user.keyboard('{Enter}');
@@ -416,8 +417,10 @@ it.each(['breadcrumb', 'back'])(
         );
       };
       await leave(true);
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
       expect(
+        // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
         screen.getByRole('status', { name: 'Current URL' }),
       ).toHaveTextContent('/settings/roles/test/edit');
       expect(beforeUnload()).toBe(true);
@@ -432,6 +435,7 @@ it.each(['breadcrumb', 'back'])(
         screen.getByRole('button', { name: 'Cancel', exact: true }),
       );
       expect(
+        // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
         screen.getByRole('status', { name: 'Current URL' }),
       ).toHaveTextContent('/settings/roles/test/edit');
       expect(draft).toHaveValue('Nested unsaved draft');
@@ -484,8 +488,10 @@ it('restores the draft and restarts only the mounted data effect after permissio
     await userEvent.click(
       screen.getByRole('button', { name: 'Open settings' }),
     );
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
       screen.getByRole('status', { name: 'Current URL' }),
     ).toHaveTextContent('/settings/roles/test/edit');
     expect(beforeUnload()).toBe(true);

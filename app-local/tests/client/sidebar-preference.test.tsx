@@ -164,6 +164,7 @@ describe('application sidebar preference', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'expanded' }));
     expect(
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
       screen.getByRole('button', { name: 'collapsed' }),
     ).toBeInTheDocument();
     expect(cookie).not.toHaveBeenCalled();

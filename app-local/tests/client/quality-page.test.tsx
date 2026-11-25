@@ -163,9 +163,11 @@ it('hides the intake form from a user without fqc.intake', async () => {
   await screen.findByText(enUS.quality.tickets.empty);
   await waitForPermissions(requests);
   expect(
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     screen.queryByRole('button', { name: enUS.quality.intake.submit }),
   ).not.toBeInTheDocument();
   expect(
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     screen.queryByPlaceholderText(enUS.quality.intake.contentPlaceholder),
   ).not.toBeInTheDocument();
 });
@@ -278,6 +280,7 @@ it('shows no confirm button for a row that is not awaiting review', async () => 
   expect(await screen.findByText('Routed without a human')).toBeVisible();
   await waitForPermissions(requests);
   expect(
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     screen.queryByRole('button', { name: enUS.quality.screenings.review }),
   ).not.toBeInTheDocument();
 });
@@ -303,6 +306,7 @@ it('shows no confirm button to a user without fqc.handle', async () => {
   ).toBeVisible();
   await waitForPermissions(requests);
   expect(
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     screen.queryByRole('button', { name: enUS.quality.screenings.review }),
   ).not.toBeInTheDocument();
 });
@@ -416,6 +420,7 @@ it('restores an unknown intake outcome after leaving and returning to the page',
 
   await user.click(screen.getByRole('button', { name: 'Leave page' }));
   expect(
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     screen.queryByText(enUS.quality.intake.outcomeUnknown),
   ).not.toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Return to page' }));

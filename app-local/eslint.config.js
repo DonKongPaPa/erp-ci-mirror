@@ -1,5 +1,6 @@
 import { createApplicationConfig } from '@nocobase/dev-config/eslint';
 import jsxA11y from 'eslint-plugin-jsx-a11y';
+import noSyncQueryAfterAction from './eslint-rules/no-sync-query-after-action.js';
 
 /**
  * 可访问性的静态规则（R-039 第二道门）：`eslint-plugin-jsx-a11y` 的推荐配置，
@@ -26,6 +27,24 @@ const accessibility = {
   },
 };
 
+/**
+ * 同步查询守门（R-047）：只在客户端测试里生效。触发动作之后、没等到 findBy/waitFor
+ * 就同步查一个可能还没出现的元素，是本机绿远端红的头号来源。规则本体在 eslint-rules/，
+ * 误报用行内禁用写明理由，不放宽规则。
+ */
+const syncQueryGuard = {
+  name: 'app-local/sync-query-guard',
+  files: ['tests/client/**/*.{js,jsx,ts,tsx}'],
+  plugins: {
+    'app-local': {
+      rules: { 'no-sync-query-after-action': noSyncQueryAfterAction },
+    },
+  },
+  rules: {
+    'app-local/no-sync-query-after-action': 'error',
+  },
+};
+
 export default [
   ...createApplicationConfig({
     tsconfigRootDir: import.meta.dirname,
@@ -40,4 +59,5 @@ export default [
   }),
   // After the framework's config on purpose: this block only adds rules, scoped to the app's own files.
   accessibility,
+  syncQueryGuard,
 ];
