@@ -179,6 +179,8 @@ function runClassify(
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
       ...process.env,
+      // 镜像仓库把 CI_MIRROR 设在整个作业的环境里；分类脚本的测试要与它隔离，否则一律判成「不是只改文档」
+      CI_MIRROR: '',
       EVENT_NAME: '',
       PUSH_BEFORE: '',
       PUSH_HEAD: '',
