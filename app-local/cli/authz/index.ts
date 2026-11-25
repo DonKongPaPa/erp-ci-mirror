@@ -1,0 +1,23 @@
+import { defineCliPlugin } from '@nocobase/app-cli';
+
+import AuthzExport from './export.js';
+import AuthzImport from './import.js';
+
+/**
+ * `authz export` / `authz import`（R-013 验收第 8 条）。
+ *
+ * 本应用自己的命令放在 `cli/commands/` 时挂在 `app` 主题下（`pnpm nocobase app …`），
+ * 而设计把这两个命令定成 `pnpm nocobase authz export`。所以这里用 CLI 插件的形式
+ * 登记一个本地主题：`pluginTopicFor()` 把包名 `@app-local/authz-cli` 变成 `authz`，
+ * 命令由 `cli/plugins.ts` 一并注册。包名只是主题的来源与冲突提示用的名字。
+ */
+const authzCli = defineCliPlugin({
+  packageName: '@app-local/authz-cli',
+  description: 'Export and import authorization data.',
+  commands: {
+    export: AuthzExport,
+    import: AuthzImport,
+  },
+});
+
+export default authzCli;
