@@ -56,7 +56,7 @@ it('cancels a shell leave confirmation on concealment and requires a fresh decis
   await act(async () => conceal(true));
   expect(screen.queryByRole('alertdialog')).toBeNull();
   await user.click(screen.getByRole('link', { name: 'Leave page' }));
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 断言的是受控输入值或 rerender 传入的同步值
   expect(screen.getByTestId('location')).toHaveTextContent('/editor');
   const unload = new Event('beforeunload', { cancelable: true });
   window.dispatchEvent(unload);

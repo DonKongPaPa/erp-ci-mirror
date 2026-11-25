@@ -95,23 +95,23 @@ it('clamps only a successfully loaded count and retains unrelated query context'
 it('restores external URL changes, resets the page on sort and retains sorting when paging', async () => {
   await renderWithApp(<Probe />, { route: '/?page=3&pageSize=10' });
   await userEvent.click(screen.getByRole('button', { name: 'History' }));
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   expect(screen.getByTestId('state')).toHaveTextContent(
     '"pageIndex":1,"pageSize":20',
   );
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   expect(screen.getByTestId('state')).toHaveTextContent('"desc":false');
   await userEvent.click(screen.getByRole('button', { name: 'Sort' }));
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 断言的是受控输入值或 rerender 传入的同步值
   expect(screen.getByTestId('url')).not.toHaveTextContent('page=2');
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 断言的是受控输入值或 rerender 传入的同步值
   expect(screen.getByTestId('url')).toHaveTextContent('q=historic');
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   expect(screen.getByTestId('state')).toHaveTextContent('"desc":true');
   await userEvent.click(screen.getByRole('button', { name: 'Next' }));
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   expect(screen.getByTestId('state')).toHaveTextContent('"pageIndex":1');
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 断言的是受控输入值或 rerender 传入的同步值
   expect(screen.getByTestId('url')).toHaveTextContent('order=desc');
 });
 it('normalizes invalid pagination and ignores unsupported sort columns', async () => {
@@ -126,14 +126,14 @@ it('normalizes invalid pagination and ignores unsupported sort columns', async (
 it('allows browser Back to restore the preceding page', async () => {
   await renderWithApp(<Probe />, { route: '/?page=3&pageSize=10&q=kept' });
   await userEvent.click(screen.getByRole('button', { name: 'Next' }));
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   expect(screen.getByTestId('state')).toHaveTextContent('"pageIndex":1');
   await userEvent.click(
     screen.getByRole('button', { name: 'Back in history' }),
   );
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   expect(screen.getByTestId('state')).toHaveTextContent('"pageIndex":2');
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 断言的是受控输入值或 rerender 传入的同步值
   expect(screen.getByTestId('url')).toHaveTextContent('q=kept');
 });
 
@@ -142,13 +142,13 @@ it('starts at page one after resizing even when the table supplies an old page i
     route: '/?page=4&pageSize=10&sort=name&order=desc&q=kept',
   });
   await userEvent.click(screen.getByRole('button', { name: 'Resize' }));
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   expect(screen.getByTestId('state')).toHaveTextContent(
     '"pageIndex":0,"pageSize":20',
   );
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 断言的是受控输入值或 rerender 传入的同步值
   expect(screen.getByTestId('url')).toHaveTextContent('order=desc');
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 断言的是受控输入值或 rerender 传入的同步值
   expect(screen.getByTestId('url')).toHaveTextContent('q=kept');
 });
 
@@ -188,18 +188,18 @@ it('writes and restores the complete existing orderBy sequence', async () => {
     route: '/?page=3&pageSize=20&q=kept',
   });
   await userEvent.click(screen.getByRole('button', { name: 'Multi sort' }));
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   expect(screen.getByTestId('state')).toHaveTextContent(
     '[{"id":"name","desc":true},{"id":"updatedAt","desc":false}]',
   );
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   expect(screen.getByTestId('state')).toHaveTextContent('"pageIndex":0');
   await userEvent.click(screen.getByRole('button', { name: 'Next' }));
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 断言的是受控输入值或 rerender 传入的同步值
   expect(screen.getByTestId('url')).toHaveTextContent(
     'orderBy=name+desc%2CupdatedAt',
   );
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 断言的是受控输入值或 rerender 传入的同步值
   expect(screen.getByTestId('url')).toHaveTextContent('q=kept');
 });
 
@@ -209,7 +209,7 @@ it('keeps ordered multi-sort while deferred deletion recovery corrects the react
   });
   await userEvent.click(screen.getByRole('button', { name: 'Toggle active' }));
   await userEvent.click(screen.getByRole('button', { name: 'Loaded' }));
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   expect(screen.getByTestId('state')).toHaveTextContent('"pageIndex":4');
   await userEvent.click(screen.getByRole('button', { name: 'Toggle active' }));
   await waitFor(() =>

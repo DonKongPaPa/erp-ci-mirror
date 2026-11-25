@@ -124,20 +124,20 @@ describe('returning to a list', () => {
     const router = setup();
     for (let i = 0; i < 3; i++) {
       await userEvent.click(screen.getByRole('link', { name: 'Open detail' }));
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       expect(screen.getByRole('link', { name: 'Orders' })).toHaveAttribute(
         'href',
         initial,
       );
       await userEvent.click(screen.getByRole('link', { name: 'Orders' }));
       expect(router.state.location.search).toBe('?q=Acme&status=open&page=2');
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 断言的是受控输入值或 rerender 传入的同步值
       expect(screen.getByRole('textbox', { name: 'Search' })).toHaveValue(
         'Acme',
       );
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 断言的是受控输入值或 rerender 传入的同步值
       expect(screen.getByTestId('page')).toHaveTextContent('2');
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 断言的是受控输入值或 rerender 传入的同步值
       expect(screen.getByTestId('record')).toHaveTextContent('Acme-2');
     }
   });
@@ -149,20 +149,20 @@ describe('returning to a list', () => {
     await userEvent.click(screen.getByRole('link', { name: 'Open detail' }));
     await userEvent.click(screen.getByRole('link', { name: 'Back' }));
     expect(router.state.location.pathname).toBe('/orders');
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 断言的是受控输入值或 rerender 传入的同步值
     expect(screen.getByTestId('record')).toHaveTextContent('Acme-2');
   });
   it('keeps each visited ancestor separate from a nested list query', async () => {
     setup();
     await userEvent.click(screen.getByRole('link', { name: 'Open detail' }));
     await userEvent.click(screen.getByRole('link', { name: 'Open lines' }));
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('link', { name: 'Orders' })).toHaveAttribute(
       'href',
       initial,
     );
     // Middle levels appear in both the desktop trail and the collapsed menu.
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('link', { name: 'Order' })).toHaveAttribute(
       'href',
       '/orders/42?detailPage=7&q=child',
@@ -172,14 +172,14 @@ describe('returning to a list', () => {
     const router = setup();
     await userEvent.click(screen.getByRole('button', { name: 'Clear' }));
     await userEvent.click(screen.getByRole('link', { name: 'Open detail' }));
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('link', { name: 'Orders' })).toHaveAttribute(
       'href',
       '/orders',
     );
     await act(() => router.navigate('/other?q=Beta&page=3'));
     await userEvent.click(screen.getByRole('link', { name: 'Open detail' }));
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('link', { name: 'Other' })).toHaveAttribute(
       'href',
       '/other?q=Beta&page=3',
@@ -206,7 +206,7 @@ describe('returning to a list', () => {
     );
     await userEvent.click(screen.getByRole('link', { name: 'Open detail' }));
     await userEvent.click(screen.getByRole('link', { name: 'Orders' }));
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 断言的是受控输入值或 rerender 传入的同步值
     expect(screen.getByTestId('record')).toHaveTextContent('Beta-1');
   });
 });

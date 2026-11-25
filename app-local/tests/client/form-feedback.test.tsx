@@ -72,7 +72,7 @@ describe('feedback forms', () => {
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: 'Corrected' },
     });
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 断言的是受控输入值或 rerender 传入的同步值
     expect(screen.getByLabelText('Name')).toHaveValue('Corrected');
     fireEvent.click(screen.getByText('Save'));
     await waitFor(() =>
@@ -123,7 +123,7 @@ describe('feedback forms', () => {
     fireEvent.change(screen.getByLabelText('First'), {
       target: { value: 'corrected' },
     });
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是动作前就存在的节点（点击受体、静态结构或已显示的内容）
     expect(screen.getByLabelText('First')).toHaveFocus();
   });
 
@@ -437,7 +437,7 @@ describe('feedback forms', () => {
       </FeedbackForm>,
     );
     fireEvent.click(screen.getByText('Save'));
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     const entry = screen.getByRole('button', { name: 'Equipment group' });
     await waitFor(() => expect(entry).toHaveFocus());
     const id = entry.getAttribute('aria-describedby')!;
@@ -516,7 +516,7 @@ describe('feedback forms', () => {
     }
     await mount(<ControlledForm />);
     fireEvent.click(screen.getByText('Save'));
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     const input = screen.getByLabelText('Name');
     await waitFor(() => expect(input).toHaveFocus());
     expect(screen.getAllByText('Choose a unique name.')).toHaveLength(1);
@@ -532,7 +532,7 @@ describe('feedback forms', () => {
     fireEvent.change(input, { target: { value: 'unique' } });
     expect(input).toHaveAttribute('aria-invalid', 'false');
     expect(input).toHaveAttribute('aria-describedby', 'new-help');
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(input).toHaveValue('unique');
     fireEvent.click(screen.getByText('Save'));
@@ -587,11 +587,11 @@ describe('feedback forms', () => {
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: 'Corrected' },
     });
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('alert')).toBeVisible();
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.queryByText('Choose another name.')).not.toBeInTheDocument();
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.queryByRole('list')).not.toBeInTheDocument();
   });
 });

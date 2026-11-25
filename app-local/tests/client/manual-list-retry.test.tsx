@@ -93,11 +93,11 @@ describe.each(Object.keys(adapters) as (keyof typeof adapters)[])(
         await userEvent.click(
           screen.getByRole('button', { name: 'Retry', exact: true }),
         );
-        // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+        // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
         expect(screen.getByRole('alert')).toHaveTextContent(
           enUS.listFeedback.refreshFailed,
         );
-        // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+        // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
         expect(screen.getByText('Original row')).toBeVisible();
         expect(
           await screen.findByRole('button', { name: 'Retrying…' }),
@@ -147,13 +147,13 @@ describe.each(Object.keys(adapters) as (keyof typeof adapters)[])(
         const pending = deferred();
         response = pending.promise;
         await userEvent.click(screen.getByRole('button', { name: 'Refresh' }));
-        // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+        // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
         expect(screen.getByRole('alert')).toHaveTextContent(
           status === 401
             ? enUS.listFeedback.unauthenticated
             : enUS.listFeedback.forbidden,
         );
-        // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+        // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
         expect(screen.queryByText('Private row')).not.toBeInTheDocument();
         await act(async () => pending.resolve({ data: ['Authorized row'] }));
         await screen.findByText('Authorized row');

@@ -100,7 +100,7 @@ describe('standard role table', () => {
       await user.tab();
     expect(link).toHaveFocus();
     await user.keyboard('{Enter}');
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByText('Edit member')).toBeVisible();
   });
   it('uses standard pagination without losing edit links on later pages', async () => {
@@ -129,10 +129,10 @@ describe('standard role table', () => {
       screen.queryByRole('link', { name: 'Role 11', exact: true }),
     ).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Go to next page' }));
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getAllByRole('row')).toHaveLength(3);
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('link', { name: 'Role 11', exact: true }),
     ).toHaveAttribute('href', '/roles/role-11/edit');
   });

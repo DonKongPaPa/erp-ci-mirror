@@ -117,14 +117,14 @@ it('groups ranges by operation, keeps independent choices and preserves explicit
   );
   expect(change).toHaveBeenCalledExactlyOnceWith('copies', 'all');
   expect(
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     screen.getByRole('combobox', {
       name: 'Browse holdings · Book information',
     }),
   ).toHaveTextContent('No default scope');
   view.rerender(<DefaultAccessEditor {...props} readOnly />);
   expect(
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     screen
       .getAllByRole('combobox')
       .every((item) => item.hasAttribute('disabled')),

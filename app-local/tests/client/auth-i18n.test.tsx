@@ -66,11 +66,11 @@ describe('authentication translations', () => {
     try {
       const value = await runtime();
       renderPage(value, <ResetPasswordPage />);
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 装配阶段的同步查询：setup/render 之后即测试起点
       expect(screen.getByRole('status')).toHaveTextContent(
         'Your password has been reset.',
       );
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 装配阶段的同步查询：setup/render 之后即测试起点
       expect(screen.queryByLabelText('New password')).not.toBeInTheDocument();
       await act(() => value.changeLanguage('zh-CN'));
       expect(screen.getByRole('status')).toHaveTextContent(
@@ -85,7 +85,7 @@ describe('authentication translations', () => {
     try {
       const value = await runtime();
       const view = renderPage(value, <ResetPasswordPage />);
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 装配阶段的同步查询：setup/render 之后即测试起点
       expect(screen.queryByLabelText('New password')).not.toBeInTheDocument();
       resetState.failed = true;
       view.rerender(
@@ -135,7 +135,7 @@ describe('authentication translations', () => {
       target: { value: 'two' },
     });
     fireEvent.submit(container.querySelector('form')!);
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByText("Passwords don't match.")).toBeVisible();
     await act(() => value.changeLanguage('zh-CN'));
     expect(screen.getByText('两次输入的密码不一致。')).toBeVisible();

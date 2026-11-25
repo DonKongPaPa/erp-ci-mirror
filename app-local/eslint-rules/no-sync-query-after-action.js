@@ -5,7 +5,8 @@
  *   - 清掉稳态：user.click / user.type / fireEvent 等交互调用，以及 await 的其它动作表达式
  *     （自定义封装、包着交互的 act）。这些之后 UI 可能还在变。
  *   - 立起稳态：await findBy* / findAllBy* / waitFor / waitForElementToBeRemoved，
- *     await 纯数据操作的 act，以及假定时钟的 advance / tick。
+ *     await 纯数据操作的 act，假定时钟的 advance / tick，以及 CUSTOM_STEADY 名单里的封装
+ *     （参数里带交互的仍按动作处理；名单之外的一律按非稳态处理）。
  *   - 中性：render / mount 是测试起点，不清也不立 —— 设计规定 render 之后就能查。
  *   - 稳态为假时，同步的 getBy* / getAllBy* 和断言里的 queryBy* / queryAllBy* 报错。
  *
@@ -38,6 +39,22 @@ const CALLBACK_WRAPPERS = new Set([
   'waitFor',
   'waitForElementToBeRemoved',
   'act',
+]);
+/**
+ * 仓库里实际在用、且函数体里没有交互的装配/等待封装（逐个 grep 过，只有这四个名字）：
+ *   - setup：tests/client/layout-i18n.test.tsx:67；另有 12 处同名装配，函数体均不点击。
+ *   - createRuntime：tests/client/language-switcher.test.tsx:52（await runtime.init）。
+ *   - findSidebarLink：tests/client/client-shell.test.tsx:43（waitFor + getByRole）。
+ *   - waitForPermissions：tests/client/quality-page.test.tsx:66（waitFor 权限快照）。
+ * 明确名单而不是前缀：新 helper 默认按非稳态（动作）处理，要放宽得先改这里。
+ * 名字太泛的（auth-i18n.test.tsx 的 runtime() 等）不进名单，继续走行内豁免。
+ * 名单里的 helper 若在自己函数体里点击，规则看不到 —— 既有盲区，见回归样例的已知漏报。
+ */
+const CUSTOM_STEADY = new Set([
+  'setup',
+  'createRuntime',
+  'findSidebarLink',
+  'waitForPermissions',
 ]);
 const USER_INTERACTIONS = new Set([
   'click',
@@ -112,13 +129,15 @@ function containsInteraction(node) {
 /** 被 await 的调用本身是不是「等到稳态」的那种。 */
 function isSteadyCall(node) {
   if (node.type !== 'CallExpression') return false;
+  // 名字像等待、参数里却带着点击/键盘的，仍然是动作，不能被名字骗过去。
+  if (containsInteraction(node)) return false;
   const name = calleeName(node.callee);
   if (FIND_QUERY.test(name) || STEADY_WAITS.has(name) || TIMER_WAITS.has(name))
     return true;
   // await act(…)：里面只有数据操作（改语言、resolve 请求、refresh）时，await 已经把
   // 工作做完；只有包着点击/键盘这类交互时才当作触发动作（清稳态）。
-  if (name === 'act') return !containsInteraction(node);
-  return false;
+  if (name === 'act') return true;
+  return CUSTOM_STEADY.has(name);
 }
 
 /**

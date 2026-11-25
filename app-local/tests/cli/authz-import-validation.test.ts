@@ -237,6 +237,94 @@ describe('R-013: rule and subject file problems are found before any write', () 
       expected: 'does not record its protection',
     },
     {
+      name: 'a wildcard rule whose action no resource of that type declares is a file problem',
+      file: {
+        rules: {
+          ...emptyRules,
+          defaultAccess: [
+            {
+              key: 'wildcard-bad-action',
+              resource: { type: 'database.collection', id: '*' },
+              actions: [{ action: 'explode', selection: { type: 'all' } }],
+            },
+          ],
+        },
+      },
+      expected:
+        'action "explode" is not registered for resource type "database.collection"',
+    },
+    {
+      name: 'a wildcard rule over composites whose action no composite declares is a file problem',
+      file: {
+        rules: {
+          ...emptyRules,
+          defaultAccess: [
+            {
+              key: 'wildcard-bad-composite-action',
+              resource: { type: 'composite', id: '*' },
+              actions: [{ action: 'explode', selection: { type: 'all' } }],
+            },
+          ],
+        },
+      },
+      expected: 'action "explode" is not registered for composite resources',
+    },
+    {
+      name: 'a rule on a resource id that is not registered is a file problem',
+      file: {
+        rules: {
+          ...emptyRules,
+          defaultAccess: [
+            {
+              key: 'ghost-item',
+              resource: { type: 'database.collection', id: 'ghostCollection' },
+              actions: [{ action: 'read', selection: { type: 'all' } }],
+            },
+          ],
+        },
+      },
+      expected:
+        'resource "database.collection:ghostCollection" is not registered',
+    },
+    {
+      // 权限集里的授权不能走通配：框架把 `id: "*"` 当「这一类里的任意一项」，
+      // 一条 `composite: "*"` 的授权会覆盖所有复合资源。通配只对规则放行。
+      name: 'a permission set grant on a wildcard composite resource is a file problem',
+      file: {
+        permissionSets: [
+          {
+            key: 'wildcard_composite_role',
+            revision: 'from-another-environment',
+            grants: [
+              {
+                resource: { type: 'composite', id: '*' },
+                actions: [{ action: 'view' }],
+              },
+            ],
+          },
+        ],
+      },
+      expected: 'Unknown composite resource action: *.view',
+    },
+    {
+      name: 'a permission set grant on a wildcard collection is a file problem',
+      file: {
+        permissionSets: [
+          {
+            key: 'wildcard_collection_role',
+            revision: 'from-another-environment',
+            grants: [
+              {
+                resource: { type: 'database.collection', id: '*' },
+                actions: [{ action: 'read' }],
+              },
+            ],
+          },
+        ],
+      },
+      expected: 'resource "database.collection:*" is not registered',
+    },
+    {
       // 前面还有要新建的权限集与要授出的赋权：这条规则若不在计划阶段拦下，
       // 服务层要到写入时才拒绝（sharing 的 allowAll 是 false），那时前两条已经落库。
       name: 'a sharing rule that selects all records is a file problem',
@@ -393,6 +481,55 @@ test(
 );
 
 test(
+  'R-013: a wildcard composite rule passes when only one composite declares the action',
+  { timeout: TEST_TIMEOUT },
+  async () => {
+    const env = await openEnvironment();
+    const directory = await temporaryDirectory();
+    try {
+      // `intake` 只有 fqc 声明，departments 没有：通配规则按「任一复合资源声明」放行，
+      // 不能要求所有复合资源都声明同一个动作。
+      const file = path.join(directory, 'wildcard-one-participant.json');
+      await writeFile(
+        file,
+        `${JSON.stringify(
+          minimalDocument({
+            rules: {
+              ...emptyRules,
+              defaultAccess: [
+                {
+                  key: 'wildcard-one-participant',
+                  resource: { type: 'composite', id: '*' },
+                  actions: [{ action: 'intake', selection: { type: 'all' } }],
+                },
+              ],
+            },
+          }),
+          null,
+          2,
+        )}\n`,
+      );
+
+      const imported = await runCommand(AuthzImport, env, 'authz:import', [
+        '--file',
+        file,
+        '--json',
+      ]);
+      expect(imported.error).toBeUndefined();
+      expect(imported.exitCode ?? 0).toBe(0);
+      const stored = await authorization(env).defaultAccess.list();
+      expect(
+        stored.find((rule) => rule.key === 'wildcard-one-participant')
+          ?.resource,
+      ).toEqual({ type: 'composite', id: '*' });
+    } finally {
+      await env.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   'R-013: a default-access rule the file moves lets a new rule take over its old resource',
   { timeout: TEST_TIMEOUT },
   async () => {
@@ -449,6 +586,174 @@ test(
       expect(rules.find((rule) => rule.key === 'zzz-moved')?.resource).toEqual({
         type: 'database.collection',
         id: 'fqcMessages',
+      });
+    } finally {
+      await env.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'R-013: deleting one of the rules that exchange resources lets the import converge',
+  { timeout: TEST_TIMEOUT },
+  async () => {
+    const env = await openEnvironment();
+    const directory = await temporaryDirectory();
+    try {
+      // 成环：a 占 fqcTickets、b 占 fqcMessages，文件要它们互换。
+      await authorization(env).defaultAccess.create({
+        key: 'aaa-swap',
+        resource: { type: 'database.collection', id: 'fqcTickets' },
+        actions: [{ action: 'read', selection: { type: 'all' } }],
+      });
+      await authorization(env).defaultAccess.create({
+        key: 'zzz-swap',
+        resource: { type: 'database.collection', id: 'fqcMessages' },
+        actions: [{ action: 'read', selection: { type: 'all' } }],
+      });
+      const file = path.join(directory, 'swap.json');
+      await writeFile(
+        file,
+        `${JSON.stringify(
+          minimalDocument({
+            rules: {
+              ...emptyRules,
+              defaultAccess: [
+                {
+                  key: 'aaa-swap',
+                  resource: { type: 'database.collection', id: 'fqcMessages' },
+                  actions: [{ action: 'read', selection: { type: 'all' } }],
+                },
+                {
+                  key: 'zzz-swap',
+                  resource: { type: 'database.collection', id: 'fqcTickets' },
+                  actions: [{ action: 'read', selection: { type: 'all' } }],
+                },
+              ],
+            },
+          }),
+          null,
+          2,
+        )}\n`,
+      );
+
+      // 一次导入：两条规则都在，没有安全的写入顺序，半途失败。
+      const blocked = await runCommand(AuthzImport, env, 'authz:import', [
+        '--file',
+        file,
+        '--json',
+      ]);
+      expect(blocked.exitCode).toBe(1);
+      expect(blocked.json().error?.code).toBe('IMPORT_WRITE_FAILED');
+
+      // 按帮助里的做法先删掉其中一条旧规则，同一份文件就能收敛。
+      await authorization(env).defaultAccess.delete('zzz-swap');
+      const imported = await runCommand(AuthzImport, env, 'authz:import', [
+        '--file',
+        file,
+        '--json',
+      ]);
+      expect(imported.error).toBeUndefined();
+      expect(imported.exitCode ?? 0).toBe(0);
+      const rules = await authorization(env).defaultAccess.list();
+      expect(rules.find((rule) => rule.key === 'aaa-swap')?.resource).toEqual({
+        type: 'database.collection',
+        id: 'fqcMessages',
+      });
+      expect(rules.find((rule) => rule.key === 'zzz-swap')?.resource).toEqual({
+        type: 'database.collection',
+        id: 'fqcTickets',
+      });
+    } finally {
+      await env.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'R-013: a chain of default-access rules converges only when written from its tail',
+  { timeout: TEST_TIMEOUT },
+  async () => {
+    const env = await openEnvironment();
+    const directory = await temporaryDirectory();
+    try {
+      // 成链：a 占 fqcTickets、b 占 fqcMessages，文件要把 a 挪进 b 的资源、b 挪到空的 fqcScreenings。
+      await authorization(env).defaultAccess.create({
+        key: 'aaa-chain',
+        resource: { type: 'database.collection', id: 'fqcTickets' },
+        actions: [{ action: 'read', selection: { type: 'all' } }],
+      });
+      await authorization(env).defaultAccess.create({
+        key: 'zzz-chain',
+        resource: { type: 'database.collection', id: 'fqcMessages' },
+        actions: [{ action: 'read', selection: { type: 'all' } }],
+      });
+      const entry = (key: string, id: string) => ({
+        key,
+        resource: { type: 'database.collection', id },
+        actions: [{ action: 'read', selection: { type: 'all' } }],
+      });
+      const headFirst = path.join(directory, 'head-first.json');
+      await writeFile(
+        headFirst,
+        `${JSON.stringify(
+          minimalDocument({
+            rules: {
+              ...emptyRules,
+              // 链头（a）排在前面：它要进的资源还被 b 占着，写入时撞旧占用。
+              defaultAccess: [
+                entry('aaa-chain', 'fqcMessages'),
+                entry('zzz-chain', 'fqcScreenings'),
+              ],
+            },
+          }),
+          null,
+          2,
+        )}\n`,
+      );
+      const blocked = await runCommand(AuthzImport, env, 'authz:import', [
+        '--file',
+        headFirst,
+        '--json',
+      ]);
+      expect(blocked.exitCode).toBe(1);
+      expect(blocked.json().error?.code).toBe('IMPORT_WRITE_FAILED');
+
+      // 从链尾（b）开始写：先把它挪到空资源，a 再接手它让出的资源。
+      const tailFirst = path.join(directory, 'tail-first.json');
+      await writeFile(
+        tailFirst,
+        `${JSON.stringify(
+          minimalDocument({
+            rules: {
+              ...emptyRules,
+              defaultAccess: [
+                entry('zzz-chain', 'fqcScreenings'),
+                entry('aaa-chain', 'fqcMessages'),
+              ],
+            },
+          }),
+          null,
+          2,
+        )}\n`,
+      );
+      const imported = await runCommand(AuthzImport, env, 'authz:import', [
+        '--file',
+        tailFirst,
+        '--json',
+      ]);
+      expect(imported.error).toBeUndefined();
+      expect(imported.exitCode ?? 0).toBe(0);
+      const rules = await authorization(env).defaultAccess.list();
+      expect(rules.find((rule) => rule.key === 'aaa-chain')?.resource).toEqual({
+        type: 'database.collection',
+        id: 'fqcMessages',
+      });
+      expect(rules.find((rule) => rule.key === 'zzz-chain')?.resource).toEqual({
+        type: 'database.collection',
+        id: 'fqcScreenings',
       });
     } finally {
       await env.close();

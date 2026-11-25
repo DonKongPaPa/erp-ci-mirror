@@ -50,7 +50,7 @@ describe('standard DataTable', () => {
     expect(screen.getByText('Page 1 of 2')).toBeVisible();
     expect(screen.queryByText('row-10')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Go to next page' }));
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByText('row-10')).toBeVisible();
     await user.click(
       screen.getByRole('button', { name: 'Go to previous page' }),
@@ -62,7 +62,7 @@ describe('standard DataTable', () => {
       await screen.findByRole('menuitem', { name: 'Desc', exact: true }),
     );
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       within(screen.getAllByRole('row')[1]!).getByText('row-11'),
     ).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'View', exact: true }));
@@ -72,7 +72,7 @@ describe('standard DataTable', () => {
         exact: true,
       }),
     );
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getAllByRole('columnheader', { hidden: true })).toHaveLength(
       1,
     );
@@ -82,7 +82,7 @@ describe('standard DataTable', () => {
         exact: true,
       }),
     );
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('columnheader', { name: 'Amount' })).toBeVisible();
   });
   it('preserves the server page and sort instead of applying client paging or sorting again', async () => {
@@ -115,9 +115,9 @@ describe('standard DataTable', () => {
       within(screen.getAllByRole('row')[1]!).getByText('row-0'),
     ).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Go to next page' }));
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByText('Page 4 of 6')).toBeVisible();
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByText('row-0')).toBeVisible();
   });
   it('localizes successful emptiness and keeps the table headers without paging controls', async () => {

@@ -105,12 +105,9 @@ describe('shell translations', () => {
     const runtime = await setup(<AppLayout routes={[overview]} />);
     // The header's trail, where a tagline used to be.
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
       screen.getByRole('navigation', { name: 'Breadcrumb' }),
     ).toHaveTextContent('Overview');
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     expect(screen.getByText('Build reliable business systems')).toBeVisible();
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     expect(screen.queryByText('Default Template')).not.toBeInTheDocument();
     await act(() => runtime.changeLanguage('zh-CN'));
     expect(screen.getByRole('navigation', { name: '面包屑' })).toBeVisible();
@@ -146,18 +143,15 @@ it('translates the settings navigation without a separate resources footer', asy
     navigation: { title: 'settings.title' },
   };
   const runtime = await setup(<AppLayout routes={[overview, settings]} />);
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
   const navigation = screen.getByRole('navigation', {
     name: 'Application navigation',
   });
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
   const link = within(navigation).getByRole('link', {
     name: 'System settings',
   });
   expect(link).toHaveAttribute('href', '/settings');
   expect(link.closest('[data-slot="sidebar-content"]')).not.toBeNull();
   expect(
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     screen.queryByRole('navigation', { name: 'Resources' }),
   ).not.toBeInTheDocument();
   fireEvent.click(link);

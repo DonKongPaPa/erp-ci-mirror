@@ -371,7 +371,7 @@ it('redirects legacy URLs and uses a searchable multi-select with one Save for b
   await user.click(screen.getByRole('option', { name: 'Sales team' }));
   await user.keyboard('{Escape}');
   expect(
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     screen.getByRole('combobox', { name: 'Application', exact: true }),
   ).toHaveTextContent('Sales team');
   await user.click(screen.getByRole('button', { name: 'Save', exact: true }));
@@ -523,7 +523,7 @@ it('blocks closing and duplicate submission until the unified save completes', a
     screen.getByRole('button', { name: 'Cancel', exact: true }),
   ).toBeDisabled();
   await user.click(screen.getByRole('button', { name: 'Close', exact: true }));
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   expect(screen.getAllByRole('dialog')).toHaveLength(1);
   expect(view.toasts()).toHaveLength(0);
   current = { ...original, name: 'Alice changed' };
@@ -595,7 +595,7 @@ it('focuses and describes the required role dropdown when creating without a rol
     'long-enough-password',
   );
   await user.click(screen.getByRole('button', { name: 'Create', exact: true }));
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   const roles = screen.getByRole('combobox', {
     name: 'Application',
     exact: true,
@@ -631,7 +631,7 @@ it('uses Member only as a creation default and respects explicitly cleared selec
   );
   await user.keyboard('{Escape}');
   expect(roles).not.toHaveTextContent('Member');
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   expect(screen.getByText(enUS.settings.noRoleAccess)).toBeVisible();
   await user.type(screen.getByRole('textbox', { name: 'Name *' }), 'Roleless');
   await user.type(

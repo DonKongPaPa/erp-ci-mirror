@@ -109,31 +109,31 @@ describe('application-owned permission workspace', () => {
     );
     await user.type(screen.getByRole('textbox'), 'reserve stock');
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('checkbox', { name: 'Approve order' }),
     ).toBeChecked();
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.queryByRole('checkbox', { name: 'Withdraw order' }),
     ).not.toBeInTheDocument();
     expect(change).not.toHaveBeenCalled();
     await user.clear(screen.getByRole('textbox'));
     await user.type(screen.getByRole('textbox'), 'Order processing');
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('checkbox', { name: 'Withdraw order' }),
     ).toBeVisible();
     await user.clear(screen.getByRole('textbox'));
     await user.type(screen.getByRole('textbox'), 'missing');
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('status')).toHaveTextContent(
       'No matching permissions',
     );
     await user.click(screen.getByRole('button', { name: 'Clear filters' }));
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是动作前就存在的节点（点击受体、静态结构或已显示的内容）
     expect(screen.getByRole('textbox')).toHaveFocus();
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('checkbox', { name: 'Withdraw order' }),
     ).not.toBeChecked();
     expect(change).not.toHaveBeenCalled();
@@ -155,30 +155,30 @@ describe('application-owned permission workspace', () => {
     await user.click(category);
     expect(category).toHaveAttribute('aria-selected', 'true');
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('checkbox', { name: 'Configure numbering' }),
     ).toBeVisible();
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.queryByRole('checkbox', { name: 'Approve order' }),
     ).not.toBeInTheDocument();
     await user.type(screen.getByRole('textbox'), 'reserve stock');
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('checkbox', { name: 'Approve order' }),
     ).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Clear filters' }));
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('checkbox', { name: 'Configure numbering' }),
     ).toBeVisible();
     expect(category).toHaveAttribute('aria-selected', 'true');
     await user.type(screen.getByRole('textbox'), 'missing');
     await user.click(screen.getByRole('tab', { name: 'Business actions' }));
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 断言的是受控输入值或 rerender 传入的同步值
     expect(screen.getByRole('textbox')).toHaveValue('');
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('checkbox', { name: 'Approve order' }),
     ).toBeVisible();
     expect(change).not.toHaveBeenCalled();
@@ -209,7 +209,7 @@ describe('application-owned permission workspace', () => {
     fireEvent.change(input, { target: { value: '审批' } });
     fireEvent.compositionEnd(input, { data: '审批' });
     expect(input).toHaveValue('审批');
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('checkbox', { name: '审批借用' })).toBeVisible();
     await user.clear(input);
     await user.type(input, '借用');
@@ -242,9 +242,9 @@ describe('application-owned permission workspace', () => {
     render(<Draft />);
     await user.click(screen.getByRole('tab', { name: 'Granted' }));
     await user.click(screen.getByRole('checkbox', { name: 'Approve' }));
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是动作前就存在的节点（点击受体、静态结构或已显示的内容）
     expect(screen.getByRole('textbox')).toHaveFocus();
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('status')).toHaveTextContent(
       'No matching permissions',
     );
@@ -270,7 +270,7 @@ describe('application-owned permission workspace', () => {
     expect(change).not.toHaveBeenCalled();
     await userEvent.type(screen.getByRole('textbox'), 'numbering');
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('checkbox', { name: 'Configure numbering' }),
     ).toBeVisible();
     view.unmount();
@@ -300,11 +300,11 @@ describe('application-owned permission workspace', () => {
       />,
     );
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('checkbox', { name: 'Fixed action' }),
     ).toHaveAttribute('aria-disabled', 'true');
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByText('This permission is managed by the application.'),
     ).toBeVisible();
   });
@@ -333,7 +333,7 @@ describe('application-owned permission workspace', () => {
     await user.keyboard(' ');
     expect(change).toHaveBeenCalledTimes(2);
     expect(change).toHaveBeenLastCalledWith('withdraw', true);
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是动作前就存在的节点（点击受体、静态结构或已显示的内容）
     screen.getAllByRole('tab', { name: 'Granted' })[0]!.focus();
     await user.keyboard(' ');
     expect(change).toHaveBeenCalledTimes(2);
@@ -342,7 +342,7 @@ describe('application-owned permission workspace', () => {
     await user.click(
       screen.getAllByRole('tab', { name: 'Application configuration' })[0]!,
     );
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是动作前就存在的节点（点击受体、静态结构或已显示的内容）
     screen.getByRole('checkbox', { name: 'Configure numbering' }).focus();
     await user.keyboard(' ');
     expect(change).toHaveBeenLastCalledWith('configure', true);
@@ -628,18 +628,18 @@ describe('application-owned page navigation', () => {
     collapse.focus();
     await user.keyboard('{Enter}');
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.queryByRole('checkbox', { name: 'Books' }),
     ).not.toBeInTheDocument();
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('checkbox', { name: 'Catalog' })).toBeChecked();
     expect(change).not.toHaveBeenCalled();
     await user.keyboard(' ');
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('checkbox', { name: 'Books' })).toBeChecked();
     await user.click(screen.getByRole('checkbox', { name: 'Catalog' }));
     expect(change).toHaveBeenCalledExactlyOnceWith('catalog', false);
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('checkbox', { name: 'Books' })).toBeChecked();
     expect(submit).not.toHaveBeenCalled();
   });
@@ -656,39 +656,39 @@ describe('application-owned page navigation', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Collapse Catalog' }));
     await user.type(screen.getByRole('textbox'), 'Library');
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('checkbox', { name: 'Books' })).toBeVisible();
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('checkbox', { name: 'Review loans' }),
     ).toBeVisible();
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.queryByRole('checkbox', { name: 'Independent page' }),
     ).not.toBeInTheDocument();
     await user.clear(screen.getByRole('textbox'));
     await user.type(screen.getByRole('textbox'), 'Review loans');
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByText('Library')).toBeVisible();
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByText('Approvals')).toBeVisible();
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.queryByRole('checkbox', { name: 'Books' }),
     ).not.toBeInTheDocument();
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.queryByRole('checkbox', { name: 'Catalog' }),
     ).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Clear filters' }));
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是动作前就存在的节点（点击受体、静态结构或已显示的内容）
     expect(screen.getByRole('textbox')).toHaveFocus();
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.queryByRole('checkbox', { name: 'Review loans' }),
     ).not.toBeInTheDocument();
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('button', { name: 'Expand Catalog' }),
     ).toHaveAttribute('aria-expanded', 'false');
     expect(change).not.toHaveBeenCalled();
@@ -718,16 +718,16 @@ describe('application-owned page navigation', () => {
     }
     render(<ControlledTree />);
     await user.click(screen.getByRole('tab', { name: 'Granted' }));
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByText('Library')).toBeVisible();
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByText('Catalog')).toBeVisible();
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.queryByText('Approvals')).not.toBeInTheDocument();
     await user.click(screen.getByRole('checkbox', { name: 'Books' }));
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是动作前就存在的节点（点击受体、静态结构或已显示的内容）
     expect(screen.getByRole('textbox')).toHaveFocus();
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('status')).toHaveTextContent(
       'No matching permissions',
     );
@@ -765,12 +765,12 @@ describe('application-owned page navigation', () => {
     await user.click(screen.getByRole('checkbox', { name: 'Books' }));
     expect(change).not.toHaveBeenCalled();
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('checkbox', { name: 'Books' }),
     ).toHaveAccessibleDescription('These permissions are read-only.');
     await user.click(screen.getByRole('button', { name: 'Collapse Library' }));
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('button', { name: 'Expand Library' }),
     ).toBeEnabled();
     expect(change).not.toHaveBeenCalled();
@@ -810,14 +810,14 @@ describe('compact permission controls', () => {
     const collapse = screen.getByRole('button', { name: 'Collapse all' });
     expect(collapse).toBeDisabled();
     await user.click(collapse);
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('checkbox', { name: 'Borrowing' })).toBeVisible();
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('checkbox', { name: 'Borrowing' })).toBeChecked();
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('checkbox', { name: 'Catalog' })).not.toBeChecked();
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.queryByRole('button', { name: 'Expand all' }),
     ).not.toBeInTheDocument();
     expect(change).not.toHaveBeenCalled();
@@ -838,34 +838,34 @@ describe('compact permission controls', () => {
     for (const action of ['Collapse all', 'Expand all']) {
       await user.click(screen.getByRole('button', { name: action }));
       for (const name of ['Borrowing', 'Catalog']) {
-        // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+        // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
         const checkbox = screen.getByRole('checkbox', { name });
         expect(checkbox).toBeVisible();
         checkbox.focus();
         expect(checkbox).toHaveFocus();
       }
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       expect(screen.getByRole('checkbox', { name: 'Borrowing' })).toBeChecked();
       expect(
-        // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+        // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
         screen.getByRole('checkbox', { name: 'Catalog' }),
       ).not.toBeChecked();
       if (action === 'Collapse all') {
         expect(
-          // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+          // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
           screen.getByRole('button', { name: 'Expand Orders' }),
         ).toBeVisible();
         expect(
-          // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+          // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
           screen.queryByRole('checkbox', { name: 'Approve order' }),
         ).not.toBeInTheDocument();
       } else {
         expect(
-          // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+          // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
           screen.getByRole('checkbox', { name: 'Approve order' }),
         ).toBeChecked();
         expect(
-          // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+          // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
           screen.getByRole('checkbox', { name: 'Withdraw order' }),
         ).not.toBeChecked();
       }
@@ -892,16 +892,16 @@ describe('compact permission controls', () => {
       />,
     );
     await user.click(screen.getByRole('button', { name: 'Collapse all' }));
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     rerender(<PermissionEditor {...props} sections={[leaves]} />);
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('checkbox', { name: 'Borrowing' })).toBeVisible();
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('checkbox', { name: 'Borrowing' })).toBeChecked();
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('checkbox', { name: 'Catalog' })).not.toBeChecked();
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('button', { name: 'Collapse all' })).toBeDisabled();
     expect(change).not.toHaveBeenCalled();
   });
@@ -918,27 +918,27 @@ describe('compact permission controls', () => {
     );
     await user.click(screen.getByRole('tab', { name: 'Ungranted' }));
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('checkbox', { name: 'Review loans' }),
     ).not.toBeChecked();
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('checkbox', { name: 'Configure numbering' }),
     ).not.toBeChecked();
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.queryByRole('checkbox', { name: 'Books' }),
     ).not.toBeInTheDocument();
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByText('2 of 4 enabled')).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Clear filters' }));
     await user.type(screen.getByRole('textbox'), '/library/books');
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('checkbox', { name: 'Books' })).toBeChecked();
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByText('/library/books')).toBeVisible();
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.queryByRole('checkbox', { name: 'Review loans' }),
     ).not.toBeInTheDocument();
     expect(change).not.toHaveBeenCalled();
@@ -955,22 +955,22 @@ describe('compact permission controls', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Collapse all' }));
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.queryByRole('checkbox', { name: 'Approve order' }),
     ).not.toBeInTheDocument();
     await user.type(screen.getByRole('textbox'), 'reserve');
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('checkbox', { name: 'Approve order' }),
     ).toBeChecked();
     await user.click(screen.getByRole('button', { name: 'Clear filters' }));
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.queryByRole('checkbox', { name: 'Approve order' }),
     ).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Expand all' }));
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('checkbox', { name: 'Approve order' }),
     ).toBeChecked();
     expect(change).not.toHaveBeenCalled();

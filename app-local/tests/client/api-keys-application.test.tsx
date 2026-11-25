@@ -173,7 +173,7 @@ it('creates a service account and issues its key with an idempotency key', async
     'Production key',
   );
   // 应用密钥必须过期：默认 90 天，这里改成 30。
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   const days = within(issueDialog).getByLabelText(enUS.apiKeys.common.validity);
   await user.clear(days);
   await user.type(days, '30');

@@ -26,12 +26,15 @@ interface ImportResult extends ImportSummary {
  * 成功的输出逐条列出新建与更新的条目，作为审计线索。
  *
  * 写到一半失败时停下并列出已写入与未写入的条目。不为了整批回滚绕开服务层
- * 直接写表：重跑是幂等的，这是设计接受的代价。
+ * 直接写表：重跑是幂等的，这是设计接受的代价。**例外是两条默认访问规则互相换资源**：
+ * 成环没有安全的写入顺序（把文件拆成两份也不行 —— 每份的目标仍被库里另一条旧规则占着，
+ * 计划阶段就报 IMPORT_VALIDATION_FAILED），成链要按链尾到链头写；重跑都不收敛。
+ * 可用的做法是先删掉或挪走其中一条旧规则，或先导一份把它挪到空资源的中间文件。
  */
 export default class AuthzImport extends AppCommand {
   static summary = 'Import an authorization export into this environment.';
   static description =
-    'Validates the whole file before writing any authorization data: every username and service-account name is looked up, every grant is checked against the registered resources, rule selections and default-access conflicts are checked, and the protected markers must match what this application declares. Any problem lists every issue and exits without writing authorization data — the application start itself may still create or migrate the database and run seeds. The import trusts the file: it can grant any registered resource and action, including root and user reads, to any account the file names. Every created and updated entry is listed at the end. A write that fails halfway stops and lists what was written and what was not. It does not roll the batch back by writing tables directly — rerunning the same file is the recovery path, and it is safe because the import is idempotent.';
+    'Validates the whole file before writing any authorization data: every username and service-account name is looked up, every grant is checked against the registered resources, rule selections and default-access conflicts are checked, and the protected markers must match what this application declares. Any problem lists every issue and exits without writing authorization data — the application start itself may still create or migrate the database and run seeds. The import trusts the file: it can grant any registered resource and action, including root and user reads, to any account the file names. Every created and updated entry is listed at the end. A write that fails halfway stops and lists what was written and what was not. It does not roll the batch back by writing tables directly — rerunning the same file is the recovery path, and it is safe because the import is idempotent. One exception: two default-access rules that exchange resources cannot both be written in one import. A cycle has no safe order at all (splitting the file does not help — each rule target is still held by the old rule, so validation refuses it before writing), and a chain works only from its tail. Delete or move one of the old rules first, or import an intermediate file that moves it to a free resource, and then import this file.';
   static examples = [
     '<%= config.bin %> <%= command.id %> --file ./authorization.json',
     '<%= config.bin %> <%= command.id %> --file ./authorization.json --json',

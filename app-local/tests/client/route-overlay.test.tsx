@@ -165,7 +165,7 @@ describe('route overlays', () => {
     const router = setup(check);
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
     await waitFor(() => expect(check).toHaveBeenCalledTimes(1));
     await act(async () => {
@@ -292,7 +292,7 @@ describe('route overlay interactions', () => {
     const name = await screen.findByRole('textbox', { name: 'Name' });
     await user.clear(name);
     await user.type(name, 'Changed');
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     const link = screen.getByRole('link', { name: 'Open details' });
     await user.click(link);
     const child = await screen.findByRole('dialog', { name: 'Details' });
@@ -504,7 +504,7 @@ describe('unsaved changes in a route overlay', () => {
     const history = setupGuarded(guard);
     const name = await screen.findByRole('textbox', { name: 'Name' });
     await userEvent.type(name, ' draft');
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     const dialog = screen.getByRole('dialog', { name: 'Edit' });
 
     await userEvent.click(
@@ -795,7 +795,7 @@ describe('detail drawer, edit dialog and a confirmation', () => {
     }
 
     // Enter on "Discard" leaves the dialog for the drawer below, still without saving.
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- await 的封装结束时 DOM 已同步落地，查的是它的同步产出
     within(prompt).getByRole('button', { name: 'Discard' }).focus();
     await user.keyboard('{Enter}');
     await waitFor(() =>
@@ -889,7 +889,7 @@ describe('the dirty prop of a route overlay', () => {
       await screen.findByRole('textbox', { name: 'Name' }),
       ' draft',
     );
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     const dialog = screen.getByRole('dialog', { name: 'Edit' });
 
     await userEvent.click(
@@ -905,9 +905,9 @@ describe('the dirty prop of a route overlay', () => {
     act(() => history.back!());
     await keepEditing();
 
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- await 的封装结束时 DOM 已同步落地，查的是它的同步产出
     expect(screen.getByRole('dialog', { name: 'Edit' })).toBeVisible();
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- await 的封装结束时 DOM 已同步落地，查的是它的同步产出
     expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue(
       'Original draft',
     );
@@ -1038,7 +1038,7 @@ describe('the unsaved-changes question cannot be switched off by a draft', () =>
     await userEvent.click(
       within(prompt).getByRole('button', { name: 'Keep editing' }),
     );
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 断言的是受控输入值或 rerender 传入的同步值
     expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue(
       'Original draft',
     );
@@ -1051,7 +1051,7 @@ describe('the unsaved-changes question cannot be switched off by a draft', () =>
       await screen.findByRole('textbox', { name: 'Name' }),
       ' invalid',
     );
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
     for (const leave of [
       () => userEvent.click(screen.getByRole('button', { name: 'Cancel' })),
@@ -1229,7 +1229,7 @@ describe('the unsaved-changes question without a dirty prop', () => {
       ' draft',
     );
     expect(sessionStorage.getItem(draftKey)).toBe('Original draft');
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     const dialog = screen.getByRole('dialog', { name: 'Edit' });
     await userEvent.click(
       within(dialog).getByRole('button', { name: 'Cancel' }),
@@ -1249,7 +1249,7 @@ describe('the unsaved-changes question without a dirty prop', () => {
     await answer('Keep editing');
     act(() => history.back!());
     await answer('Keep editing');
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- await 的封装结束时 DOM 已同步落地，查的是它的同步产出
     expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue(
       'Original draft',
     );
@@ -1265,11 +1265,11 @@ describe('the unsaved-changes question without a dirty prop', () => {
   it('still asks while validation disables the save button', async () => {
     setup('/orders/edit?page=2');
     await userEvent.clear(await screen.findByRole('textbox', { name: 'Name' }));
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     await answer('Keep editing');
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- await 的封装结束时 DOM 已同步落地，查的是它的同步产出
     expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('');
   });
 
@@ -1455,7 +1455,7 @@ describe('unsaved values of a FeedbackForm, compared with the saved ones', () =>
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     await answer('Keep editing');
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- await 的封装结束时 DOM 已同步落地，查的是它的同步产出
       screen.getByRole('status', { name: 'Current priority' }),
     ).toHaveTextContent('high');
     act(() => history.back!());
@@ -1690,7 +1690,7 @@ describe('the unsaved-changes question for a plain form', () => {
     await keep();
     act(() => history.back!());
     await keep();
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- await 的封装结束时 DOM 已同步落地，查的是它的同步产出
     expect(screen.getByRole('textbox', { name: 'Equipment' })).toHaveValue(
       'Pump 2',
     );
@@ -1703,7 +1703,7 @@ describe('the unsaved-changes question for a plain form', () => {
       await screen.findByRole('combobox', { name: 'Priority' }),
     );
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('combobox', { name: 'Priority' }),
     ).toHaveTextContent('High');
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -1718,7 +1718,7 @@ describe('the unsaved-changes question for a plain form', () => {
     // The server refused it without marking any field, and the dialog stayed.
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(field).not.toHaveAttribute('aria-invalid');
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     const dialog = screen.getByRole('dialog', { name: 'Edit' });
     const backdrop = dialog
       .closest('[data-base-ui-portal]')
@@ -1884,7 +1884,7 @@ describe('the unsaved-changes question on a covering child page', () => {
     const reload = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(reload);
     expect(reload.defaultPrevented).toBe(true);
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- await 的封装结束时 DOM 已同步落地，查的是它的同步产出
     expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('Pump 2');
     await waitFor(() => expect(history.path).toBe('/orders/new?page=2'));
   });

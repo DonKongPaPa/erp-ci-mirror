@@ -133,7 +133,6 @@ describe('LanguageSwitcher', () => {
     const { app, runtime } = await createRuntime(['en-US', 'zh-CN']);
 
     renderMenu(app, runtime);
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     screen.getByRole('button', { name: 'Account' }).focus();
     await userEvent.keyboard('{ArrowDown}');
 
@@ -156,7 +155,6 @@ describe('LanguageSwitcher', () => {
     const user = userEvent.setup();
 
     renderMenu(app, runtime);
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     screen.getByRole('button', { name: 'Account' }).focus();
     await userEvent.keyboard('{ArrowDown}');
 
@@ -193,7 +191,6 @@ describe('LanguageSwitcher', () => {
     );
 
     renderMenu(app, runtime);
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     screen.getByRole('button', { name: 'Account' }).focus();
     await user.keyboard('{ArrowDown}');
     await user.click(
@@ -233,7 +230,6 @@ describe('LanguageSwitcher', () => {
     fetchMock.mockImplementation(() => Promise.reject(new Error('offline')));
 
     renderMenu(app, runtime);
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
     screen.getByRole('button', { name: 'Account' }).focus();
     await user.keyboard('{ArrowDown}');
     await user.click(

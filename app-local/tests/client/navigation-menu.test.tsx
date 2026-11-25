@@ -294,7 +294,7 @@ describe('entry counts', () => {
         .parentElement?.querySelector('[data-slot="navigation-badge-dot"]'),
     ).toBeNull();
     await user.hover(inbox);
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('tooltip')).toHaveTextContent('inbox · 5');
   });
 });
@@ -312,7 +312,7 @@ describe('collapsed navigation', () => {
     show({ route: page('Home'), children: [] });
     const link = screen.getByRole('link', { name: 'Home' });
     await user.hover(link);
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(screen.getByRole('tooltip')).toHaveTextContent('Home');
     expect(link).not.toHaveAttribute('title');
     await user.unhover(link);
@@ -340,9 +340,9 @@ describe('collapsed navigation', () => {
       // The group holding the selected page is highlighted.
       expect(trigger).toHaveAttribute('data-active');
       fireEvent.mouseEnter(trigger);
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       const popup = screen.getByRole('dialog', { name: 'Group' });
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       const link = within(popup).getByRole('link', { name: 'child' });
       expect(link).toHaveAttribute('aria-current', 'page');
       expect(link).toHaveAttribute('href', '/child');
@@ -368,7 +368,7 @@ describe('collapsed navigation', () => {
     await user.tab();
     expect(await screen.findByRole('dialog', { name: 'Group' })).toBeVisible();
     await user.tab();
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是动作前就存在的节点（点击受体、静态结构或已显示的内容）
     expect(screen.getByRole('link', { name: 'child' })).toHaveFocus();
     await user.keyboard('{Escape}');
     await waitFor(() =>
@@ -390,12 +390,12 @@ describe('collapsed navigation', () => {
     const parent = screen.getByRole('link', { name: 'Parent' });
     expect(parent).toHaveAttribute('href', '/Parent');
     fireEvent.mouseEnter(parent);
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     const popup = screen.getByRole('dialog', { name: 'Parent' });
     fireEvent.mouseLeave(parent, { relatedTarget: popup });
     await user.hover(popup);
     await user.click(within(popup).getByText('Nested'));
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     expect(within(popup).getByRole('link', { name: 'sibling' })).toBeVisible();
     await user.click(parent);
     await waitFor(() =>
@@ -432,10 +432,10 @@ describe('collapsed navigation', () => {
           screen.getByRole('button', { name: 'Open navigation' }),
         );
       await user.hover(screen.getByRole('link', { name: 'Home' }));
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
       expect(
-        // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+        // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
         screen.queryByRole('dialog', { name: 'Home' }),
       ).not.toBeInTheDocument();
     },
@@ -456,7 +456,7 @@ describe('sidebar shell', () => {
       'collapsed',
     );
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('button', { name: 'Expand navigation' }),
     ).toHaveAttribute('aria-pressed', 'true');
   });
@@ -480,7 +480,7 @@ describe('sidebar shell', () => {
     expect(onKeyDown.mock.calls.filter(([key]) => key === 'b')).toHaveLength(2);
     expect(localStorage.getItem(preferenceKey)).toBeNull();
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('button', { name: 'Collapse navigation' }),
     ).toBeInTheDocument();
   });

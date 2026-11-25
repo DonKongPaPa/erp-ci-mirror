@@ -37,7 +37,7 @@ describe('account menu sign out', () => {
     ).toBeNull();
     expect(view.toasts()).toHaveLength(0);
     await openAccountMenu();
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- await 的封装结束时 DOM 已同步落地，查的是它的同步产出
     expect(screen.queryByText(view.session.user.email)).not.toBeInTheDocument();
   });
   it('reports a rejected origin without pretending the session ended', async () => {

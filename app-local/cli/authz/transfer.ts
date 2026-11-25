@@ -564,7 +564,8 @@ interface GrantProblemOptions {
   /**
    * 规则里的 `resource.id` 可以是 `*`，表示「这一类里的任意一项」（框架的
    * `RuleService.constraints` 按 `rule.resource.id !== '*'` 放行每一条）。
-   * 这种资源没法按具体 id 查，只能核对类型本身声明的动作。
+   * 这种资源没法按具体 id 查，只能核对类型声明的动作；复合资源的每一项相当于
+   * 一个具名资源，所以逐项核对名称与动作。
    */
   allowWildcard?: boolean;
 }
@@ -578,6 +579,20 @@ function grantProblem(
 ): string | undefined {
   const { policy, allowWildcard = false } = options;
   if (resource.type === 'composite') {
+    if (allowWildcard && resource.id === '*') {
+      // 复合资源的通配也一样：规则约束按「类型相同、id 是 `*` 或相等」匹配，
+      // 所以只要某一项复合资源声明了这个动作，规则就可能在某个复合资源上生效。
+      // 按名字查不到（`*` 不是已定义的名字），改为逐项核对名称与动作。
+      const supported = authz.compositeResources
+        .list()
+        .some((definition) =>
+          definition.actions.some((entry) => entry.name === action),
+        );
+      if (!supported) {
+        return `${where}: action "${action}" is not registered for composite resources.`;
+      }
+      return undefined;
+    }
     const reason = authz.compositeResources.validateGrant({
       resource,
       action,

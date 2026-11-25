@@ -103,11 +103,11 @@ describe('app client theme', () => {
       );
       expect(document.documentElement).toHaveAttribute('data-theme', preset);
       expect(
-        // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+        // eslint-disable-next-line app-local/no-sync-query-after-action -- await 的封装结束时 DOM 已同步落地，查的是它的同步产出
         screen.getByRole('menuitemradio', { name: modeLabel }),
       ).toHaveAttribute('aria-checked', 'true');
       expect(
-        // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+        // eslint-disable-next-line app-local/no-sync-query-after-action -- await 的封装结束时 DOM 已同步落地，查的是它的同步产出
         screen.getByRole('menuitemradio', { name: presetLabel }),
       ).toHaveAttribute('aria-checked', 'true');
     },
@@ -154,12 +154,12 @@ describe('app client theme', () => {
     act(() => compact.focus());
     await userEvent.keyboard('{ArrowDown}{Enter}');
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
       screen.getByRole('menuitemradio', { name: 'Default' }),
     ).toHaveAttribute('aria-checked', 'true');
     expect(localStorage.getItem('nocobase:crm:theme:preset')).toBe('default');
     await userEvent.keyboard('{Escape}');
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是动作前就存在的节点（点击受体、静态结构或已显示的内容）
     expect(screen.getByRole('menuitem', { name: 'Theme' })).toHaveFocus();
   });
 
@@ -173,7 +173,7 @@ describe('app client theme', () => {
     );
     await openTheme();
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- await 的封装结束时 DOM 已同步落地，查的是它的同步产出
       screen.queryByRole('menuitemradio', { name: 'Ant-design' }),
     ).not.toBeInTheDocument();
     expect(
@@ -191,7 +191,7 @@ describe('app client theme', () => {
     );
     await openTheme();
     expect(
-      // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+      // eslint-disable-next-line app-local/no-sync-query-after-action -- await 的封装结束时 DOM 已同步落地，查的是它的同步产出
       screen.queryByRole('menuitemradio', { name: 'Ocean' }),
     ).not.toBeInTheDocument();
     expect(

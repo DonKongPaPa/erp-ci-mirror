@@ -80,7 +80,7 @@ it('validates a filter, prevents Enter submitting the role and emits a native ty
     screen.getByRole('textbox', { name: 'Value 2' }),
     'not a number',
   );
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
   await user.clear(screen.getByRole('textbox', { name: 'Value 2' }));
   await user.type(screen.getByRole('textbox', { name: 'Value 2' }), '500000');
@@ -151,9 +151,9 @@ it('restores existing values, requires nonempty conditions and preserves typed b
     'Finance',
   );
   await user.click(screen.getByRole('button', { name: 'Remove' }));
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是动作前就存在的节点（点击受体、静态结构或已显示的内容）
   expect(screen.getByRole('button', { name: 'Add condition' })).toHaveFocus();
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
   await user.click(screen.getByRole('button', { name: 'Add condition' }));
   await user.click(screen.getByRole('combobox', { name: 'Value type 1' }));
@@ -201,6 +201,6 @@ it('keeps the condition limit explained and restores focus when removing a row a
   expect(screen.getByRole('button', { name: 'Add condition' })).toBeDisabled();
   await waitFor(() => expect(screen.getByText(labels.limit)).toBeVisible());
   await userEvent.click(screen.getAllByRole('button', { name: 'Remove' })[0]!);
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是动作前就存在的节点（点击受体、静态结构或已显示的内容）
   expect(screen.getByRole('button', { name: 'Add condition' })).toHaveFocus();
 });

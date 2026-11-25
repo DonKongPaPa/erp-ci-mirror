@@ -163,10 +163,10 @@ it('reads every page of tables, searches the whole list and shows key and refere
     screen.getByRole('searchbox', { name: 'Search by table name or title' }),
     'cust',
   );
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   expect(screen.getByText('1 of 2 tables matches')).toBeInTheDocument();
   expect(
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     within(tableList()).queryByRole('link', { name: /orders/ }),
   ).not.toBeInTheDocument();
   expect(search().get('q')).toBe('cust');
@@ -202,7 +202,7 @@ it('reads every page of tables, searches the whole list and shows key and refere
     screen.getByRole('searchbox', { name: /Search by field/ }),
     'missing',
   );
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   expect(screen.getByText('No results')).toBeInTheDocument();
   expect(search().get('fieldQ')).toBe('missing');
 });
@@ -265,10 +265,10 @@ it('never shows a late response for a table that is no longer selected', async (
     ).findByRole('link', { name: 'orders' }),
   );
   // While the fields load, the panel already names the table and holds its place.
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   expect(screen.getByRole('heading', { name: 'orders' })).toBeInTheDocument();
   expect(
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     screen.getByText('Loading').closest('[aria-busy="true"]'),
   ).not.toBeNull();
   await user.click(
@@ -374,7 +374,7 @@ it('explains connections, tables and searches that have nothing to show', async 
     screen.getByRole('searchbox', { name: /Search by table/ }),
     'zzz',
   );
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   expect(screen.getByText('No results')).toBeInTheDocument();
 
   await user.click(screen.getByRole('combobox', { name: 'Connection' }));
@@ -450,15 +450,15 @@ it('moves through the table list with the keyboard', async () => {
   await user.click(screen.getByRole('searchbox', { name: /Search by table/ }));
   await user.keyboard('{ArrowDown}');
   expect(
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     within(tableList()).getByRole('link', { name: 'alpha' }),
   ).toHaveFocus();
   await user.keyboard('{ArrowDown}');
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是动作前就存在的节点（点击受体、静态结构或已显示的内容）
   expect(within(tableList()).getByRole('link', { name: 'beta' })).toHaveFocus();
   await user.keyboard('{End}');
   expect(
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     within(tableList()).getByRole('link', { name: 'gamma' }),
   ).toHaveFocus();
   await user.keyboard('{ArrowUp}{Enter}');
@@ -468,7 +468,7 @@ it('moves through the table list with the keyboard', async () => {
   expect(tabStops()).toEqual(['beta']);
   await user.click(screen.getByRole('searchbox', { name: /Search by table/ }));
   await user.tab();
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是动作前就存在的节点（点击受体、静态结构或已显示的内容）
   expect(within(tableList()).getByRole('link', { name: 'beta' })).toHaveFocus();
   // The next Tab leaves the list rather than visiting the other tables.
   await user.tab();
@@ -523,12 +523,12 @@ it('marks relations, keeps only notes about what is shown and names the open tab
   ).toBeInTheDocument();
   expect(screen.getByText(/^1 inspection note/)).toBeInTheDocument();
   await user.click(screen.getByText(/^1 inspection note/));
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   expect(screen.getByText('Foreign keys are partial.')).toBeInTheDocument();
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   expect(screen.queryByText('Checks are partial.')).not.toBeInTheDocument();
   expect(
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     screen.queryByText('Comments are unsupported.'),
   ).not.toBeInTheDocument();
 
@@ -587,7 +587,7 @@ it('shows one level at a time on a narrow screen and returns to the table it cam
   await user.click(screen.getByRole('link', { name: 'All tables' }));
   expect(search().get('table')).toBeNull();
   expect(
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     within(tableList()).getByRole('link', { name: 'orders' }),
   ).toHaveFocus();
 });
@@ -664,9 +664,9 @@ it('keeps inspection notes collapsed until requested without hiding the fields',
   await user.click(trigger);
   expect(trigger).toHaveAttribute('aria-expanded', 'true');
   expect(
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
     screen.getByText('Native defaults could not be inspected.'),
   ).toBeVisible();
-  // eslint-disable-next-line app-local/no-sync-query-after-action -- 同步可得的元素，动作已 await；异步元素请用 findBy/waitFor（R-047 行内豁免）
+  // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
   expect(screen.getByRole('table', { name: 'Fields of orders' })).toBeVisible();
 });

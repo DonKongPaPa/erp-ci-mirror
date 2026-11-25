@@ -30,6 +30,15 @@ test('R-013: the authz commands are registered under their own topic', () => {
   expect(plugin!.commands.import).toBe(AuthzImport);
 });
 
+test('R-013: the import help explains how to unblock rules that exchange resources', () => {
+  // 已知限制：两条默认访问规则互相换资源时写入会撞上旧占用。成环没有安全的顺序，
+  // 把文件拆成两份也不行（每份的目标仍被库里另一条占着，计划阶段就拒）；成链要按链尾到链头写。
+  // 帮助文字是操作者唯一能提前看到这条限制的地方。
+  expect(AuthzImport.description).toContain(
+    'Delete or move one of the old rules first',
+  );
+});
+
 test('R-013: a file with an unknown format version is refused before the application starts', async () => {
   const directory = await temporaryDirectory();
   try {
@@ -180,6 +189,97 @@ test(
         id: '*',
       });
       expect(rule?.subjects).toEqual([{ type: 'user', id: targetUserId }]);
+    } finally {
+      await source.close();
+      await target.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'R-013: a rule covering every composite resource (id "*") survives export and import',
+  { timeout: TEST_TIMEOUT },
+  async () => {
+    const directory = await temporaryDirectory();
+    const source = await openEnvironment();
+    const target = await openEnvironment();
+    try {
+      // 服务层对规则资源不查复合的定义：`id: "*"` 在规则约束里命中任意复合资源。
+      // 动作要带真实的 `scopeKey`：运行时约束按复合授权的分支范围解析（`fqc.view` 的
+      // 分支是 fqcMessages / fqcScreenings / fqcTickets），没有 scopeKey 的规则一个分支都命中不了。
+      await authorization(source).sharingRules.create({
+        key: 'share-any-composite',
+        resource: { type: 'composite', id: '*' },
+        actions: [
+          {
+            action: 'view',
+            scopeKey: 'fqcTickets',
+            selection: { type: 'records', ids: ['ticket-1'] },
+          },
+        ],
+        subjects: [{ type: 'authenticated', id: '*' }],
+      });
+
+      const file = path.join(directory, 'authorization.json');
+      const exported = await runCommand(AuthzExport, source, 'authz:export', [
+        '--out',
+        file,
+        '--json',
+      ]);
+      expect(exported.error).toBeUndefined();
+      expect(exported.exitCode ?? 0).toBe(0);
+      const document = JSON.parse(await readFile(file, 'utf8'));
+      const exportedRule = document.rules.sharing.find(
+        (rule: { key: string }) => rule.key === 'share-any-composite',
+      );
+      expect(exportedRule).toBeDefined();
+      expect(exportedRule.resource).toEqual({
+        type: 'composite',
+        id: '*',
+      });
+      expect(exportedRule.actions[0].scopeKey).toBe('fqcTickets');
+
+      const imported = await runCommand(AuthzImport, target, 'authz:import', [
+        '--file',
+        file,
+        '--json',
+      ]);
+      expect(imported.error).toBeUndefined();
+      expect(imported.exitCode ?? 0).toBe(0);
+      const stored = await authorization(target).sharingRules.list();
+      const rule = stored.find((entry) => entry.key === 'share-any-composite');
+      expect(rule).toBeDefined();
+      // 设计写的是「规则资源可以是通配」，没有给复合资源开例外：导入不能把它判成未注册。
+      expect(rule?.resource).toEqual({ type: 'composite', id: '*' });
+      expect(rule?.subjects).toEqual([{ type: 'authenticated', id: '*' }]);
+      expect(rule?.actions[0]?.scopeKey).toBe('fqcTickets');
+
+      // 通配要真的覆盖「任意一项」：按运行时查询的形状解析约束 ——
+      // 资源是具体的复合资源、`scopeKey` 是它的一个分支范围，这条规则要命中。
+      const resolved = await authorization(target).constraints.resolve({
+        principal: { type: 'authenticated', id: '*' },
+        resource: { type: 'composite', id: 'fqc' },
+        action: 'view',
+        scopeKey: 'fqcTickets',
+      });
+      expect(
+        resolved.some(
+          (constraint) => constraint.source.id === 'share-any-composite',
+        ),
+      ).toBe(true);
+      // 换一个分支范围就不该命中：否则「按 scopeKey 绑定一张表」无从谈起。
+      const otherScope = await authorization(target).constraints.resolve({
+        principal: { type: 'authenticated', id: '*' },
+        resource: { type: 'composite', id: 'fqc' },
+        action: 'view',
+        scopeKey: 'fqcMessages',
+      });
+      expect(
+        otherScope.some(
+          (constraint) => constraint.source.id === 'share-any-composite',
+        ),
+      ).toBe(false);
     } finally {
       await source.close();
       await target.close();
