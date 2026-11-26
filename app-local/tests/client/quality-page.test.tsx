@@ -625,9 +625,21 @@ it('renders the drafting outcomes skeleton rows with the real labels so the line
 
   await act(async () => releaseStats());
 
-  const firstLabel = await within(card).findByText(
-    enUS.quality.drafting.total,
+  // 骨架行与数字行渲染的是同一组静态标签，`findByText` 会立刻命中骨架里的标签，
+  // 并不表示统计已经回来（远端慢，断言时骨架还在：expected 0 but got 14）。
+  // 先等到 14 行数字行真的换掉骨架行，再同步取第一行。
+  await waitFor(
+    () => {
+      expect(
+        card.querySelectorAll(
+          'div.flex.items-center.justify-between.text-sm:not([aria-hidden="true"])',
+        ),
+        '统计到达后要渲染 14 行数字行',
+      ).toHaveLength(14);
+    },
+    { timeout: 15_000 },
   );
+  const firstLabel = within(card).getByText(enUS.quality.drafting.total);
   const dataRow = firstLabel.closest('div') as HTMLElement;
   expect(
     dataRow.className,
