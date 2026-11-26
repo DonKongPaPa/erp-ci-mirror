@@ -29,11 +29,10 @@ const ALL_FQC_SCOPES = {
   fqcScreeningReviews: 'allRecords',
 } as const;
 
-/** 投递只写三张业务表：它的动作没有确认记录表的范围。 */
+/** R-003 S2：投递只写消息与初筛两张表，工单表的范围已收掉。 */
 const INTAKE_FQC_SCOPES = {
   fqcMessages: 'allRecords',
   fqcScreenings: 'allRecords',
-  fqcTickets: 'allRecords',
 } as const;
 
 /** 一个业务动作的授权；数据范围照 seed，全部填「全部」。 */

@@ -90,8 +90,6 @@ const VIEW_MESSAGE_READ_FIELDS = [
   'id',
   'channel',
   'externalId',
-  'senderName',
-  'senderContact',
   'content',
   'rawContentType',
   'receivedAt',
@@ -123,7 +121,7 @@ const VIEW_SCREENING_READ_FIELDS = [
   'reviewId',
 ].sort();
 
-/** R-003 S1：「查看」读工单表原来的十五列，新加的七列第二片定契约之前不放开。 */
+/** R-003 S2：工单表全列去掉两个停写列，逐列列出。 */
 const VIEW_TICKET_READ_FIELDS = [
   'id',
   'code',
@@ -133,17 +131,11 @@ const VIEW_TICKET_READ_FIELDS = [
   'screeningId',
   'category',
   'severity',
-  'ownerDepartment',
   'assigneeId',
   'state',
-  'dueAt',
   'closedAt',
   'createdAt',
   'updatedAt',
-].sort();
-
-/** R-003 S1：迁移 202611260003 新加的七列，经「查看」一列都读不到。 */
-const NEW_TICKET_FIELDS = [
   'departmentId',
   'createdBy',
   'resolution',
@@ -151,7 +143,49 @@ const NEW_TICKET_FIELDS = [
   'statusChangedAt',
   'lifecycleVersion',
   'lifecycleDefinition',
-];
+].sort();
+
+/** 停写两列：留在表里，谁也不写、不读。 */
+const STOPPED_TICKET_FIELDS = ['ownerDepartment', 'dueAt'];
+
+/** R-003 S2：「处理」建工单的列（数据模型里会写的列，不含停写两列）。 */
+const HANDLE_TICKET_CREATE_FIELDS = [
+  'id',
+  'code',
+  'title',
+  'description',
+  'sourceMessageId',
+  'screeningId',
+  'category',
+  'severity',
+  'departmentId',
+  'createdBy',
+  'assigneeId',
+  'state',
+  'closedAt',
+  'createdAt',
+  'updatedAt',
+  'statusChangedAt',
+  'lifecycleVersion',
+  'lifecycleDefinition',
+].sort();
+
+/** 改判只改类别与严重度。 */
+const HANDLE_TICKET_UPDATE_FIELDS = ['category', 'severity'].sort();
+
+/** 派单规则只读类别与责任部门；整体替换时写四列，改只写后三列。 */
+const ROUTING_READ_FIELDS = ['category', 'departmentId'].sort();
+const ROUTING_CREATE_FIELDS = [
+  'category',
+  'departmentId',
+  'updatedAt',
+  'updatedBy',
+].sort();
+const ROUTING_UPDATE_FIELDS = [
+  'departmentId',
+  'updatedAt',
+  'updatedBy',
+].sort();
 
 /** R-026：「提交反馈」读消息表的十九列、建十七列，建初筛表十五列。 */
 const SUBMIT_MESSAGE_READ_FIELDS = [
@@ -264,17 +298,30 @@ const readableFields = (
  */
 const expectView = (
   decision: FqcDecision,
-  options: { readonly readsConfirmations: boolean },
+  options: {
+    readonly readsConfirmations: boolean;
+    readonly readsRouting: boolean;
+    readonly readsMessages?: boolean;
+    readonly readsScreenings?: boolean;
+  },
 ) => {
   expect(decision.effect, '查看应当是「有条件放行」').toBe('conditional');
   const policies = databasePolicies(decision);
-  expect(Object.keys(policies).sort()).toEqual(
-    [...FQC_TABLES, REVIEW_TABLE].sort(),
-  );
-  for (const table of [...FQC_TABLES, REVIEW_TABLE]) {
-    expect(isAllowed(policies[table]?.read), `${table} 的查看没有读`).toBe(
-      table === REVIEW_TABLE ? options.readsConfirmations : true,
-    );
+  const VIEW_TABLES = [...FQC_TABLES, REVIEW_TABLE, 'fqcRoutingRules'];
+  // 未配范围的键仍在决策里，只是读被折成 false（框架回 NO_RECORD_ACCESS）。
+  expect(Object.keys(policies).sort()).toEqual(VIEW_TABLES.sort());
+  for (const table of VIEW_TABLES) {
+    const allowed =
+      table === REVIEW_TABLE
+        ? options.readsConfirmations
+        : table === 'fqcRoutingRules'
+          ? options.readsRouting
+          : table === 'fqcMessages'
+            ? (options.readsMessages ?? true)
+            : table === 'fqcScreenings'
+              ? (options.readsScreenings ?? true)
+              : true;
+    expect(isAllowed(policies[table]?.read), `${table} 的查看读`).toBe(allowed);
     expect(isAllowed(policies[table]?.create), `${table} 的查看带了新建`).toBe(
       false,
     );
@@ -285,39 +332,62 @@ const expectView = (
       false,
     );
   }
-  expect(
-    readableFields(policies.fqcMessages?.read),
-    '查看对消息表不是原来的十一列',
-  ).toEqual(VIEW_MESSAGE_READ_FIELDS);
-  expect(
-    readableFields(policies.fqcScreenings?.read),
-    '查看对初筛表不是原来的十九列',
-  ).toEqual(VIEW_SCREENING_READ_FIELDS);
+  if (isAllowed(policies.fqcMessages?.read)) {
+    expect(
+      readableFields(policies.fqcMessages?.read),
+      '查看对消息表不是收窄后的九列',
+    ).toEqual(VIEW_MESSAGE_READ_FIELDS);
+    for (const field of ['senderName', 'senderContact']) {
+      expect(
+        readableFields(policies.fqcMessages?.read) ?? [],
+        `查看不该读到消息表的 ${field}`,
+      ).not.toContain(field);
+    }
+  }
+  if (isAllowed(policies.fqcScreenings?.read)) {
+    expect(
+      readableFields(policies.fqcScreenings?.read),
+      '查看对初筛表不是原来的十九列',
+    ).toEqual(VIEW_SCREENING_READ_FIELDS);
+  }
   expect(
     readableFields(policies.fqcScreenings?.read) ?? [],
     '查看对初筛表的读里出现了 ownerId',
   ).not.toContain('ownerId');
-  // R-003 S1：七列经「查看」的任何读接口都拿不到。第二片定下契约后再放开要放开的那几列。
-  expect(
-    readableFields(policies.fqcTickets?.read),
-    '查看对工单表不是原来的十五列',
-  ).toEqual(VIEW_TICKET_READ_FIELDS);
-  for (const field of NEW_TICKET_FIELDS) {
+  // R-003 S2：最终契约——七列读得到，停写两列读不到。
+  if (isAllowed(policies.fqcTickets?.read)) {
+    expect(
+      readableFields(policies.fqcTickets?.read),
+      '查看对工单表不是最终列清单',
+    ).toEqual(VIEW_TICKET_READ_FIELDS);
+  }
+  for (const field of STOPPED_TICKET_FIELDS) {
     expect(
       readableFields(policies.fqcTickets?.read) ?? [],
-      `查看不该读到 R-003 新加的 ${field}`,
+      `查看读到了停写列 ${field}`,
     ).not.toContain(field);
+  }
+  if (options.readsRouting) {
+    expect(
+      readableFields(policies.fqcRoutingRules?.read),
+      '查看对派单规则只读类别与责任部门',
+    ).toEqual(ROUTING_READ_FIELDS);
+  } else {
+    expect(
+      isAllowed(policies.fqcRoutingRules?.read),
+      '部门主管不该读到派单规则',
+    ).toBe(false);
   }
 };
 
-/** 「处理」：四张表都读；初筛表只能改三列，确认记录表只能建。 */
+/** 「处理」：五张表都读；初筛改三列，工单建行与改判两列，确认记录只建。 */
 const expectHandle = (decision: FqcDecision) => {
   expect(decision.effect, '处理应当是「有条件放行」').toBe('conditional');
   const policies = databasePolicies(decision);
   expect(Object.keys(policies).sort()).toEqual(
-    [...FQC_TABLES, REVIEW_TABLE].sort(),
+    [...FQC_TABLES, REVIEW_TABLE, 'fqcRoutingRules'].sort(),
   );
-  for (const table of [...FQC_TABLES, REVIEW_TABLE]) {
+  for (const table of [...FQC_TABLES, REVIEW_TABLE, 'fqcRoutingRules']) {
     expect(isAllowed(policies[table]?.read), `${table} 的处理没有读`).toBe(
       true,
     );
@@ -325,11 +395,19 @@ const expectHandle = (decision: FqcDecision) => {
       false,
     );
   }
-  for (const table of FQC_TABLES) {
+  for (const table of FQC_TABLES.filter((table) => table !== 'fqcTickets')) {
     expect(isAllowed(policies[table]?.create), `${table} 的处理带了新建`).toBe(
       false,
     );
   }
+  expect(
+    writableFields(policies.fqcTickets?.create),
+    '处理建工单的列与设计不一致',
+  ).toEqual(HANDLE_TICKET_CREATE_FIELDS);
+  expect(
+    readableFields(policies.fqcRoutingRules?.read),
+    '处理对派单规则只读类别与责任部门',
+  ).toEqual(ROUTING_READ_FIELDS);
   // 确认记录只追加：处理可以建，不能改也不能删。
   expect(
     isAllowed(policies[REVIEW_TABLE]?.create),
@@ -349,8 +427,8 @@ const expectHandle = (decision: FqcDecision) => {
   ).toBeUndefined();
   expect(
     writableFields(policies.fqcTickets?.update),
-    '处理不该能改质量工单：派单与关单等它们的端点做出来再加列',
-  ).toBeUndefined();
+    '改判只能改工单的类别与严重度',
+  ).toEqual(HANDLE_TICKET_UPDATE_FIELDS);
   expect(
     writableFields(policies.fqcScreenings?.update),
     '处理只该改初筛表的结论、确认记录指针与更新时间',
@@ -398,6 +476,70 @@ const registrationSnapshot = (authz: AppAuthorization) => ({
   placement: authz.ui.placementOf({ type: 'composite', id: 'fqc' }),
 });
 
+test('R-003 S2: 处理工单与维护派单规则按设计逐列放开', async ({
+  testApp,
+  app,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const user = await createUser(admin, 'r003s2newactions', {
+    app: ['quality_manager'],
+  });
+  const authz = app.container.resolve(authorizationToken);
+  const context = authz.for({ principal: { type: 'user', id: user.id } });
+
+  const ticket = await context.authorize({
+    resource: { type: 'composite', id: 'fqc' },
+    action: 'ticket',
+  });
+  expect(ticket.effect, '处理工单应当有条件放行').toBe('conditional');
+  const ticketPolicies = databasePolicies(ticket);
+  expect(Object.keys(ticketPolicies).sort()).toEqual(['fqcTickets']);
+  expect(
+    writableFields(ticketPolicies.fqcTickets?.create),
+    '处理工单不该建工单',
+  ).toBeUndefined();
+  expect(
+    writableFields(ticketPolicies.fqcTickets?.update),
+    '处理工单改的列与设计不一致',
+  ).toEqual(
+    [
+      'assigneeId',
+      'resolution',
+      'reopenCount',
+      'departmentId',
+      'closedAt',
+      'statusChangedAt',
+      'lifecycleVersion',
+      'lifecycleDefinition',
+    ].sort(),
+  );
+  expect(
+    writableFields(ticketPolicies.fqcTickets?.update) ?? [],
+    '处理工单不该直接写状态列',
+  ).not.toContain('state');
+
+  const configure = await context.authorize({
+    resource: { type: 'composite', id: 'fqc' },
+    action: 'configure',
+  });
+  expect(configure.effect, '维护派单规则应当有条件放行').toBe('conditional');
+  const routing = databasePolicies(configure);
+  expect(Object.keys(routing).sort()).toEqual(['fqcRoutingRules']);
+  expect(readableFields(routing.fqcRoutingRules?.read)).toEqual(
+    ROUTING_READ_FIELDS,
+  );
+  expect(writableFields(routing.fqcRoutingRules?.create)).toEqual(
+    ROUTING_CREATE_FIELDS,
+  );
+  expect(writableFields(routing.fqcRoutingRules?.update)).toEqual(
+    ROUTING_UPDATE_FIELDS,
+  );
+  expect(
+    isAllowed(routing.fqcRoutingRules?.delete),
+    '派单规则不该登记删除',
+  ).toBe(false);
+});
+
 test('R-013: registers the three FQC tables with three actions, the fqc actions, the department access and the workspace section', async ({
   app,
 }) => {
@@ -424,11 +566,28 @@ test('R-013: registers the three FQC tables with three actions, the fqc actions,
     'read',
     'create',
   ]);
+  const routing = authz.database.collections
+    .list()
+    .find((collection) => collection.name === 'fqcRoutingRules');
+  expect(routing, '派单规则表没有注册').toBeDefined();
+  expect(routing?.actions, '派单规则表登记的动作').toEqual([
+    'read',
+    'create',
+    'update',
+  ]);
   expect(authz.compositeResources.getAction('fqc', 'view')?.title).toEqual({
     key: 'authorization.fqc.actions.view',
     ns: 'app-local',
   });
-  for (const action of ['view', 'handle', 'intake', 'submit', 'maintain']) {
+  for (const action of [
+    'view',
+    'handle',
+    'intake',
+    'submit',
+    'maintain',
+    'ticket',
+    'configure',
+  ]) {
     expect(
       authz.compositeResources.getAction('fqc', action),
       `fqc.${action} 没有注册`,
@@ -488,19 +647,24 @@ test('R-013: the role editor catalogue lists the five FQC actions and no departm
     'view',
     'handle',
     'intake',
+    'ticket',
+    'configure',
     'submit',
     'maintain',
   ]);
   for (const action of ['view', 'handle']) {
     const scopes = fqc?.dataScopes?.[action] ?? [];
     expect(scopes.map((scope) => scope.collection).sort()).toEqual(
-      [...FQC_TABLES, REVIEW_TABLE].sort(),
+      [...FQC_TABLES, REVIEW_TABLE, 'fqcRoutingRules'].sort(),
     );
     for (const scope of scopes) {
       expect(scope.recordAccess).toContain('allRecords');
       if (
         scope.collection === REVIEW_TABLE ||
-        scope.collection === 'fqcTickets'
+        scope.collection === 'fqcTickets' ||
+        // 派单规则表也有 departmentId 列，框架的部门范围键会出现在目录里；
+        // 目录列出可用范围不等于把范围配给了部门主管（seed 不配）。
+        scope.collection === 'fqcRoutingRules'
       ) {
         // R-002 的确认记录表带 departmentId 列。R-003 设计「授权与暴露面」一节
         // （「为什么要把『处理工单』拆出来」与「默认授权」）给工单表加了这一列，
@@ -515,11 +679,20 @@ test('R-013: the role editor catalogue lists the five FQC actions and no departm
       }
     }
   }
+  // R-003 S2：处理工单只展开工单表，维护派单规则只展开派单规则表。
+  expect(
+    (fqc?.dataScopes?.ticket ?? []).map((scope) => scope.collection).sort(),
+  ).toEqual(['fqcTickets']);
+  expect(
+    (fqc?.dataScopes?.configure ?? []).map((scope) => scope.collection).sort(),
+  ).toEqual(['fqcRoutingRules']);
   // 投递只写三张业务表，不该出现确认记录表的数据范围。
   const intakeScopes = fqc?.dataScopes?.intake ?? [];
-  expect(intakeScopes.map((scope) => scope.collection).sort()).toEqual(
-    [...FQC_TABLES].sort(),
-  );
+  // R-003 S2：投递不再建工单，目录里只剩消息与初筛两张表。
+  expect(intakeScopes.map((scope) => scope.collection).sort()).toEqual([
+    'fqcMessages',
+    'fqcScreenings',
+  ]);
   // R-026：提交反馈只有两张表，且只有「仅本人」一档，默认也是它。
   const submitScopes = fqc?.dataScopes?.submit ?? [];
   expect(submitScopes.map((scope) => scope.collection).sort()).toEqual([
@@ -595,7 +768,10 @@ test('R-013: quality roles view and handle as designed and may not intake', asyn
         resource: { type: 'composite', id: 'fqc' },
         action: 'view',
       }),
-      { readsConfirmations: true },
+      {
+        readsConfirmations: true,
+        readsRouting: name === 'r013manager',
+      },
     );
     expectHandle(
       await context.authorize({
@@ -638,7 +814,12 @@ test('R-013: a department manager views and neither handles nor intakes', async 
       resource: { type: 'composite', id: 'fqc' },
       action: 'view',
     }),
-    { readsConfirmations: false },
+    {
+      readsConfirmations: false,
+      readsRouting: false,
+      readsMessages: false,
+      readsScreenings: false,
+    },
   );
   for (const action of ['handle', 'intake']) {
     const denied = await context.authorize({
@@ -777,7 +958,15 @@ test('R-013: root is unrestricted on the business actions, may read the tables a
     principal: { type: 'user', id: String(admin.user.id) },
   });
 
-  for (const action of ['view', 'handle', 'intake', 'submit', 'maintain']) {
+  for (const action of [
+    'view',
+    'handle',
+    'intake',
+    'submit',
+    'maintain',
+    'ticket',
+    'configure',
+  ]) {
     const decision = await root.authorize({
       resource: { type: 'composite', id: 'fqc' },
       action,
@@ -786,11 +975,17 @@ test('R-013: root is unrestricted on the business actions, may read the tables a
     expect(decision.effect, `root 被拒了 fqc.${action}`).toBe('conditional');
     expect(codes(decision)).toContain('UNRESTRICTED_ACCESS');
     const expectedTables =
-      action === 'intake' || action === 'maintain'
-        ? [...FQC_TABLES]
-        : action === 'submit'
+      action === 'intake'
+        ? ['fqcMessages', 'fqcScreenings']
+        : action === 'maintain'
+          ? [...FQC_TABLES]
+          : action === 'submit'
           ? ['fqcMessages', 'fqcScreenings']
-          : [...FQC_TABLES, REVIEW_TABLE];
+          : action === 'ticket'
+            ? ['fqcTickets']
+            : action === 'configure'
+              ? ['fqcRoutingRules']
+              : [...FQC_TABLES, REVIEW_TABLE, 'fqcRoutingRules'];
     expect(Object.keys(decision.conditions?.database ?? {}).sort()).toEqual(
       expectedTables.sort(),
     );
@@ -839,7 +1034,6 @@ test('R-013: a grant holding only intake creates rows and cannot read the tables
               scopes: {
                 fqcMessages: 'allRecords',
                 fqcScreenings: 'allRecords',
-                fqcTickets: 'allRecords',
               },
             },
           },
@@ -862,11 +1056,15 @@ test('R-013: a grant holding only intake creates rows and cannot read the tables
   });
   expect(intake.effect, '只持投递的主体投不了').not.toBe('deny');
   const policies = databasePolicies(intake);
-  for (const table of FQC_TABLES) {
+  for (const table of ['fqcMessages', 'fqcScreenings']) {
     expect(isAllowed(policies[table]?.create), `${table} 的投递没有建`).toBe(
       true,
     );
   }
+  expect(
+    isAllowed(policies.fqcTickets?.create),
+    '投递不该还有工单表的建',
+  ).toBe(false);
 
   // 投递的授权不带读：裸读三张表都要被拒。
   for (const table of FQC_TABLES) {
@@ -898,9 +1096,7 @@ test('R-002 21: 投递对初筛表能改的十五列逐项固定，reviewId 与�
               type: 'composite',
               scopes: {
                 fqcMessages: 'allRecords',
-                fqcScreenings: 'allRecords',
-                fqcTickets: 'allRecords',
-              },
+                fqcScreenings: 'allRecords',              },
             },
           },
         ],
@@ -1007,6 +1203,7 @@ test('R-013: booting the authorization resources provider twice registers once',
   expect(registered.collections.map((collection) => collection.name)).toEqual([
     ...FQC_TABLES,
     REVIEW_TABLE,
+    'fqcRoutingRules',
     'departments',
     'departmentMembers',
     'departmentMemberHistory',

@@ -483,12 +483,12 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
       : undefined;
 
     /**
-     * 投递在同一个事务里写三张表，每张表用「投递」决策给出的范围。
+     * 投递只写消息与初筛两张表（R-003：工单在人工确认草稿之后才建）。
      *
      * 「投递」不带读，所以用 `createMany` 写、不要求回读：`createOne` 会把刚落库的
      * 记录读回来当返回值，而读在投递的授权里是 false（READ_FORBIDDEN）。响应由这次
      * 写入的值组成，写入的内容与以前一致；时间与置信度按列的读回形态给，201 与随后
-     * 从列表端点读到的同一条逐字段相等。
+     * 从列表端点读到的同一条逐字段相等。**响应里没有 `ticket`。**
      */
     async function ingestOnce(
       input: IngestMessageInput,
@@ -496,12 +496,10 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
       policies: {
         readonly messages: RepositoryPolicy;
         readonly screenings: RepositoryPolicy;
-        readonly tickets: RepositoryPolicy;
       },
       attachmentOwnerId: string | null,
     ) {
-      const now = new Date();
-      // 四件事与工单那一笔都在调用方给的这一个事务里；工单写失败会回滚四件。
+      // 四件事都在调用方给的这一个事务里；任何一件失败都整笔回滚。
       const { message, screening: record } = await ingestFeedback(
         {
           channel: input.channel,
@@ -523,29 +521,6 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         attachmentOwnerId,
         (text) => screening.screen(text),
       );
-      const storedNow = storedDateTime(now);
-      const ticket = {
-        id: randomUUID(),
-        code: `FQC-${String(now.getTime()).slice(-8)}`,
-        title: `${String(record.category)} / ${String(record.severity)}`,
-        description: input.content.slice(0, 2000),
-        sourceMessageId: message.id,
-        screeningId: record.id,
-        category: record.category,
-        severity: record.severity,
-        ownerDepartment: record.suggestedOwner,
-        assigneeId: null,
-        state: 'open',
-        dueAt: null,
-        closedAt: null,
-        createdAt: storedNow,
-        updatedAt: storedNow,
-      };
-      await transaction
-        .repository('fqcTickets')
-        .withPolicy(policies.tickets)
-        .createMany({ values: [ticket] as never });
-
       // 录入只写十五列；投递的 201 按列的默认值（或空）把其余列拼回来，
       // 与随后按「查看」读到的同一条逐字段相等。写库的值不变。
       const screeningResponse: Record<string, unknown> = {
@@ -558,7 +533,7 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         degradeReason: record.degradeReason ?? null,
         ...record,
       };
-      return { message, screening: screeningResponse, ticket };
+      return { message, screening: screeningResponse };
     }
 
     /**
@@ -850,7 +825,7 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
     router.use('/quality/feedback-files/*', auth.required(), authz.middleware());
 
     // 外部渠道回调：企业微信/微信网关把客户消息推到这里。
-    // 授权一次「投递」；三张表的写入在同一个事务里完成，写入的内容与以前一致。
+    // 授权一次「投递」；两张表的写入在同一个事务里完成，不建工单。
     // 幂等键由框架的 executeIdempotentMutation 管：同一个键重复投递返回第一次的结果，
     // 同键异体是 409 OPERATION_CONFLICT。收据与业务写在同一个事务里。
     router.post(
@@ -910,7 +885,6 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
               {
                 messages: policyOf(decision, 'fqcMessages'),
                 screenings: policyOf(decision, 'fqcScreenings'),
-                tickets: policyOf(decision, 'fqcTickets'),
               },
               session?.user?.id === undefined ? null : String(session.user.id),
             );

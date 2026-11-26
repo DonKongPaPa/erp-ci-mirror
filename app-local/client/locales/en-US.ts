@@ -66,7 +66,7 @@ const enUS = {
       contentPlaceholder:
         'For example: this batch is out of tolerance, it will not assemble, 0.3 mm off, the line is stopped',
       submit: 'Submit and screen',
-      created: 'Ticket {{code}} created',
+      created: 'Feedback recorded',
       failed: 'Submission failed',
       outcomeUnknown:
         'The last submission’s result is unknown. Check the list for the ticket it may have created before submitting again.',
@@ -325,10 +325,13 @@ const enUS = {
       messages: 'Customer messages',
       screenings: 'AI screening',
       tickets: 'Quality tickets',
+      routingRules: 'Routing rules',
       actions: {
         view: 'View',
-        handle: 'Handle',
+        handle: 'Review and dispatch',
         intake: 'Intake',
+        ticket: 'Handle ticket',
+        configure: 'Maintain routing rules',
         submit: 'Submit feedback',
         maintain: 'Maintain feedback',
       },

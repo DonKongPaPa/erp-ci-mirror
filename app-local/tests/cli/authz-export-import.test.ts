@@ -31,6 +31,7 @@ test('R-013: the authz commands are registered under their own topic', () => {
     'export',
     'import',
     'upgrade-r002',
+    'upgrade-r003',
     'upgrade-r026',
   ]);
   expect(plugin!.commands.export).toBe(AuthzExport);

@@ -13,9 +13,9 @@ import { randomUUID } from 'node:crypto';
  * R-013 的四个业务角色（seed）。
  *
  * 授权内容照设计文档的角色表：
- * - 质量主管、质量员：FQC 查看与处理、质量页、知识库；R-026 再加反馈单页、「提交反馈」
- *   与「维护反馈单」
- * - 部门主管：FQC 查看、质量页；R-026 不给他新动作
+ * - 质量主管、质量员：FQC 查看与处理、处理工单、质量页、知识库；R-026 再加反馈单页、
+ *   「提交反馈」与「维护反馈单」；质量主管另有「维护派单规则」
+ * - 部门主管：FQC 查看（只工单表的「本部门及下级」）、质量页；不给他新动作
  * - 普通员工：R-026 的反馈单页与「提交反馈」（两张表都是「仅本人」）
  *
  * 「查看」「处理」「维护反馈单」的数据范围填 `allRecords`（Q31）；R-026 的
@@ -39,15 +39,23 @@ const qualityFqcScopes = {
   fqcScreeningReviews: 'allRecords',
 } as const;
 
-/**
- * 其余角色只覆盖三张业务表。确认记录表没配范围就是拒绝：它是「人的判断」，
- * 部门主管不该读到质量人员确认成什么（R-003 的收窄）。
- */
-const readFqcScopes = {
-  fqcMessages: 'allRecords',
-  fqcScreenings: 'allRecords',
-  fqcTickets: 'allRecords',
+/** 质量角色的查看、处理各自多一张派单规则表：查看只读，处理要按规则取责任部门。 */
+const qualityViewScopes = { ...qualityFqcScopes, fqcRoutingRules: 'allRecords' } as const;
+const qualityHandleScopes = {
+  ...qualityFqcScopes,
+  fqcRoutingRules: 'allRecords',
 } as const;
+
+/** R-003：处理工单只展开工单表，维护派单规则只展开派单规则表。 */
+const ticketScopes = { fqcTickets: 'allRecords' } as const;
+const configureScopes = { fqcRoutingRules: 'allRecords' } as const;
+
+/**
+ * R-003：部门主管的「查看」只配工单表的「本部门及下级」。消息表、初筛表、
+ * 确认记录表、派单规则表都不配范围 —— 框架回 `NO_RECORD_ACCESS`（读不到），
+ * 不是全部。没有 `departmentId` 的表没法按部门收窄，所以不往它们扩。
+ */
+const readFqcScopes = { fqcTickets: 'org.myDepartmentsAndBelow' } as const;
 
 /**
  * R-026「提交反馈」的范围：两张表都只有「仅本人」，默认也是它。
@@ -119,7 +127,11 @@ export const businessPermissionSets: readonly PermissionSet[] = [
   definePermissionSet('quality_manager')
     .title({ key: 'permissionSets.business.qualityManager', ns: NAMESPACE })
     .grant(qualityPage)
-    .grant(fqcGrant(['view', 'handle'], qualityFqcScopes))
+    .grant(fqcGrant(['view'], qualityViewScopes))
+    .grant(fqcGrant(['handle'], qualityHandleScopes))
+    // R-003：新动作各成一条授权；已有的「查看、处理」不改。
+    .grant(fqcGrant(['ticket'], ticketScopes))
+    .grant(fqcGrant(['configure'], configureScopes))
     // R-026：两个新动作各成一条授权，不并进上面那条「查看、处理」。
     .grant(feedbackPage)
     .grant(fqcGrant(['submit'], submitFqcScopes))
@@ -130,7 +142,10 @@ export const businessPermissionSets: readonly PermissionSet[] = [
   definePermissionSet('quality_inspector')
     .title({ key: 'permissionSets.business.qualityInspector', ns: NAMESPACE })
     .grant(qualityPage)
-    .grant(fqcGrant(['view', 'handle'], qualityFqcScopes))
+    // 派单规则只给质量主管「查看」；质量员在处理里读它取责任部门即可。
+    .grant(fqcGrant(['view'], qualityFqcScopes))
+    .grant(fqcGrant(['handle'], qualityHandleScopes))
+    .grant(fqcGrant(['ticket'], ticketScopes))
     .grant(feedbackPage)
     .grant(fqcGrant(['submit'], submitFqcScopes))
     .grant(fqcGrant(['maintain'], maintainFqcScopes))

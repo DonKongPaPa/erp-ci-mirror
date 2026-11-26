@@ -269,7 +269,6 @@ export const IngestResultMessageSchema = MessageSchema.extend({
 export const IngestResultSchema = z.object({
   message: IngestResultMessageSchema,
   screening: ScreeningSchema,
-  ticket: TicketSchema,
 });
 
 /**

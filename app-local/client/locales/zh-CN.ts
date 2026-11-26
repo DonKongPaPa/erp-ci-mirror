@@ -58,7 +58,7 @@ const zhCN: AppResource = {
       contentPlaceholder:
         '例如：这批零件尺寸超差了，装配不上，公差差 0.3mm，已经停了产线',
       submit: '投递并初筛',
-      created: '已生成工单 {{code}}',
+      created: '反馈已记录',
       failed: '投递失败',
       outcomeUnknown:
         '上一次提交的结果未知。请先到列表里核对是否已经生成工单，再继续投递。',
@@ -295,10 +295,13 @@ const zhCN: AppResource = {
       messages: '客户消息',
       screenings: 'AI 初筛',
       tickets: '质量工单',
+      routingRules: '派单规则',
       actions: {
         view: '查看',
-        handle: '处理',
+        handle: '复核与派单',
         intake: '投递',
+        ticket: '处理工单',
+        configure: '维护派单规则',
         submit: '提交反馈',
         maintain: '维护反馈单',
       },

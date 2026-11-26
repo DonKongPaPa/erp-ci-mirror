@@ -41,8 +41,6 @@ const VIEW_MESSAGE_READ_FIELDS = [
   'id',
   'rawContentType',
   'receivedAt',
-  'senderContact',
-  'senderName',
   'status',
   'updatedAt',
 ].sort();
@@ -563,9 +561,7 @@ test('R-026 23: 「投递」建消息表收成十六列，原文七列不在任�
   const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
   const intake = await decisionFor(app, admin, 'r026-intake', 'intake', {
     fqcMessages: 'allRecords',
-    fqcScreenings: 'allRecords',
-    fqcTickets: 'allRecords',
-  });
+    fqcScreenings: 'allRecords',  });
   const intakePolicies = databasePolicies(intake);
   expect(fieldsOf(intakePolicies.fqcMessages?.create), '投递建消息表的列与设计不一致').toEqual(
     INTAKE_MESSAGE_CREATE_FIELDS,

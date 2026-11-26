@@ -4,6 +4,11 @@ import { createNodeVitestConfig } from '@nocobase/dev-config/vitest/node';
 import { createReactVitestConfig } from '@nocobase/dev-config/vitest/react';
 import { defineConfig } from 'vitest/config';
 
+import { loadTestDatabaseEnv } from './tests/setup/test-db-env';
+
+// 测试只连 Postgres：CI 用注入的变量，本机从主检出的 .local/test-pg.env 读（不打印口令）。
+loadTestDatabaseEnv();
+
 const root = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig({

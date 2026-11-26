@@ -168,7 +168,7 @@ export class QualityClient {
       .then(({ data }) => data);
   }
 
-  /** 投递一条客户消息，服务端会同步完成初筛并生成工单。幂等键由 useSubmission 生成。 */
+  /** 投递一条客户消息，服务端同步完成初筛；不建工单（人工确认之后才建）。幂等键由 useSubmission 生成。 */
   intake(
     input: {
       channel: string;
@@ -180,7 +180,6 @@ export class QualityClient {
   ): Promise<{
     message: QualityMessage;
     screening: QualityScreening;
-    ticket: QualityTicket;
   }> {
     return this.api
       .request<{

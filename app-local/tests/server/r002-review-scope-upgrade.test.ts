@@ -83,9 +83,12 @@ const reviewScopeOf = async (
   actionName: string,
 ): Promise<unknown> => {
   const set = await authz.permissionSets.get(key);
+  // R-003 S2 把「查看」与「处理」拆成两条授权，动作可能不在第一条里。
   const grant = grantsOf(set as { grants: unknown }).find(
     (entry) =>
-      entry.resource.type === 'composite' && entry.resource.id === 'fqc',
+      entry.resource.type === 'composite' &&
+      entry.resource.id === 'fqc' &&
+      entry.actions.some((action) => action.action === actionName),
   );
   const action = grant?.actions.find((entry) => entry.action === actionName);
   return action?.policy?.scopes?.[REVIEW_TABLE];

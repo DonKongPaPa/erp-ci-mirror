@@ -30,12 +30,8 @@ const qualityFqcScopes = {
   fqcScreeningReviews: 'allRecords',
 };
 
-/** 其余角色只覆盖三张业务表：确认记录表没配范围就是拒绝（R-003 要的收窄）。 */
-const deptFqcScopes = {
-  fqcMessages: 'allRecords',
-  fqcScreenings: 'allRecords',
-  fqcTickets: 'allRecords',
-};
+/** R-003 S2：部门主管的「查看」只配工单表的「本部门及下级」。 */
+const deptFqcScopes = { fqcTickets: 'org.myDepartmentsAndBelow' };
 
 /** R-026「提交反馈」：两张表都只有「仅本人」。 */
 const submitFqcScopes = {
@@ -72,13 +68,54 @@ const knowledgeGrant = (action: 'manage.related' | 'propose.related') => ({
   actions: [{ action }],
 });
 
-const fqcViewAndHandle = {
+const qualityViewScopes = {
+  ...qualityFqcScopes,
+  fqcRoutingRules: 'allRecords',
+};
+const qualityHandleScopes = {
+  ...qualityFqcScopes,
+  fqcRoutingRules: 'allRecords',
+};
+const ticketScopes = { fqcTickets: 'allRecords' };
+const configureScopes = { fqcRoutingRules: 'allRecords' };
+
+const fqcTicket = {
+  resource: { type: 'composite', id: 'fqc' },
+  actions: [
+    { action: 'ticket', policy: { type: 'composite', scopes: ticketScopes } },
+  ],
+};
+
+const fqcConfigure = {
+  resource: { type: 'composite', id: 'fqc' },
+  actions: [
+    {
+      action: 'configure',
+      policy: { type: 'composite', scopes: configureScopes },
+    },
+  ],
+};
+
+const fqcView = {
+  resource: { type: 'composite', id: 'fqc' },
+  actions: [
+    { action: 'view', policy: { type: 'composite', scopes: qualityViewScopes } },
+  ],
+};
+
+const fqcInspectorView = {
   resource: { type: 'composite', id: 'fqc' },
   actions: [
     { action: 'view', policy: { type: 'composite', scopes: qualityFqcScopes } },
+  ],
+};
+
+const fqcHandle = {
+  resource: { type: 'composite', id: 'fqc' },
+  actions: [
     {
       action: 'handle',
-      policy: { type: 'composite', scopes: qualityFqcScopes },
+      policy: { type: 'composite', scopes: qualityHandleScopes },
     },
   ],
 };
@@ -113,7 +150,10 @@ const expectedRoles = {
     title: { key: 'permissionSets.business.qualityManager', ns: 'app-local' },
     grants: [
       pageGrant,
-      fqcViewAndHandle,
+      fqcView,
+      fqcHandle,
+      fqcTicket,
+      fqcConfigure,
       feedbackPageGrant,
       fqcSubmit,
       fqcMaintain,
@@ -125,7 +165,9 @@ const expectedRoles = {
     title: { key: 'permissionSets.business.qualityInspector', ns: 'app-local' },
     grants: [
       pageGrant,
-      fqcViewAndHandle,
+      fqcInspectorView,
+      fqcHandle,
+      fqcTicket,
       feedbackPageGrant,
       fqcSubmit,
       fqcMaintain,

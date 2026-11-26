@@ -6,36 +6,35 @@ import {
 } from '@nocobase/app-plugin-authorization/server';
 
 /**
- * R-013 FQC 的业务资源声明，按 R-002 第一个切片与 R-026 第一个切片改过。
+ * R-013 FQC 的业务资源声明，按 R-002、R-026 与 R-003 第一个切片改过。
  *
- * 四张表以迁移 202611220001_create_fqc_demo.ts、202611260001_fqc_drafting_reviews.ts
- * 与 202611260002_fqc_feedback.ts 为准。读的权限只有四份全列声明，业务动作按设计
- * 各取所需；写权限另外声明，不在一份带读的声明上叠加：
+ * 五张表以迁移 202611220001_create_fqc_demo.ts、202611260001_fqc_drafting_reviews.ts、
+ * 202611260002_fqc_feedback.ts 与 202611260003_fqc_ticket_dispatch.ts 为准。读的权限
+ * 一律逐列列出；写权限另外声明，不在一份带读的声明上叠加（同一个数据范围的键会撞车）：
  *
- * - `view`   读消息表原来的十一列、初筛表原来的十九列（不含本条的 `ownerId`）、
- *            工单原来的十五列、确认记录按范围。部门主管也持这个动作，本条新加的
- *            十列一列也不放进来（R-026 的暴露面）；R-003 新加的七列等第二片定契约
- * - `handle` 读四张表全列；只改初筛表的三列（结论、确认记录指针、更新时间）；在
- *            确认记录表上建一行 —— 读不是可选的：响应里的 `review` 要读刚写的那一行，
- *            R-003 的派单与改判还要在同一个事务里读最近一次确认记录取生效值
- * - `intake` 三张业务表各建一行（消息表收成十六列），另给初筛表逐列的修改权
- *            （模型版在第二笔写入里换掉规则版草稿），不读 —— 投递一次只写一行，
- *            带读就能读走客户联系方式与消息原文
- * - `submit` 提交反馈：读消息表十九列、建十七列；初筛表建十五列、改十五列、不读。
- *            两张表的范围都只有「仅本人」，默认也是它；没有发布给「全部」的档，
- *            管理员选不出会被整条跳过的组合
- * - `maintain` 维护反馈单：消息表全列读、只改十一列；初筛八个字段、工单五个字段；
- *            三张表的范围都只有「全部」
+ * - `view`   消息表去掉发件人姓名与联系方式两列、初筛表原来的十九列（不含 `ownerId`）、
+ *            工单表全列去掉停写的 `ownerDepartment` 与 `dueAt`、确认记录按范围、
+ *            派单规则只读类别与责任部门；不写
+ * - `handle` 五张表都读；初筛表只改三列；工单建行与改判时改类别、严重度；确认记录建行。
+ *            读不是可选的：响应里的 `review` 要读刚写的那一行，派单还要读最近一次确认记录
+ * - `intake` 两张表各建一行（消息表十六列），另给初筛表逐列的修改权，不读。
+ *            工单表的建已收掉：投递不建单，已有的投递权限集要由 upgrade-r003
+ *            把 `fqcTickets` 从 scopes 里删掉，否则整条授权会被跳过、投递被拒
+ * - `ticket` 处理工单：工单表全列读；改经办人、处理说明、重开次数、责任部门、关闭时间
+ *            与 lifecycle 的三列（不写状态列，流转走 lifecycle）
+ * - `configure` 维护派单规则：派单规则表读两列、建四列、改三列
+ * - `submit` 提交反馈：读消息表十九列、建十七列；初筛表建十五列、改十五列、不读
+ * - `maintain` 维护反馈单：消息表全列读、只改十一列；初筛八个字段、工单五个字段
  *
  * 只建不读的权限不能写在带读的声明上：`read('*')` 之后再 `.create('*')` 得到的是读加建。
  * 所以投递的三张表各起一份只含建（初筛表另加逐列修改）的声明。初筛表在 `handle` 里
- * 既读又改，必须是同一份声明：拆成读一份、改一份会在数据范围的键上撞车。
+ * 既读又改，必须是同一份声明。
  *
  * 原文七列（`channel`、`externalId`、`senderName`、`senderContact`、`content`、
- * `rawContentType`、`receivedAt`）可以建、不能改：两个新动作与投递的改列清单里
- * 都没有它们，「查看」与「处理」对消息表也没有改权。
+ * `rawContentType`、`receivedAt`）可以建、不能改。「查看」对消息表连发件人两列都不读，
+ * 收窄靠声明而不是端点记得裁，新加的端点也不会漏。
  *
- * 确认记录表只登记读与建：这张表只追加，R-003 的三个动作都只写新行。
+ * 确认记录表只登记读与建：这张表只追加。派单规则表登记读写、不登记删除。
  *
  * 这里只是纯声明，不注册、不查库、不赋权。注册在 providers/authorization-resources.ts，
  * 初始角色在 database/main/seeds/。动作的数据范围键用集合名，seed 里
@@ -76,13 +75,14 @@ const INTAKE_SCREENING_UPDATE_FIELDS = [
   'updatedAt',
 ] as const;
 
-/** 消息表原来的十一列（迁移 202611220001）：「查看」只读这些。 */
+/**
+ * 「查看」读消息表的九列：迁移 202611220001 的十一列去掉发件人姓名与联系方式。
+ * 这两列只给持「处理」的人；带「查看」范围的查询从 SQL 的 select 里就没有它们。
+ */
 const VIEW_MESSAGE_READ_FIELDS = [
   'id',
   'channel',
   'externalId',
-  'senderName',
-  'senderContact',
   'content',
   'rawContentType',
   'receivedAt',
@@ -231,12 +231,11 @@ const MAINTAIN_TICKET_READ_FIELDS = [
 ] as const;
 
 /**
- * 「查看」读工单表的十五列：迁移 202611220001 建表时的全部列。
+ * 「查看」读工单表的二十列：全列去掉两个停写列（`ownerDepartment`、`dueAt`）。
  *
- * R-003 第一个切片给工单加了七列（`departmentId`、`createdBy`、`resolution`、
- * `reopenCount`、`statusChangedAt`、`lifecycleVersion`、`lifecycleDefinition`）。
- * 第二个切片才会定下这几列经「查看」放开哪几列；在那之前逐列列出来，不写 `read('*')`，
- * 免得列表端点把还没定契约的列先漏出去。守门的「201 与列表字段一致」也靠这一份清单。
+ * R-003 第一片的七列（`departmentId`、`createdBy`、`resolution`、`reopenCount`、
+ * `statusChangedAt`、`lifecycleVersion`、`lifecycleDefinition`）经「查看」放开；
+ * 停写两列留在表里、谁也不写不读。逐列列出，不写 `read('*')`。
  */
 const VIEW_TICKET_READ_FIELDS = [
   'id',
@@ -247,16 +246,72 @@ const VIEW_TICKET_READ_FIELDS = [
   'screeningId',
   'category',
   'severity',
-  'ownerDepartment',
   'assigneeId',
   'state',
-  'dueAt',
   'closedAt',
   'createdAt',
   'updatedAt',
+  'departmentId',
+  'createdBy',
+  'resolution',
+  'reopenCount',
+  'statusChangedAt',
+  'lifecycleVersion',
+  'lifecycleDefinition',
 ] as const;
 
-/** 「查看」：消息表只读本条之前的十一列。 */
+/** 「处理」建工单会写的列：数据模型的全部列去掉停写两列。 */
+const HANDLE_TICKET_CREATE_FIELDS = [
+  'id',
+  'code',
+  'title',
+  'description',
+  'sourceMessageId',
+  'screeningId',
+  'category',
+  'severity',
+  'departmentId',
+  'createdBy',
+  'assigneeId',
+  'state',
+  'closedAt',
+  'createdAt',
+  'updatedAt',
+  'statusChangedAt',
+  'lifecycleVersion',
+  'lifecycleDefinition',
+] as const;
+
+/** 改判只改工单的类别与严重度；流转历史与其余列不动。 */
+const HANDLE_TICKET_UPDATE_FIELDS = ['category', 'severity'] as const;
+
+/** 「处理工单」能改的列：状态不走这里，由 lifecycle 写。 */
+const TICKET_UPDATE_FIELDS = [
+  'assigneeId',
+  'resolution',
+  'reopenCount',
+  'departmentId',
+  'closedAt',
+  'statusChangedAt',
+  'lifecycleVersion',
+  'lifecycleDefinition',
+] as const;
+
+/** 派单规则：页面要显示的是七行的类别与责任部门，其余两列是审计用。 */
+const ROUTING_READ_FIELDS = ['category', 'departmentId'] as const;
+const ROUTING_CREATE_FIELDS = [
+  'category',
+  'departmentId',
+  'updatedAt',
+  'updatedBy',
+] as const;
+const ROUTING_UPDATE_FIELDS = [
+  'departmentId',
+  'updatedAt',
+  'updatedBy',
+] as const;
+
+/** 「查看」：消息表只读九列，发件人两列不放进来。 */
 const viewedMessages = defineDatabasePermission((permission) =>
   permission
     .collection('fqcMessages')
@@ -272,7 +327,7 @@ const viewedScreenings = defineDatabasePermission((permission) =>
     .read(VIEW_SCREENING_READ_FIELDS),
 );
 
-/** 「查看」：工单表只读原来的十五列，逐列列出；R-003 新加的七列第二片再定。 */
+/** 「查看」：工单表二十列，停写两列不读。 */
 const viewedTickets = defineDatabasePermission((permission) =>
   permission
     .collection('fqcTickets')
@@ -280,12 +335,41 @@ const viewedTickets = defineDatabasePermission((permission) =>
     .read(VIEW_TICKET_READ_FIELDS),
 );
 
-/** 「处理」：工单表仍是全列读，派单与改判要写新列，也要读回来。 */
+/** 「处理」：工单表全列读；派单建行、改判只改类别与严重度。 */
 const tickets = defineDatabasePermission((permission) =>
   permission
     .collection('fqcTickets')
     .title({ key: 'authorization.fqc.tickets', ns: NAMESPACE })
-    .read('*'),
+    .read('*')
+    .create(HANDLE_TICKET_CREATE_FIELDS)
+    .update(HANDLE_TICKET_UPDATE_FIELDS),
+);
+
+/** 「查看」与「处理」对派单规则都只读类别与责任部门。 */
+const viewedRoutingRules = defineDatabasePermission((permission) =>
+  permission
+    .collection('fqcRoutingRules')
+    .title({ key: 'authorization.fqc.routingRules', ns: NAMESPACE })
+    .read(ROUTING_READ_FIELDS),
+);
+
+/** 「处理工单」：工单表全列读，改的列逐项列出（状态列不在这里）。 */
+const handledTickets = defineDatabasePermission((permission) =>
+  permission
+    .collection('fqcTickets')
+    .title({ key: 'authorization.fqc.tickets', ns: NAMESPACE })
+    .read('*')
+    .update(TICKET_UPDATE_FIELDS),
+);
+
+/** 「维护派单规则」：整体替换七行 —— 建四列，改三列，读两列。 */
+const configuredRoutingRules = defineDatabasePermission((permission) =>
+  permission
+    .collection('fqcRoutingRules')
+    .title({ key: 'authorization.fqc.routingRules', ns: NAMESPACE })
+    .read(ROUTING_READ_FIELDS)
+    .create(ROUTING_CREATE_FIELDS)
+    .update(ROUTING_UPDATE_FIELDS),
 );
 
 /** 「处理」对消息表的全列读。 */
@@ -345,13 +429,6 @@ const createdScreenings = defineDatabasePermission((permission) =>
     .title({ key: 'authorization.fqc.screenings', ns: NAMESPACE })
     .create('*')
     .update(INTAKE_SCREENING_UPDATE_FIELDS),
-);
-
-const createdTickets = defineDatabasePermission((permission) =>
-  permission
-    .collection('fqcTickets')
-    .title({ key: 'authorization.fqc.tickets', ns: NAMESPACE })
-    .create('*'),
 );
 
 /**
@@ -443,6 +520,11 @@ export const FQC_COLLECTIONS: readonly DatabaseCollectionDefinition[] = [
     title: { key: 'authorization.fqc.screenings', ns: NAMESPACE },
     actions: ['read', 'create'],
   },
+  {
+    name: 'fqcRoutingRules',
+    title: { key: 'authorization.fqc.routingRules', ns: NAMESPACE },
+    actions: ['read', 'create', 'update'],
+  },
 ];
 
 export const fqc = defineCompositeResource('fqc', (resource) =>
@@ -454,7 +536,8 @@ export const fqc = defineCompositeResource('fqc', (resource) =>
         .grant('fqcMessages', viewedMessages)
         .grant('fqcScreenings', viewedScreenings)
         .grant('fqcTickets', viewedTickets)
-        .grant('fqcScreeningReviews', reviews),
+        .grant('fqcScreeningReviews', reviews)
+        .grant('fqcRoutingRules', viewedRoutingRules),
     )
     .action('handle', (action) =>
       action
@@ -462,14 +545,24 @@ export const fqc = defineCompositeResource('fqc', (resource) =>
         .grant('fqcMessages', messages)
         .grant('fqcScreenings', reviewedScreenings)
         .grant('fqcTickets', tickets)
-        .grant('fqcScreeningReviews', handledReviews),
+        .grant('fqcScreeningReviews', handledReviews)
+        .grant('fqcRoutingRules', viewedRoutingRules),
     )
     .action('intake', (action) =>
       action
         .title({ key: 'authorization.fqc.actions.intake', ns: NAMESPACE })
         .grant('fqcMessages', createdMessages)
-        .grant('fqcScreenings', createdScreenings)
-        .grant('fqcTickets', createdTickets),
+        .grant('fqcScreenings', createdScreenings),
+    )
+    .action('ticket', (action) =>
+      action
+        .title({ key: 'authorization.fqc.actions.ticket', ns: NAMESPACE })
+        .grant('fqcTickets', handledTickets),
+    )
+    .action('configure', (action) =>
+      action
+        .title({ key: 'authorization.fqc.actions.configure', ns: NAMESPACE })
+        .grant('fqcRoutingRules', configuredRoutingRules),
     )
     .action('submit', (action) =>
       action

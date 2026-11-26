@@ -266,9 +266,7 @@ const intakeGrant = {
         type: 'composite',
         scopes: {
           fqcMessages: 'allRecords',
-          fqcScreenings: 'allRecords',
-          fqcTickets: 'allRecords',
-        },
+          fqcScreenings: 'allRecords',        },
       },
     },
   ],

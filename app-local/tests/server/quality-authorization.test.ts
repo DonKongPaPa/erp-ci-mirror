@@ -65,15 +65,10 @@ interface IngestedMessage extends Record<string, unknown> {
   receivedAt: string;
 }
 
-interface IngestedTicket extends Record<string, unknown> {
-  id: string;
-}
-
 interface Ingested {
   data: {
     message: IngestedMessage;
     screening: IngestedScreening;
-    ticket: IngestedTicket;
   };
 }
 
@@ -277,9 +272,7 @@ const intakeGrant = {
         type: 'composite',
         scopes: {
           fqcMessages: 'allRecords',
-          fqcScreenings: 'allRecords',
-          fqcTickets: 'allRecords',
-        },
+          fqcScreenings: 'allRecords',        },
       },
     },
   ],
@@ -472,12 +465,14 @@ test('R-013 3b: a department manager lists but may neither review nor intake', a
   ]);
 
   const session = await signInAs(testApp, 'r013qdept');
-  for (const path of [
-    '/quality/tickets',
-    '/quality/messages',
-    '/quality/screenings',
-  ]) {
-    await expectJson(await session.fetch(path), 200);
+  // R-003 S2：部门主管的「查看」只配工单表「本部门及下级」；消息与初筛没有
+  // departmentId，配全量等于把全公司的客户正文给他，所以不配范围、读被拒绝。
+  await expectJson(await session.fetch('/quality/tickets'), 200);
+  for (const path of ['/quality/messages', '/quality/screenings']) {
+    const error = await expectError(await session.fetch(path), 403);
+    expect(error.reason, `${path} 应当以 READ_FORBIDDEN 被拒`).toBe(
+      'READ_FORBIDDEN',
+    );
   }
 
   const screeningId = await insertScreening(connection, 'needs-review');
@@ -527,7 +522,7 @@ test('R-013 3b: root is allowed on every quality endpoint', async ({
   expect(ingested.data.message.content).toBe('超管投递');
 });
 
-test('R-013: the screening list marks needs-review rows with canReview for both quality roles', async ({
+test('R-003 S2: the screening list marks canReview for quality roles; the department manager is refused', async ({
   testApp,
   app,
   connection,
@@ -568,11 +563,10 @@ test('R-013: the screening list marks needs-review rows with canReview for both 
     ).toBe(outcome === 'needs-review');
   }
 
-  const deptRows = await rowsOf(dept);
-  expect(
-    new Map(deptRows.map((row) => [row.id, row.canReview])),
-    '部门主管与质量主管看到的 canReview 应当一致',
-  ).toEqual(new Map(managerRows.map((row) => [row.id, row.canReview])));
+  // 部门主管的「查看」不配初筛表范围：连列表都是 403，不是看到再裁列。
+  const denied = await dept.fetch('/quality/screenings');
+  await denied.text();
+  expect(denied.status).toBe(403);
 });
 
 test('R-013 12: a service account key holding fqc.intake intakes once per idempotency key', async ({
@@ -646,14 +640,16 @@ test('R-013 12: a service account key holding fqc.intake intakes once per idempo
       body: JSON.stringify(payload),
     });
 
-  // ① 持 fqc.intake 的密钥：201，三张表各多一行。
+  // ① 持 fqc.intake 的密钥：201，消息与初筛各多一行，工单一行都不建。
   const first = await post(allowedSecret, key, body);
   expect(first.headers.get('Idempotency-Replayed')).toBe('false');
   const firstBody = (await expectJson(first, 201)) as Ingested;
+  expect(firstBody.data, '投递的 201 不该带 ticket').not.toHaveProperty('ticket');
   const afterFirst = await countFqcRows(connection);
-  for (const table of FQC_TABLES) {
+  for (const table of ['fqcMessages', 'fqcScreenings']) {
     expect(afterFirst[table], `${table} 应当多一行`).toBe(before[table] + 1);
   }
+  expect(afterFirst.fqcTickets, '投递不该建工单').toBe(before.fqcTickets);
 
   // ② 同一个键再投一次：返回第一次的结果，库里仍然只有那几行。
   const replay = await post(allowedSecret, key, body);
@@ -661,7 +657,9 @@ test('R-013 12: a service account key holding fqc.intake intakes once per idempo
   const replayBody = (await expectJson(replay, 201)) as Ingested;
   expect(replayBody.data.message.id).toBe(firstBody.data.message.id);
   expect(replayBody.data.screening.id).toBe(firstBody.data.screening.id);
-  expect(replayBody.data.ticket.id).toBe(firstBody.data.ticket.id);
+  expect(replayBody.data, '重放的 201 也不该带 ticket').not.toHaveProperty(
+    'ticket',
+  );
   expect(await countFqcRows(connection)).toEqual(afterFirst);
 
   // ③ 同一个键换了请求体：409 OPERATION_CONFLICT，同样一行都不写。
@@ -725,9 +723,10 @@ test('R-026 9/10: 投递写 open，重复的 (channel, externalId) 是 409 且�
     ownerId: null,
   });
   const afterFirst = await countFqcRows(connection);
-  for (const table of FQC_TABLES) {
+  for (const table of ['fqcMessages', 'fqcScreenings']) {
     expect(afterFirst[table], `${table} 应当多一行`).toBe(before[table] + 1);
   }
+  expect(afterFirst.fqcTickets, '投递不该建工单').toBe(before.fqcTickets);
 
   // 不同幂等键、同一个 (channel, externalId)：409 FEEDBACK_ALREADY_RECORDED，一行不多。
   const duplicateResponse = await admin.fetch(
@@ -777,27 +776,35 @@ test('R-026 9/10: 投递写 open，重复的 (channel, externalId) 是 409 且�
 });
 
 /**
- * R-003 S1：新加的七列在授权第二片定契约之前，任何走「查看」的读接口都拿不到。
+ * R-003 S2：工单「查看」的最终列契约。
  *
- * 声明逐列列出原来的十五列，不写 `read('*')`。这里从列表端点验行为：守门的
- * 「201 与列表同一组字段」只保证了两边一致，两边一起多回七列它也不会红。
+ * 七列读得到、停写两列读不到。声明逐列列出，这里从列表端点验行为：只有逐列
+ * 断言才能挡住「两边一起多回一列」的退化。
  */
-test('R-003 S1: the seven new ticket columns are absent from every view read', async ({
+test('R-003 S2: the view reads the seven new ticket columns but never the two stopped ones', async ({
   testApp,
   app,
+  connection,
 }) => {
   authzOf(app);
   const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
-  await createUser(admin, 'r003s1viewfields', { app: ['quality_manager'] });
-  await expectJson(
-    await admin.fetch(
-      '/quality/intake',
-      json({ channel: 'wechat', content: 'R-003 S1 查看收窄' }),
-    ),
-    201,
-  );
+  await createUser(admin, 'r003s2viewfields', { app: ['quality_manager'] });
+  // 工单不再由投递建：直接插一张，验的是「查看」的列，不是投递链路。
+  await connection.repository('fqcTickets').createOne({
+    values: {
+      id: randomUUID(),
+      code: 'R003-S2-VIEW',
+      title: '查看列契约',
+      description: 'R-003 S2 查看列契约',
+      category: 'dimension',
+      severity: 'major',
+      state: 'open',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+  });
 
-  const viewer = await signInAs(testApp, 'r003s1viewfields');
+  const viewer = await signInAs(testApp, 'r003s2viewfields');
   const rows = (
     (await expectJson(await viewer.fetch('/quality/tickets'), 200)) as {
       data: Record<string, unknown>[];
@@ -805,42 +812,37 @@ test('R-003 S1: the seven new ticket columns are absent from every view read', a
   ).data;
   expect(rows.length, '列表里应当能看到刚投递建的那张工单').toBeGreaterThan(0);
   for (const row of rows) {
-    expect(Object.keys(row).sort(), '工单列表不该多出 R-003 的新列').toEqual(
+    expect(Object.keys(row).sort(), '工单列表的列不是 S2 定下的清单').toEqual(
       [
-        'assigneeId',
-        'category',
-        'closedAt',
-        'code',
-        'createdAt',
-        'description',
-        'dueAt',
         'id',
-        'ownerDepartment',
-        'screeningId',
-        'severity',
-        'sourceMessageId',
-        'state',
+        'code',
         'title',
+        'description',
+        'sourceMessageId',
+        'screeningId',
+        'category',
+        'severity',
+        'assigneeId',
+        'state',
+        'closedAt',
+        'createdAt',
         'updatedAt',
+        'departmentId',
+        'createdBy',
+        'resolution',
+        'reopenCount',
+        'statusChangedAt',
+        'lifecycleVersion',
+        'lifecycleDefinition',
       ].sort(),
     );
-    for (const field of [
-      'departmentId',
-      'createdBy',
-      'resolution',
-      'reopenCount',
-      'statusChangedAt',
-      'lifecycleVersion',
-      'lifecycleDefinition',
-    ]) {
-      expect(row, `工单列表读到了 R-003 新加的 ${field}`).not.toHaveProperty(
-        field,
-      );
+    for (const field of ['ownerDepartment', 'dueAt']) {
+      expect(row, `工单列表读到了停写列 ${field}`).not.toHaveProperty(field);
     }
   }
 });
 
-test('R-013: the intake response matches the stored message, screening and ticket the list endpoints read', async ({
+test('R-003 S2: the intake response matches the stored message and screening; no ticket is created', async ({
   testApp,
   app,
 }) => {
@@ -875,7 +877,7 @@ test('R-013: the intake response matches the stored message, screening and ticke
     (row) => row.id === ingested.data.message.id,
   );
   expect(storedMessage, '列表里找不到刚投递的那条消息').toBeDefined();
-  // R-026 起投递的 201 还带新加的表单字段，「查看」只读原来的十一列；
+  // R-026 起投递的 201 还带新加的表单字段；R-003 S2 的「查看」又去掉发件人两列。
   // 按读者实际读到的列投影后再比，仍然逐字段相等。
   const viewedMessage = Object.fromEntries(
     Object.keys(storedMessage!).map((key) => [
@@ -921,14 +923,16 @@ test('R-013: the intake response matches the stored message, screening and ticke
 
   const ticketRows = (
     (await expectJson(await viewer.fetch('/quality/tickets'), 200)) as {
-      data: IngestedTicket[];
+      data: Record<string, unknown>[];
     }
   ).data;
-  const storedTicket = ticketRows.find(
-    (row) => row.id === ingested.data.ticket.id,
-  );
-  expect(storedTicket, '列表里找不到刚投递的那条工单').toBeDefined();
-  expectSameRecord(ingested.data.ticket, storedTicket!, '工单');
+  expect(
+    ticketRows.filter(
+      (row) => row.sourceMessageId === ingested.data.message.id,
+    ),
+    '这次投递不该建出工单',
+  ).toEqual([]);
+  expect(ingested.data, '响应里整段没有 ticket').not.toHaveProperty('ticket');
 });
 
 test('R-013 10: the inspector reports the quality manager permission set as the source, and denies a user with no role', async ({

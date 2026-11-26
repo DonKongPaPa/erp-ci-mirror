@@ -25,6 +25,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 APP="$ROOT/app-local"
 CI_DIR="$ROOT/.ci"
 CI_MIRROR="${CI_MIRROR:-0}"
+# 本地测试库容器（主机名固定；可用 TEST_PG_CONTAINER 覆盖以便守门测试）。CI 注入 POSTGRES_HOST，不用它。
+export TEST_PG_CONTAINER="${TEST_PG_CONTAINER:-hs-erp-pg-test}"
 
 mkdir -p "$CI_DIR"
 
@@ -400,13 +402,20 @@ check_evidence() {
   return 0
 }
 
-# 数据库方言：测试库优先用 Postgres（与生产同方言，迁移缺陷才不会漏到上线）。
-# 没有提供连接信息时回落到 SQLite —— 这是 NocoBase 测试栈的默认行为。
-export NOCOBASE_TEST_DB_DIALECT="${NOCOBASE_TEST_DB_DIALECT:-postgres}"
-if [ "$NOCOBASE_TEST_DB_DIALECT" = "postgres" ] && [ -z "${POSTGRES_HOST:-}" ]; then
-  printf '\n\033[33m[gate] 未设置 POSTGRES_HOST，测试库回落 SQLite。\033[0m\n' >&2
-  printf '  Postgres 能覆盖 SQLite 覆盖不到的类型与索引差异，CI 上必须用 Postgres。\n' >&2
-  export NOCOBASE_TEST_DB_DIALECT=sqlite
+# 测试只连 Postgres：与生产同方言，迁移与并发缺陷才不会漏到上线。
+# 显式设成别的方言（尤其 sqlite）直接报错，不给 SQLite 线留后门。
+if [ -n "${NOCOBASE_TEST_DB_DIALECT:-}" ] && [ "$NOCOBASE_TEST_DB_DIALECT" != "postgres" ]; then
+  fail "测试只连 Postgres；NOCOBASE_TEST_DB_DIALECT=$NOCOBASE_TEST_DB_DIALECT 不被接受。"
+fi
+export NOCOBASE_TEST_DB_DIALECT=postgres
+
+# 本地容器检查只对真正连库的档位；docs 档不连库，CI 的连接由工作流注入的变量保证。
+if [ -z "${POSTGRES_HOST:-}" ] && [ "${CI:-0}" != "true" ] && [ "${GITHUB_ACTIONS:-}" != "true" ]; then
+  case "$STAGE" in
+    fast|unit|beta|all)
+      "$ROOT/scripts/ci/test-pg-check.sh" || exit 1
+      ;;
+  esac
 fi
 
 cd "$APP" || fail "进不去 app-local"

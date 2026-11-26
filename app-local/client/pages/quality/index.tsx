@@ -230,7 +230,7 @@ export default function QualityPage(): ReactElement {
       if (!result) return;
       toaster.show({
         type: 'success',
-        title: t('quality.intake.created', { code: result.ticket.code }),
+        title: t('quality.intake.created'),
         description: `${t(
           `quality.categories.${result.screening.category ?? 'other'}`,
           {
