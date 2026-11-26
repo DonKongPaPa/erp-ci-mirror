@@ -119,8 +119,9 @@ export function screenByRules(content: string): ScreeningResult {
 /**
  * 暴露给应用其他部分与 agent 的初筛能力。
  *
- * 当前为规则实现；接入模型服务后，这里替换为 models.gateway.generate()，
- * 调用契约不变，因此上层业务不受影响。
+ * 这里只是规则版入口。模型层不在这里：R-002 的代填服务（`quality-drafting.ts` 的
+ * `draft`）用它出规则版兜底，再按 `quality.drafting.modelEnabled` 决定要不要问模型；
+ * 投递的那一行草稿也仍由这里先写出来。
  */
 export class QualityScreeningService {
   screen(content: string): ScreeningResult {

@@ -121,6 +121,34 @@ describe('enabled in development', () => {
     expect(JSON.stringify(accounts)).not.toContain('@');
   });
 
+  test('R-026: every demo person account carries the staff baseline, exactly once', async ({
+    connection,
+    testApp,
+  }) => {
+    const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+    const accounts = await readAccounts(admin);
+    const assignments = await connection.query
+      .selectFrom('authorizationPermissionSetAssignments')
+      .select(['subjectId', 'permissionSetKey'])
+      .where('subjectType', '=', 'user')
+      .where(
+        'subjectId',
+        'in',
+        accounts.map((account) => account.id),
+      )
+      .execute();
+    for (const account of accounts) {
+      const sets = assignments
+        .filter((row) => String(row.subjectId) === account.id)
+        .map((row) => String(row.permissionSetKey))
+        .sort();
+      // 业务角色加上基线 staff；staff 恰好一条（重跑不重复指派）。
+      expect(sets, `${account.username} 的权限集`).toEqual(
+        [...new Set([account.role, 'staff'])].sort(),
+      );
+    }
+  });
+
   test('switching ends the current session and signs in as the target', async ({
     testApp,
   }) => {

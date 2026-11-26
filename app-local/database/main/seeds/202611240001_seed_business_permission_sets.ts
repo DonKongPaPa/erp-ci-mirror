@@ -13,12 +13,14 @@ import { randomUUID } from 'node:crypto';
  * R-013 的四个业务角色（seed）。
  *
  * 授权内容照设计文档的角色表：
- * - 质量主管、质量员：FQC 查看与处理、质量页
- * - 部门主管：FQC 查看、质量页
- * - 普通员工：暂无授权，等反馈单的入口页上线后再赋
+ * - 质量主管、质量员：FQC 查看与处理、质量页、知识库；R-026 再加反馈单页、「提交反馈」
+ *   与「维护反馈单」
+ * - 部门主管：FQC 查看、质量页；R-026 不给他新动作
+ * - 普通员工：R-026 的反馈单页与「提交反馈」（两张表都是「仅本人」）
  *
- * 这一版所有数据范围都填 `allRecords`（Q31）。两把部门范围键已经注册，部门表有数据、
- * 业务表带 `departmentId` 后会自动开始生效。
+ * 「查看」「处理」「维护反馈单」的数据范围填 `allRecords`（Q31）；R-026 的
+ * 「提交反馈」按设计只给「仅本人」（`recordsIOwn`，比的是 `ownerId`）。两把部门
+ * 范围键已经注册，部门表有数据、业务表带 `departmentId` 后会自动开始生效。
  *
  * 四个角色都不授予「用户」资源的任何动作（R-028）：读人员信息只做选择性暴露。
  *
@@ -42,6 +44,22 @@ const qualityFqcScopes = {
  * 部门主管不该读到质量人员确认成什么（R-003 的收窄）。
  */
 const readFqcScopes = {
+  fqcMessages: 'allRecords',
+  fqcScreenings: 'allRecords',
+  fqcTickets: 'allRecords',
+} as const;
+
+/**
+ * R-026「提交反馈」的范围：两张表都只有「仅本人」，默认也是它。
+ * 声明里也只发布这一档（`recordAccess.recordsIOwn`），选不出会被整条跳过的组合。
+ */
+const submitFqcScopes = {
+  fqcMessages: 'recordsIOwn',
+  fqcScreenings: 'recordsIOwn',
+} as const;
+
+/** R-026「维护反馈单」的范围：三张表都只有「全部」。 */
+const maintainFqcScopes = {
   fqcMessages: 'allRecords',
   fqcScreenings: 'allRecords',
   fqcTickets: 'allRecords',
@@ -73,6 +91,12 @@ const qualityPage = {
   actions: [{ action: 'access' }],
 };
 
+/** R-026：反馈单页。页面 id 与路由的 `authz.resource.id` 由守门测试钉在一起。 */
+const feedbackPage = {
+  resource: { type: 'page', id: 'feedback' },
+  actions: [{ action: 'access' }],
+};
+
 const knowledgePage = {
   resource: { type: 'page', id: 'knowledge' },
   actions: [{ action: 'access' }],
@@ -96,6 +120,10 @@ export const businessPermissionSets: readonly PermissionSet[] = [
     .title({ key: 'permissionSets.business.qualityManager', ns: NAMESPACE })
     .grant(qualityPage)
     .grant(fqcGrant(['view', 'handle'], qualityFqcScopes))
+    // R-026：两个新动作各成一条授权，不并进上面那条「查看、处理」。
+    .grant(feedbackPage)
+    .grant(fqcGrant(['submit'], submitFqcScopes))
+    .grant(fqcGrant(['maintain'], maintainFqcScopes))
     .grant(knowledgePage)
     .grant(knowledgeGrant('manage.related'))
     .build(),
@@ -103,6 +131,9 @@ export const businessPermissionSets: readonly PermissionSet[] = [
     .title({ key: 'permissionSets.business.qualityInspector', ns: NAMESPACE })
     .grant(qualityPage)
     .grant(fqcGrant(['view', 'handle'], qualityFqcScopes))
+    .grant(feedbackPage)
+    .grant(fqcGrant(['submit'], submitFqcScopes))
+    .grant(fqcGrant(['maintain'], maintainFqcScopes))
     .grant(knowledgePage)
     .grant(knowledgeGrant('propose.related'))
     .build(),
@@ -113,6 +144,8 @@ export const businessPermissionSets: readonly PermissionSet[] = [
     .build(),
   definePermissionSet('staff')
     .title({ key: 'permissionSets.business.staff', ns: NAMESPACE })
+    .grant(feedbackPage)
+    .grant(fqcGrant(['submit'], submitFqcScopes))
     .build(),
 ];
 

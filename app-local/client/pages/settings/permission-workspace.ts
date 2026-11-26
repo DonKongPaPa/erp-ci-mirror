@@ -35,7 +35,11 @@ export interface PermissionWorkspaceSelection {
 /** Add only business operations and configuration controls this application exposes. */
 export const permissionWorkspaceSelection: PermissionWorkspaceSelection = {
   business: [
-    { type: 'composite', id: 'fqc', actions: ['view', 'handle', 'intake'] },
+    {
+      type: 'composite',
+      id: 'fqc',
+      actions: ['view', 'handle', 'intake', 'submit', 'maintain'],
+    },
   ],
   settings: [
     {

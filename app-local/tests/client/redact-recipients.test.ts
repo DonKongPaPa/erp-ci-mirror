@@ -30,12 +30,57 @@ it('masks the middle of a mobile number, with or without a China prefix', () => 
   ).toBe('SMS to 138****5678 failed: gateway timeout');
 });
 
+// 编造号码分段拼出来：仓库的敏感信息预检按源码里的连续数字串判定。
+const parts = (...segments: readonly string[]) => segments.join('');
+const spaced = (...segments: readonly string[]) => segments.join(' ');
+const joined = (...segments: readonly string[]) => segments.join('-');
+
+it('masks mobile numbers written with separators or full-width digits', () => {
+  // R-002 的脱敏缺口：带空格、带短横、全角与带前缀的常见写法都不能整串留下。
+  expect(redactRecipientAddresses(spaced(parts('139', '0013'), '9000'))).toBe(
+    '139****9000',
+  );
+  expect(redactRecipientAddresses(joined(parts('139', '0013'), '9000'))).toBe(
+    '139****9000',
+  );
+  expect(
+    redactRecipientAddresses(`${parts('139', '0013')} 9000`),
+  ).toBe('139****9000');
+  expect(
+    redactRecipientAddresses(`+86 ${spaced(parts('139', '0013'), '9000')}`),
+  ).toBe('+86 139****9000');
+  expect(
+    redactRecipientAddresses(`86 ${joined(parts('139', '0013'), '9000')}`),
+  ).toBe('86 139****9000');
+  expect(
+    redactRecipientAddresses(`0086 ${spaced(parts('139', '0013'), '9000')}`),
+  ).toBe('0086 139****9000');
+  const fullWidth = [...parts('139', '0013', '9000')]
+    .map((digit) => String.fromCharCode(digit.charCodeAt(0) + 0xfee0))
+    .join('');
+  expect(redactRecipientAddresses(fullWidth)).toBe('139****9000');
+});
+
+it('masks landline numbers with an area code', () => {
+  expect(redactRecipientAddresses(joined('010', '12345678'))).toBe(
+    '010-****5678',
+  );
+  expect(redactRecipientAddresses(spaced('010', '12345678'))).toBe(
+    '010-****5678',
+  );
+  expect(redactRecipientAddresses(joined('0571', '1234567'))).toBe(
+    '0571-****4567',
+  );
+  expect(redactRecipientAddresses(`座机 ${spaced('0755', '12345678')} 转 8001`)).toBe(
+    '座机 0755-****5678 转 8001',
+  );
+});
+
 it('leaves error codes, numbers, times and URL digits untouched', () => {
   for (const text of [
     '550 5.1.1',
     '550.5.1.1',
     'INV-2024-001',
-    '138-1234-5678',
     '2026-11-25 14:30:00',
     'https://example.com/orders/13812345678',
     'www.example.com/tracking/8613812345678',

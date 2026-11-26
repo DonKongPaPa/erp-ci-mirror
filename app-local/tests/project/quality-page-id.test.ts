@@ -28,8 +28,10 @@ function pageGrantIds(source: string): string[] {
  * 页面上。所以用一个守门测试把两处钉在一起。
  *
  * R-002 之后 seed 多给质量主管、质量员各一条知识库页面授权：它的 id 来自知识库
- * 插件（`PAGES`），页面本身由插件的客户端路由登记（第二个切片接上）。质量页的
- * 路由仍在本应用的 `client/routes.ts` 里。
+ * 插件（`PAGES`），页面本身由插件的客户端路由登记（第二个切片接上）。R-026 再给
+ * 三个角色（普通员工、质量主管、质量员）一条反馈单页的页面授权 `feedback`，页面
+ * 本身在 R-026 的页面切片里登记；路由接上之前这里只钉 seed 一侧，页面切片补
+ * `client/routes.ts` 的断言。质量页的路由仍在本应用的 `client/routes.ts` 里。
  *
  * 改 id 属于需要迁移存量授权的变化，不能只改一边（见 app-local/AGENTS.md 的
  * 「Pages and routes」）。
@@ -44,11 +46,11 @@ describe('R-013 质量页的授权 id', () => {
         '202611240001_seed_business_permission_sets.ts',
       ),
     );
-    // 质量页一条（R-013），知识库页一条（R-002）。
+    // 质量页一条（R-013），知识库页一条（R-002），反馈单页一条（R-026）。
     expect(
       seedPageIds.sort(),
-      'seed 里的页面授权应当只有质量页与知识库页两条',
-    ).toEqual(['knowledge', 'quality']);
+      'seed 里的页面授权应当有质量页、知识库页与反馈单页三条',
+    ).toEqual(['feedback', 'knowledge', 'quality']);
 
     const routePageIds = pageGrantIds(read('client', 'routes.ts'));
     expect(

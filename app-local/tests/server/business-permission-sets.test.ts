@@ -1,3 +1,9 @@
+import { randomUUID } from 'node:crypto';
+
+import {
+  DEFAULT_ADMIN_CREDENTIALS,
+  signIn,
+} from '@nocobase/app-plugin-authentication/testing';
 import { authorizationToken } from '@nocobase/app-plugin-authorization';
 import { createAppTest } from '../helpers/test-app.js';
 import { expect } from 'vitest';
@@ -31,8 +37,27 @@ const deptFqcScopes = {
   fqcTickets: 'allRecords',
 };
 
+/** R-026「提交反馈」：两张表都只有「仅本人」。 */
+const submitFqcScopes = {
+  fqcMessages: 'recordsIOwn',
+  fqcScreenings: 'recordsIOwn',
+};
+
+/** R-026「维护反馈单」：三张表都是「全部」。 */
+const maintainFqcScopes = {
+  fqcMessages: 'allRecords',
+  fqcScreenings: 'allRecords',
+  fqcTickets: 'allRecords',
+};
+
 const pageGrant = {
   resource: { type: 'page', id: 'quality' },
+  actions: [{ action: 'access' }],
+};
+
+/** R-026：反馈单页的页面授权。 */
+const feedbackPageGrant = {
+  resource: { type: 'page', id: 'feedback' },
   actions: [{ action: 'access' }],
 };
 
@@ -65,12 +90,33 @@ const fqcViewOnly = {
   ],
 };
 
+/** R-026：两个新动作各自成一条授权，不并进上面那条「查看、处理」。 */
+const fqcSubmit = {
+  resource: { type: 'composite', id: 'fqc' },
+  actions: [
+    { action: 'submit', policy: { type: 'composite', scopes: submitFqcScopes } },
+  ],
+};
+
+const fqcMaintain = {
+  resource: { type: 'composite', id: 'fqc' },
+  actions: [
+    {
+      action: 'maintain',
+      policy: { type: 'composite', scopes: maintainFqcScopes },
+    },
+  ],
+};
+
 const expectedRoles = {
   quality_manager: {
     title: { key: 'permissionSets.business.qualityManager', ns: 'app-local' },
     grants: [
       pageGrant,
       fqcViewAndHandle,
+      feedbackPageGrant,
+      fqcSubmit,
+      fqcMaintain,
       knowledgePageGrant,
       knowledgeGrant('manage.related'),
     ],
@@ -80,6 +126,9 @@ const expectedRoles = {
     grants: [
       pageGrant,
       fqcViewAndHandle,
+      feedbackPageGrant,
+      fqcSubmit,
+      fqcMaintain,
       knowledgePageGrant,
       knowledgeGrant('propose.related'),
     ],
@@ -90,7 +139,7 @@ const expectedRoles = {
   },
   staff: {
     title: { key: 'permissionSets.business.staff', ns: 'app-local' },
-    grants: [],
+    grants: [feedbackPageGrant, fqcSubmit],
   },
 } as const;
 
@@ -123,6 +172,101 @@ test('R-013: the seed creates the four roles as the design describes them', asyn
     expect(set, `seed 没有建出角色 ${key}`).toBeDefined();
     expect(set?.title).toEqual(expected.title);
     expect(set?.grants).toEqual(expected.grants);
+  }
+});
+
+/** 建一个持有所给角色的用户；用户名只收字母数字。 */
+const createRoleUser = async (
+  admin: Awaited<ReturnType<typeof signIn>>,
+  name: string,
+  role: string,
+): Promise<string> => {
+  const username = name.replace(/-/gu, '');
+  const response = await admin.fetch('/users', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      origin: 'http://localhost',
+      'Idempotency-Key': `${Date.now()}.${randomUUID()}`,
+    },
+    body: JSON.stringify({
+      name,
+      username,
+      email: `${username}@example.test`,
+      password: 'R026-seed-test-123!',
+      roleScopes: { app: [role] },
+    }),
+  });
+  expect(response.status, `建用户 ${name} 失败`).toBe(201);
+  return ((await response.json()).data as { id: string }).id;
+};
+
+// 这一条要在「管理员改过的角色不被覆盖」之前跑：那条测试会把 quality_manager 的
+// 授权改成只剩页面授权，后面的测试看到的不再是 seed 的初始状态。
+test('R-026 25: seed 的五个动作逐条展开，该放行的没有 NO_MATCHING_GRANT', async ({
+  app,
+  testApp,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const authz = app.container.resolve(authorizationToken);
+  const cases = [
+    {
+      role: 'staff',
+      allowed: ['submit'],
+      denied: ['view', 'handle', 'intake', 'maintain'],
+    },
+    {
+      role: 'quality_manager',
+      allowed: ['view', 'handle', 'submit', 'maintain'],
+      denied: ['intake'],
+    },
+    {
+      role: 'quality_inspector',
+      allowed: ['view', 'handle', 'submit', 'maintain'],
+      denied: ['intake'],
+    },
+    {
+      role: 'dept_manager',
+      allowed: ['view'],
+      denied: ['handle', 'intake', 'submit', 'maintain'],
+    },
+  ] as const;
+
+  for (const entry of cases) {
+    const userId = await createRoleUser(
+      admin,
+      `r026seed${entry.role.replace(/_/gu, '')}`,
+      entry.role,
+    );
+    const context = authz.for({ principal: { type: 'user', id: userId } });
+    const allowed = new Set<string>(entry.allowed);
+    // R-026 的建人初始化器会给每个「人」补基线 staff。这条用例验的是 seed 里
+    // 各角色自己的授权，所以把基线撤掉（staff 本身就是要验的角色，不撤），
+    // 让测试用户只持有被验的那一个角色。
+    if (entry.role !== 'staff') {
+      await authz.permissionSets.revoke(`user:${userId}:staff`);
+    }
+    for (const action of [...entry.allowed, ...entry.denied]) {
+      const decision = await context.authorize({
+        resource: { type: 'composite', id: 'fqc' },
+        action,
+      });
+      const reasons = decision.reasons.map((reason) => reason.code);
+      if (allowed.has(action)) {
+        expect(decision.effect, `${entry.role} 应当能 ${action}`).not.toBe(
+          'deny',
+        );
+        // 质量主管的「查看」「处理」没有因为加了新动作而丢。
+        expect(reasons, `${entry.role} ${action} 返回 NO_MATCHING_GRANT`).not.toContain(
+          'NO_MATCHING_GRANT',
+        );
+      } else {
+        expect(decision.effect, `${entry.role} 不应当能 ${action}`).toBe('deny');
+        expect(reasons, `${entry.role} ${action} 不是没有授权`).toContain(
+          'NO_MATCHING_GRANT',
+        );
+      }
+    }
   }
 });
 

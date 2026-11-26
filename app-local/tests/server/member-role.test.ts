@@ -58,20 +58,30 @@ test('saved roles control direct API access while account basics remain usable',
       }),
     );
     expect(response.status).toBe(201);
-    return (await response.json()).data;
+    const created = (await response.json()).data as { id: string };
+    // R-026 的基线在建人事务提交之后补，建人响应里是提交那一刻的角色；读回来看最终状态。
+    return (await (await admin.fetch(`/users/${created.id}`)).json()).data;
   };
+  // R-026：新建的「人」都自动带基线角色 staff。建人时提交的 roleScopes 由用户管理服务
+  // 整体替换直接角色，基线在建完提交之后补，所以显式清空也清不掉它；建完之后用
+  // 更新/撤销可以拿掉（下面 PATCH 成空之后就是 []）。
   const member = await create('membercase');
-  expect(member.roleScopes.app).toEqual(['member']);
-  expect((await create('emptycase', { app: [] })).roleScopes.app).toEqual([]);
+  expect(member.roleScopes.app).toEqual(['member', 'staff']);
+  expect((await create('emptycase', { app: [] })).roleScopes.app).toEqual([
+    'staff',
+  ]);
   expect(
     (await create('replacecase', { app: ['reader'] })).roleScopes.app,
-  ).toEqual(['reader']);
+  ).toEqual(['reader', 'staff']);
   expect(
     (
       await create('appendcase', { app: ['member', 'reader'] })
     ).roleScopes.app.sort(),
-  ).toEqual(['member', 'reader']);
-  expect((await create('omittedscope', {})).roleScopes.app).toEqual(['member']);
+  ).toEqual(['member', 'reader', 'staff']);
+  expect((await create('omittedscope', {})).roleScopes.app).toEqual([
+    'member',
+    'staff',
+  ]);
   let session = await signIn(testApp, {
     username: 'membercase',
     password: 'Member-test-123!',
@@ -187,7 +197,7 @@ test('registration and trusted external identity creation receive defaults atomi
         .where('subjectId', '=', id)
         .execute()
     ).map((r) => r.permissionSetKey);
-  expect(await roles(registered.id)).toEqual(['member']);
+  expect(await roles(registered.id)).toEqual(['member', 'staff']);
   const auth = app.container.resolve(authenticationToken);
   const context = await auth.administrationContext();
   const external = await context.internalAdapter.createUser({
@@ -195,7 +205,7 @@ test('registration and trusted external identity creation receive defaults atomi
     email: 'external@example.test',
     emailVerified: true,
   });
-  expect(await roles(external.id)).toEqual(['member']);
+  expect(await roles(external.id)).toEqual(['member', 'staff']);
   const service = await app.container
     .resolve(userAdministrationServiceToken)
     .createServiceAccount({ name: 'Service verification' });
@@ -233,10 +243,15 @@ test('invitations preserve explicit empty roles and existing account decisions',
     key: 'invitation-reader',
     grants: [],
   });
+  // R-026：邀请接受也是建人，基线 staff 在不提交角色时、显式清空时、只给自定义角色时都补上。
   for (const [name, scopes, expected] of [
-    ['invite-default', undefined, ['member']],
-    ['invite-empty', { app: [] }, []],
-    ['invite-replace', { app: ['invitation-reader'] }, ['invitation-reader']],
+    ['invite-default', undefined, ['member', 'staff']],
+    ['invite-empty', { app: [] }, ['staff']],
+    [
+      'invite-replace',
+      { app: ['invitation-reader'] },
+      ['invitation-reader', 'staff'],
+    ],
   ] as const) {
     const [invitation] = await users.invite({
       emails: [`${name}@example.test`],
@@ -285,7 +300,7 @@ test('invitations preserve explicit empty roles and existing account decisions',
     },
     existing.id,
   );
-  expect((await users.get(existing.id)).roleScopes.app).toEqual([]);
+  expect((await users.get(existing.id)).roleScopes.app).toEqual(['staff']);
   const created = await Promise.all(
     Array.from({ length: 4 }, (_, index) =>
       users.create({
@@ -296,10 +311,9 @@ test('invitations preserve explicit empty roles and existing account decisions',
       }),
     ),
   );
-  expect(created.map((user) => user.roleScopes.app)).toEqual([
-    ['member'],
-    [],
-    ['member'],
-    [],
-  ]);
+  expect(
+    await Promise.all(
+      created.map(async (user) => (await users.get(user.id)).roleScopes.app),
+    ),
+  ).toEqual([['member', 'staff'], ['staff'], ['member', 'staff'], ['staff']]);
 });

@@ -28,6 +28,7 @@ import users from './users.js';
 import knowledge from './knowledge.js';
 import foundation from './foundation.js';
 import devTools from './dev-tools.js';
+import quality from './quality.js';
 
 const defaultConfigs: AppConfigFactory<{
   mailers: ReturnType<typeof mailers>;
@@ -56,6 +57,7 @@ const defaultConfigs: AppConfigFactory<{
   knowledge: ReturnType<typeof knowledge>;
   foundation: ReturnType<typeof foundation>;
   devTools: ReturnType<typeof devTools>;
+  quality: ReturnType<typeof quality>;
 }> = defaultAppConfigs({
   mailers,
   auth,
@@ -83,6 +85,7 @@ const defaultConfigs: AppConfigFactory<{
   knowledge,
   foundation,
   devTools,
+  quality,
 });
 
 export default defaultConfigs;

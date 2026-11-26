@@ -61,6 +61,7 @@ interface IngestedScreening extends Record<string, unknown> {
 interface IngestedMessage extends Record<string, unknown> {
   id: string;
   content: string;
+  status: string;
   receivedAt: string;
 }
 
@@ -197,6 +198,20 @@ const createUser = async (
 const signInAs = (app: SignInTarget, username: string) =>
   signIn(app, { username, password: PASSWORD });
 
+/**
+ * R-026：新建的「人」自动带基线角色 staff。要一个真正零赋值的 person 账号，
+ * 建完之后把基线撤掉（用 `{ app: [] }` 建不行，基线会在提交之后补上）。
+ */
+const createNoRoleUser = async (
+  admin: TestSession,
+  authz: AppAuthorization,
+  name: string,
+): Promise<{ id: string }> => {
+  const user = await createUser(admin, name, { app: [] });
+  await authz.permissionSets.revoke(`user:${user.id}:staff`);
+  return user;
+};
+
 /** 这个用户持有的权限集，用来证明「没有任何角色」与「质量主管」就是字面意思。 */
 const permissionSetsOf = async (
   authz: AppAuthorization,
@@ -294,7 +309,7 @@ test('R-013 3b: a user with no permission set is refused by every quality endpoi
 }) => {
   const authz = authzOf(app);
   const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
-  const nobody = await createUser(admin, 'r013qnone', { app: [] });
+  const nobody = await createNoRoleUser(admin, authz, 'r013qnone');
   expect(
     await permissionSetsOf(authz, nobody.id),
     '这个用户不该持有任何权限集',
@@ -339,6 +354,7 @@ test('R-013 3b: a quality manager lists and reviews, and may not intake', async 
   });
   expect(await permissionSetsOf(authz, manager.id)).toEqual([
     'quality_manager',
+    'staff',
   ]);
 
   const session = await signInAs(testApp, 'r013qmanager');
@@ -452,6 +468,7 @@ test('R-013 3b: a department manager lists but may neither review nor intake', a
   });
   expect(await permissionSetsOf(authz, deptManager.id)).toEqual([
     'dept_manager',
+    'staff',
   ]);
 
   const session = await signInAs(testApp, 'r013qdept');
@@ -565,9 +582,29 @@ test('R-013 12: a service account key holding fqc.intake intakes once per idempo
 }) => {
   const authz = authzOf(app);
   const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  // 重放要经请求自己的读范围读回那一行（R-002 的裁决），所以夹具给这份投递权限集
+  // 再加一份全量读；没有读范围的投递账号重放会得到 409，那一条在
+  // `tests/server/quality-drafting.test.ts` 的「重放经请求自己的读范围」里。
+  const replayViewGrant = {
+    resource: { type: 'composite', id: 'fqc' },
+    actions: [
+      {
+        action: 'view',
+        policy: {
+          type: 'composite',
+          scopes: {
+            fqcMessages: 'allRecords',
+            fqcScreenings: 'allRecords',
+            fqcTickets: 'allRecords',
+            fqcScreeningReviews: 'allRecords',
+          },
+        },
+      },
+    ],
+  };
   await authz.permissionSets.create({
     key: 'r013q-intake',
-    grants: [intakeGrant],
+    grants: [intakeGrant, replayViewGrant],
   });
 
   const users = app.container.resolve(userAdministrationServiceToken);
@@ -653,6 +690,154 @@ test('R-013 12: a service account key holding fqc.intake intakes once per idempo
     '普通用户的投递',
   );
   expect(await countFqcRows(connection)).toEqual(afterFirst);
+});
+
+test('R-026 9/10: 投递写 open，重复的 (channel, externalId) 是 409 且一行不多', async ({
+  testApp,
+  app,
+  connection,
+}) => {
+  authzOf(app);
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const before = await countFqcRows(connection);
+
+  const first = (await expectJson(
+    await admin.fetch(
+      '/quality/intake',
+      json({
+        channel: 'wechat',
+        externalId: 'r026-intake-dup-1',
+        content: 'R-026 第一次投递',
+      }),
+    ),
+    201,
+  )) as Ingested;
+  expect(
+    first.data.message.status,
+    '投递写入的消息状态应当是 open，不再是 screened',
+  ).toBe('open');
+  const stored = await connection
+    .repository('fqcMessages')
+    .findOne({ filter: { id: first.data.message.id } });
+  expect(stored, '投递之后库里找不到那条消息').toMatchObject({
+    status: 'open',
+    externalId: 'r026-intake-dup-1',
+    ownerId: null,
+  });
+  const afterFirst = await countFqcRows(connection);
+  for (const table of FQC_TABLES) {
+    expect(afterFirst[table], `${table} 应当多一行`).toBe(before[table] + 1);
+  }
+
+  // 不同幂等键、同一个 (channel, externalId)：409 FEEDBACK_ALREADY_RECORDED，一行不多。
+  const duplicateResponse = await admin.fetch(
+    '/quality/intake',
+    json({
+      channel: 'wechat',
+      externalId: 'r026-intake-dup-1',
+      content: 'R-026 第二次投递',
+    }),
+  );
+  const duplicateText = await duplicateResponse.text();
+  expect(duplicateResponse.status, `${duplicateText}`).toBe(409);
+  const duplicateBody = JSON.parse(duplicateText) as {
+    error: ApiErrorBody['error'];
+    data?: unknown;
+  };
+  expect(duplicateBody.error.reason).toBe('FEEDBACK_ALREADY_RECORDED');
+  expect(duplicateBody.error.status).toBe('ALREADY_EXISTS');
+  expect(duplicateBody.error.domain).toBe('quality');
+  expect(duplicateBody, '投递的 409 不该带任何一行的内容').not.toHaveProperty(
+    'data',
+  );
+  expect(duplicateText, '409 里不该带已有那一行的标识').not.toContain(
+    first.data.message.id,
+  );
+  expect(await countFqcRows(connection)).toEqual(afterFirst);
+
+  // 外部标识为空的两条可以并存（空值互不相等）。
+  await expectJson(
+    await admin.fetch(
+      '/quality/intake',
+      json({ channel: 'wechat', content: '空标识一' }),
+    ),
+    201,
+  );
+  await expectJson(
+    await admin.fetch(
+      '/quality/intake',
+      json({ channel: 'wechat', content: '空标识二' }),
+    ),
+    201,
+  );
+  const afterNulls = await countFqcRows(connection);
+  expect(afterNulls.fqcMessages, '两条空标识应当各建一行').toBe(
+    afterFirst.fqcMessages + 2,
+  );
+});
+
+/**
+ * R-003 S1：新加的七列在授权第二片定契约之前，任何走「查看」的读接口都拿不到。
+ *
+ * 声明逐列列出原来的十五列，不写 `read('*')`。这里从列表端点验行为：守门的
+ * 「201 与列表同一组字段」只保证了两边一致，两边一起多回七列它也不会红。
+ */
+test('R-003 S1: the seven new ticket columns are absent from every view read', async ({
+  testApp,
+  app,
+}) => {
+  authzOf(app);
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  await createUser(admin, 'r003s1viewfields', { app: ['quality_manager'] });
+  await expectJson(
+    await admin.fetch(
+      '/quality/intake',
+      json({ channel: 'wechat', content: 'R-003 S1 查看收窄' }),
+    ),
+    201,
+  );
+
+  const viewer = await signInAs(testApp, 'r003s1viewfields');
+  const rows = (
+    (await expectJson(await viewer.fetch('/quality/tickets'), 200)) as {
+      data: Record<string, unknown>[];
+    }
+  ).data;
+  expect(rows.length, '列表里应当能看到刚投递建的那张工单').toBeGreaterThan(0);
+  for (const row of rows) {
+    expect(Object.keys(row).sort(), '工单列表不该多出 R-003 的新列').toEqual(
+      [
+        'assigneeId',
+        'category',
+        'closedAt',
+        'code',
+        'createdAt',
+        'description',
+        'dueAt',
+        'id',
+        'ownerDepartment',
+        'screeningId',
+        'severity',
+        'sourceMessageId',
+        'state',
+        'title',
+        'updatedAt',
+      ].sort(),
+    );
+    for (const field of [
+      'departmentId',
+      'createdBy',
+      'resolution',
+      'reopenCount',
+      'statusChangedAt',
+      'lifecycleVersion',
+      'lifecycleDefinition',
+    ]) {
+      expect(row, `工单列表读到了 R-003 新加的 ${field}`).not.toHaveProperty(
+        field,
+      );
+    }
+  }
 });
 
 test('R-013: the intake response matches the stored message, screening and ticket the list endpoints read', async ({
@@ -743,7 +928,7 @@ test('R-013 10: the inspector reports the quality manager permission set as the 
   const manager = await createUser(admin, 'r013qinspectormanager', {
     app: ['quality_manager'],
   });
-  const nobody = await createUser(admin, 'r013qinspectornone', { app: [] });
+  const nobody = await createNoRoleUser(admin, authz, 'r013qinspectornone');
   expect(await permissionSetsOf(authz, nobody.id)).toEqual([]);
 
   const decide = async (id: string): Promise<InspectedDecision> =>

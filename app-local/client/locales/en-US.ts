@@ -296,6 +296,8 @@ const enUS = {
         view: 'View',
         handle: 'Handle',
         intake: 'Intake',
+        submit: 'Submit feedback',
+        maintain: 'Maintain feedback',
       },
     },
     // R-012: the department business resource and the three tables its two actions expand to.

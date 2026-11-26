@@ -31,7 +31,15 @@ import { ServiceProvider } from '@nocobase/service-provider';
  * （标识、姓名、用户名），不回邮箱（R-028 的选择性暴露）。
  */
 
-const SPACE: SpaceRef = { scope: 'quality', scopeId: 'standards' } as const;
+/**
+ * 质量标准这一个空间。代填服务读知识库时也用它，所以导出；两处不能各写一份，
+ * 解析器与读的那一边会悄悄漂开。
+ */
+export const QUALITY_STANDARDS_SPACE: SpaceRef = {
+  scope: 'quality',
+  scopeId: 'standards',
+} as const;
+const SPACE = QUALITY_STANDARDS_SPACE;
 const SPACE_TITLE = '质量标准';
 
 /** 从高到低：第一个持有的那一档就是读者的档位。 */

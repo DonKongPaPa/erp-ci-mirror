@@ -267,6 +267,8 @@ const zhCN: AppResource = {
         view: '查看',
         handle: '处理',
         intake: '投递',
+        submit: '提交反馈',
+        maintain: '维护反馈单',
       },
     },
     // R-012：部门业务资源，以及两个动作展开的三张表。

@@ -813,7 +813,8 @@ test('R-002 15: 统计不扩大暴露面，也不存在返回相似案例正文�
       content: marker,
       rawContentType: 'text',
       receivedAt: new Date('2026-11-15T10:00:00'),
-      status: 'screened',
+      // R-026：反馈单的状态只有 open 与 discarded；测试夹具跟设计走。
+      status: 'open',
       createdAt: new Date('2026-11-15T10:00:00'),
       updatedAt: new Date('2026-11-15T10:00:00'),
     },

@@ -111,12 +111,12 @@ test(
       expect(exported.json().ok).toBe(true);
 
       const targetUserId = await createUser(target, 'roundtrip');
-      // 目标环境里这个用户按默认只持有 member：导入之前没有质量员的授权。
+      // 目标环境里这个用户按默认只持有 member 与 R-026 的基线 staff：导入之前没有质量员的授权。
       expect(
         (await effectivePermissionSets(target, targetUserId)).map(
           (set) => set.key,
         ),
-      ).toEqual(['member']);
+      ).toEqual(['member', 'staff']);
 
       const imported = await runCommand(AuthzImport, target, 'authz:import', [
         '--file',

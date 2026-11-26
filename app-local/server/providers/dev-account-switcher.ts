@@ -10,6 +10,7 @@ import {
   isDevAccountSwitcherConfigured,
   isDevAccountSwitcherEnabled,
 } from '../dev-tools/settings.js';
+import { STAFF_PERMISSION_SET } from './staff-baseline.js';
 
 /**
  * R-037 开发工具的启动逻辑。
@@ -66,7 +67,12 @@ export default class DevAccountSwitcherProvider extends ServiceProvider<Applicat
         username: account.username,
         email: demoAccountEmail(account.username),
         password: randomBytes(32).toString('base64url'),
-        roleScopes: { app: [account.role] },
+        // R-026：演示账户里的「人」都带基线角色 staff。users.create 在建完之后按这份
+        // 清单整体替换直接角色，所以不能只靠建人初始化器；显式写进来。重跑时账户已
+        // 存在就跳过，不会重复指派。
+        roleScopes: {
+          app: [...new Set([account.role, STAFF_PERMISSION_SET])],
+        },
       });
     }
   }

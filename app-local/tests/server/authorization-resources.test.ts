@@ -85,6 +85,135 @@ const INTAKE_SCREENING_UPDATE_FIELDS = [
   'updatedAt',
 ];
 
+/** R-026：消息表原来的十一列（「查看」只读它们）。 */
+const VIEW_MESSAGE_READ_FIELDS = [
+  'id',
+  'channel',
+  'externalId',
+  'senderName',
+  'senderContact',
+  'content',
+  'rawContentType',
+  'receivedAt',
+  'status',
+  'createdAt',
+  'updatedAt',
+].sort();
+
+/** R-026：「查看」读初筛表的十九列，不含本条新加的 ownerId。 */
+const VIEW_SCREENING_READ_FIELDS = [
+  'id',
+  'messageId',
+  'category',
+  'severity',
+  'suggestedOwner',
+  'summary',
+  'confidence',
+  'evidence',
+  'modelName',
+  'outcome',
+  'createdAt',
+  'updatedAt',
+  'engine',
+  'promptVersion',
+  'degraded',
+  'degradeReason',
+  'knowledgeRefs',
+  'redacted',
+  'reviewId',
+].sort();
+
+/** R-003 S1：「查看」读工单表原来的十五列，新加的七列第二片定契约之前不放开。 */
+const VIEW_TICKET_READ_FIELDS = [
+  'id',
+  'code',
+  'title',
+  'description',
+  'sourceMessageId',
+  'screeningId',
+  'category',
+  'severity',
+  'ownerDepartment',
+  'assigneeId',
+  'state',
+  'dueAt',
+  'closedAt',
+  'createdAt',
+  'updatedAt',
+].sort();
+
+/** R-003 S1：迁移 202611260003 新加的七列，经「查看」一列都读不到。 */
+const NEW_TICKET_FIELDS = [
+  'departmentId',
+  'createdBy',
+  'resolution',
+  'reopenCount',
+  'statusChangedAt',
+  'lifecycleVersion',
+  'lifecycleDefinition',
+];
+
+/** R-026：「提交反馈」读消息表的十九列、建十七列，建初筛表十五列。 */
+const SUBMIT_MESSAGE_READ_FIELDS = [
+  'id',
+  'channel',
+  'externalId',
+  'senderName',
+  'senderContact',
+  'content',
+  'rawContentType',
+  'receivedAt',
+  'status',
+  'customerName',
+  'productName',
+  'model',
+  'batchNo',
+  'attachmentIds',
+  'ownerId',
+  'discardedAt',
+  'discardReason',
+  'createdAt',
+  'updatedAt',
+].sort();
+
+const SUBMIT_MESSAGE_CREATE_FIELDS = [
+  'id',
+  'channel',
+  'externalId',
+  'senderName',
+  'senderContact',
+  'content',
+  'rawContentType',
+  'receivedAt',
+  'status',
+  'customerName',
+  'productName',
+  'model',
+  'batchNo',
+  'attachmentIds',
+  'ownerId',
+  'createdAt',
+  'updatedAt',
+].sort();
+
+const SUBMIT_SCREENING_CREATE_FIELDS = [
+  'id',
+  'messageId',
+  'category',
+  'severity',
+  'suggestedOwner',
+  'summary',
+  'confidence',
+  'evidence',
+  'modelName',
+  'outcome',
+  'degradeReason',
+  'knowledgeRefs',
+  'ownerId',
+  'createdAt',
+  'updatedAt',
+].sort();
+
 const codes = (decision: { readonly reasons: readonly { code: string }[] }) =>
   decision.reasons.map((reason) => reason.code);
 
@@ -100,9 +229,21 @@ const databasePolicies = (
 const isAllowed = (value: unknown): boolean =>
   value !== undefined && value !== false;
 
-/** 一个写动作允许的列；没有这个动作、或动作被拒时返回 undefined。 */
+/** 一个写动作允许的列；没有这个动作、动作被拒时返回 undefined。 */
 const writableFields = (
   node: RepositoryPolicy['update'] | RepositoryPolicy['create'] | undefined,
+): readonly string[] | undefined => {
+  if (node === undefined || typeof node === 'boolean') {
+    return undefined;
+  }
+  return node.fields === undefined || node.fields === false
+    ? undefined
+    : [...node.fields].sort();
+};
+
+/** 一个读动作允许的列；全列时返回 undefined。 */
+const readableFields = (
+  node: RepositoryPolicy['read'] | undefined,
 ): readonly string[] | undefined => {
   if (node === undefined || typeof node === 'boolean') {
     return undefined;
@@ -117,6 +258,9 @@ const writableFields = (
  *
  * 确认记录表另说：两个质量角色的查看带它的读；部门主管的查看**不带**（没配范围
  * 就是拒绝，R-003 的收窄靠这一点）。范围键仍在，只是读被折成 false。
+ *
+ * R-026 把消息表与初筛表的读收成清单：前者是原来的十一列，后者是原来的十九列
+ * （不含 ownerId）。部门主管也持「查看」，本条新加的十列一列也读不到。
  */
 const expectView = (
   decision: FqcDecision,
@@ -140,6 +284,29 @@ const expectView = (
     expect(isAllowed(policies[table]?.delete), `${table} 的查看带了删除`).toBe(
       false,
     );
+  }
+  expect(
+    readableFields(policies.fqcMessages?.read),
+    '查看对消息表不是原来的十一列',
+  ).toEqual(VIEW_MESSAGE_READ_FIELDS);
+  expect(
+    readableFields(policies.fqcScreenings?.read),
+    '查看对初筛表不是原来的十九列',
+  ).toEqual(VIEW_SCREENING_READ_FIELDS);
+  expect(
+    readableFields(policies.fqcScreenings?.read) ?? [],
+    '查看对初筛表的读里出现了 ownerId',
+  ).not.toContain('ownerId');
+  // R-003 S1：七列经「查看」的任何读接口都拿不到。第二片定下契约后再放开要放开的那几列。
+  expect(
+    readableFields(policies.fqcTickets?.read),
+    '查看对工单表不是原来的十五列',
+  ).toEqual(VIEW_TICKET_READ_FIELDS);
+  for (const field of NEW_TICKET_FIELDS) {
+    expect(
+      readableFields(policies.fqcTickets?.read) ?? [],
+      `查看不该读到 R-003 新加的 ${field}`,
+    ).not.toContain(field);
   }
 };
 
@@ -261,7 +428,7 @@ test('R-013: registers the three FQC tables with three actions, the fqc actions,
     key: 'authorization.fqc.actions.view',
     ns: 'app-local',
   });
-  for (const action of ['view', 'handle', 'intake']) {
+  for (const action of ['view', 'handle', 'intake', 'submit', 'maintain']) {
     expect(
       authz.compositeResources.getAction('fqc', action),
       `fqc.${action} 没有注册`,
@@ -282,7 +449,7 @@ test('R-013: registers the three FQC tables with three actions, the fqc actions,
   }
 });
 
-test('R-013: the role editor catalogue lists the three FQC actions and no department scope on tables without the column', async ({
+test('R-013: the role editor catalogue lists the five FQC actions and no department scope on tables without the column', async ({
   testApp,
 }) => {
   const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
@@ -298,7 +465,12 @@ test('R-013: the role editor catalogue lists the three FQC actions and no depart
           actions: { name: string }[];
           dataScopes?: Record<
             string,
-            { key: string; collection: string; recordAccess: string[] }[]
+            {
+              key: string;
+              collection: string;
+              recordAccess: string[];
+              defaultValue?: string;
+            }[]
           >;
         }[];
       }[];
@@ -316,6 +488,8 @@ test('R-013: the role editor catalogue lists the three FQC actions and no depart
     'view',
     'handle',
     'intake',
+    'submit',
+    'maintain',
   ]);
   for (const action of ['view', 'handle']) {
     const scopes = fqc?.dataScopes?.[action] ?? [];
@@ -324,12 +498,18 @@ test('R-013: the role editor catalogue lists the three FQC actions and no depart
     );
     for (const scope of scopes) {
       expect(scope.recordAccess).toContain('allRecords');
-      if (scope.collection === REVIEW_TABLE) {
-        // R-002 的确认记录表带 departmentId 列，两把部门范围键在它上面是可用的。
+      if (
+        scope.collection === REVIEW_TABLE ||
+        scope.collection === 'fqcTickets'
+      ) {
+        // R-002 的确认记录表带 departmentId 列。R-003 设计「授权与暴露面」一节
+        // （「为什么要把『处理工单』拆出来」与「默认授权」）给工单表加了这一列，
+        // 部门主管的「查看」按它收成「本部门及下级」，所以两把部门范围键在这里可用。
+        // 列的填充与范围真正生效在后面的片：S2 收口授权、S4 解析范围、S5 流转。
         expect(scope.recordAccess).toContain('org.myDepartments');
         expect(scope.recordAccess).toContain('org.myDepartmentsAndBelow');
       } else {
-        // 三张业务表没有 departmentId 列，部门范围键不该出现在这里（验收第 5 条的适用面）。
+        // 剩下两张业务表没有 departmentId 列，部门范围键不该出现在这里（验收第 5 条的适用面）。
         expect(scope.recordAccess).not.toContain('org.myDepartments');
         expect(scope.recordAccess).not.toContain('org.myDepartmentsAndBelow');
       }
@@ -340,6 +520,33 @@ test('R-013: the role editor catalogue lists the three FQC actions and no depart
   expect(intakeScopes.map((scope) => scope.collection).sort()).toEqual(
     [...FQC_TABLES].sort(),
   );
+  // R-026：提交反馈只有两张表，且只有「仅本人」一档，默认也是它。
+  const submitScopes = fqc?.dataScopes?.submit ?? [];
+  expect(submitScopes.map((scope) => scope.collection).sort()).toEqual([
+    'fqcMessages',
+    'fqcScreenings',
+  ]);
+  for (const scope of submitScopes) {
+    expect(scope.recordAccess, `${scope.collection} 的范围选项不是只有仅本人`).toEqual(
+      ['recordsIOwn'],
+    );
+    expect(scope.defaultValue, `${scope.collection} 的默认范围不是仅本人`).toBe(
+      'recordsIOwn',
+    );
+  }
+  // R-026：维护反馈单三张表，且只有「全部」一档，默认也是它。
+  const maintainScopes = fqc?.dataScopes?.maintain ?? [];
+  expect(maintainScopes.map((scope) => scope.collection).sort()).toEqual(
+    [...FQC_TABLES].sort(),
+  );
+  for (const scope of maintainScopes) {
+    expect(scope.recordAccess, `${scope.collection} 的范围选项不是只有全部`).toEqual(
+      ['allRecords'],
+    );
+    expect(scope.defaultValue, `${scope.collection} 的默认范围不是全部`).toBe(
+      'allRecords',
+    );
+  }
 });
 
 test('R-013: an unregistered collection or business action is denied even for root', async ({
@@ -443,7 +650,7 @@ test('R-013: a department manager views and neither handles nor intakes', async 
   }
 });
 
-test('R-013: staff, a member-only user and a user with no role are denied every action', async ({
+test('R-013: staff and a member-only user (both carrying the baseline staff) may submit feedback and nothing else; a user with no role is denied every action', async ({
   testApp,
   app,
 }) => {
@@ -454,6 +661,9 @@ test('R-013: staff, a member-only user and a user with no role are denied every 
 
   const permissionSets =
     app.container.resolve(authorizationToken).permissionSets;
+  // R-026 的基线 staff 在建人时自动补，person 账号建不出「没有任何角色」；
+  // 把基线撤掉，留一个真正的零赋值主体给这条用例。
+  await permissionSets.revoke(`user:${nobody.id}:staff`);
   const assignments = await permissionSets.listAssignments();
   const setsOf = (userId: string) =>
     assignments
@@ -465,15 +675,50 @@ test('R-013: staff, a member-only user and a user with no role are denied every 
       .map((assignment) => assignment.permissionSet)
       .sort();
 
-  // 先证明这三个用户的角色就是名字说的那样：不默认持有 member、也没有多出来什么。
+  // 先证明这三个用户的角色就是名字说的那样：member 之外都带着 R-026 的基线 staff。
   expect(setsOf(staff.id), '普通员工没有拿到 staff 角色').toEqual(['staff']);
-  expect(setsOf(member.id), '这个用户没有拿到 member 角色').toEqual(['member']);
+  expect(setsOf(member.id), '这个用户没有拿到 member 角色').toEqual([
+    'member',
+    'staff',
+  ]);
   expect(setsOf(nobody.id), '这个用户不该持有任何角色').toEqual([]);
 
   const authz = app.container.resolve(authorizationToken);
-  for (const user of [staff, member, nobody]) {
+  // R-026：「提交反馈」是普通员工唯一能用的动作；其余四个仍然被拒。
+  const staffContext = authz.for({
+    principal: { type: 'user', id: staff.id },
+  });
+  const submit = await staffContext.authorize({
+    resource: { type: 'composite', id: 'fqc' },
+    action: 'submit',
+  });
+  expect(submit.effect, '普通员工不能提交反馈').toBe('conditional');
+  expect(codes(submit)).not.toContain('NO_MATCHING_GRANT');
+  for (const action of ['view', 'handle', 'intake', 'maintain']) {
+    const denied = await staffContext.authorize({
+      resource: { type: 'composite', id: 'fqc' },
+      action,
+    });
+    expect(denied.effect, `普通员工不该能 ${action}`).toBe('deny');
+    expect(codes(denied)).toContain('NO_MATCHING_GRANT');
+  }
+  for (const user of [member, nobody]) {
     const context = authz.for({ principal: { type: 'user', id: user.id } });
-    for (const action of ['view', 'handle', 'intake']) {
+    // 只持 member 的账号也带 R-026 的基线 staff，所以也能提交（仅本人）；
+    // 撤销了基线账号的 nobody 什么都不能。
+    const submit = await context.authorize({
+      resource: { type: 'composite', id: 'fqc' },
+      action: 'submit',
+    });
+    if (user === member) {
+      expect(submit.effect, '持 member 的账号也带基线 staff，应当能提交').toBe(
+        'conditional',
+      );
+    } else {
+      expect(submit.effect, '这个用户不应当能 submit').toBe('deny');
+      expect(codes(submit)).toContain('NO_MATCHING_GRANT');
+    }
+    for (const action of ['view', 'handle', 'intake', 'maintain']) {
       const denied = await context.authorize({
         resource: { type: 'composite', id: 'fqc' },
         action,
@@ -482,6 +727,44 @@ test('R-013: staff, a member-only user and a user with no role are denied every 
       expect(codes(denied)).toContain('NO_MATCHING_GRANT');
     }
   }
+});
+
+test('R-026 23: 普通员工持有的「提交反馈」建列、改列与初筛的不读逐项固定', async ({
+  testApp,
+  app,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const staff = await createUser(admin, 'r026submitstaff', { app: ['staff'] });
+  const decision = await app.container
+    .resolve(authorizationToken)
+    .for({ principal: { type: 'user', id: staff.id } })
+    .authorize({ resource: { type: 'composite', id: 'fqc' }, action: 'submit' });
+  const policies = databasePolicies(decision);
+  expect(Object.keys(policies).sort()).toEqual(['fqcMessages', 'fqcScreenings']);
+  expect(
+    readableFields(policies.fqcMessages?.read),
+    '提交反馈读消息表的列与设计不一致',
+  ).toEqual(SUBMIT_MESSAGE_READ_FIELDS);
+  expect(
+    writableFields(policies.fqcMessages?.create),
+    '提交反馈建消息表的列与设计不一致',
+  ).toEqual(SUBMIT_MESSAGE_CREATE_FIELDS);
+  expect(
+    writableFields(policies.fqcMessages?.update),
+    '提交反馈不该能改消息表',
+  ).toBeUndefined();
+  expect(
+    writableFields(policies.fqcScreenings?.create),
+    '提交反馈建初筛表的列与设计不一致',
+  ).toEqual(SUBMIT_SCREENING_CREATE_FIELDS);
+  expect(
+    writableFields(policies.fqcScreenings?.update),
+    '提交反馈改初筛表的列与投递不一致',
+  ).toEqual([...INTAKE_SCREENING_UPDATE_FIELDS].sort());
+  expect(
+    isAllowed(policies.fqcScreenings?.read),
+    '提交反馈不该能读初筛表',
+  ).toBe(false);
 });
 
 test('R-013: root is unrestricted on the business actions, may read the tables and may not delete them', async ({
@@ -494,7 +777,7 @@ test('R-013: root is unrestricted on the business actions, may read the tables a
     principal: { type: 'user', id: String(admin.user.id) },
   });
 
-  for (const action of ['view', 'handle', 'intake']) {
+  for (const action of ['view', 'handle', 'intake', 'submit', 'maintain']) {
     const decision = await root.authorize({
       resource: { type: 'composite', id: 'fqc' },
       action,
@@ -502,11 +785,14 @@ test('R-013: root is unrestricted on the business actions, may read the tables a
     // root 不受限：跳过 grant 检查，但底层表的检查仍是带范围的 conditional。
     expect(decision.effect, `root 被拒了 fqc.${action}`).toBe('conditional');
     expect(codes(decision)).toContain('UNRESTRICTED_ACCESS');
-    expect(Object.keys(decision.conditions?.database ?? {}).sort()).toEqual(
-      (action === 'intake'
+    const expectedTables =
+      action === 'intake' || action === 'maintain'
         ? [...FQC_TABLES]
-        : [...FQC_TABLES, REVIEW_TABLE]
-      ).sort(),
+        : action === 'submit'
+          ? ['fqcMessages', 'fqcScreenings']
+          : [...FQC_TABLES, REVIEW_TABLE];
+    expect(Object.keys(decision.conditions?.database ?? {}).sort()).toEqual(
+      expectedTables.sort(),
     );
   }
   for (const table of [...FQC_TABLES, REVIEW_TABLE]) {
@@ -564,6 +850,9 @@ test('R-013: a grant holding only intake creates rows and cannot read the tables
   const proxy = await createUser(admin, 'r013proxy', {
     app: ['r013intake-proxy'],
   });
+  // 这条用例验的是「只有这份投递授权」的主体；建人初始化器会给它补基线 staff，
+  // 而 staff 的「提交反馈」带消息表的读，会干扰下面的裸读断言。把基线撤掉。
+  await authz.permissionSets.revoke(`user:${proxy.id}:staff`);
   const context = authz.for({ principal: { type: 'user', id: proxy.id } });
 
   // 先证明这份授权真的生效，否则下面的「读被拒」可能只是因为它什么都没有。

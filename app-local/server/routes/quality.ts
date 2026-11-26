@@ -7,6 +7,7 @@ import {
   type AuthorizationEnv,
 } from '@nocobase/app-plugin-authorization/server';
 import type { Application } from '@nocobase/app-server/application';
+import { loggingToken } from '@nocobase/app-server/logging';
 import {
   AuthorizationDeniedError,
   type AuthorizationDecision,
@@ -14,6 +15,7 @@ import {
 } from '@nocobase/authorization/core';
 import {
   databaseManagerToken,
+  isUniqueConstraintViolation,
   type DatabaseConnection,
   type RepositoryPolicy,
 } from '@nocobase/db';
@@ -45,7 +47,15 @@ import {
   TicketSchema,
   type IngestMessageInput,
 } from './schemas.js';
-import { computeDraftingStats } from '../providers/quality-drafting.js';
+import {
+  computeDraftingStats,
+  confidenceText,
+  qualityDraftingToken,
+  screeningOutcome,
+  storedDateTime,
+  upgradeScreeningDraft,
+  type DraftSimilarCaseSources,
+} from '../providers/quality-drafting.js';
 import { qualityScreeningToken } from '../providers/quality-screening.js';
 
 type FqcAction = 'view' | 'handle' | 'intake';
@@ -100,29 +110,69 @@ function policyOf(decision: FqcDecision, table: FqcTable): RepositoryPolicy {
 }
 
 /**
- * 置信度写进 `decimal(5, 4)` 列（标度 4 见迁移 `202611220001_create_fqc_demo`）。投递
- * 不带读、不回读，201 由这次写入的值拼，所以这里按列的读回形态给文本：驱动以文本
- * 读回 numeric 的方言（Postgres）保留列的标度（`"0.7500"`），以数字读回的方言
- * （SQLite）按数字转文本（`"0.75"`）。两种形态都与列表端点随后读到的同一条逐字一致。
+ * 请求自己对初筛表的读范围：重放时用它读回当前行。投递本来就不带读，所以不能拿
+ * 投递决策凑；没有查看资格或读被折成 false 时回 `null`，调用方按「读不到」处理。
  */
-function confidenceText(confidence: number, dialect: string): string {
-  return dialect === 'sqlite' ? String(confidence) : confidence.toFixed(4);
+async function readerScreeningPolicy(
+  context: Context<AuthEnv & AuthorizationEnv>,
+): Promise<RepositoryPolicy | null> {
+  const decision = await context.get('authz').authorize({
+    resource: { type: 'composite', id: 'fqc' },
+    action: 'view',
+  });
+  if (
+    decision.effect === 'deny' ||
+    decision.conditions?.database === undefined
+  ) {
+    return null;
+  }
+  const screening = decision.conditions.database.fqcScreenings;
+  if (!screening || screening.read === false) {
+    return null;
+  }
+  return screening;
 }
 
 /**
- * `datetime` 列的读回形态：主机本地墙钟、毫秒三位、不带时区。
+ * 读相似案例用的仓储：用同一个请求主体的「查看」决策绑上范围。投递本来就不带读，
+ * 所以不能拿投递决策凑；服务自己不知道调用方是谁，也不会绕开范围去读。
  *
- * 与仓储写入时的归一化一致，也与列表端点读回来的文字一致；投递不回读，响应直接
- * 用这个形态，201 里的时间才与随后的读取相等（`Date` 经 JSON 会变成 UTC 的 `Z` 形态）。
+ * 没有查看资格、或三张表里有读不到的，就不取案例（与验收 13 的「没有就为空」同形）。
  */
-function storedDateTime(value: Date): string {
-  const pad = (part: number) => String(part).padStart(2, '0');
-  return (
-    `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}` +
-    `T${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}.${String(
-      value.getMilliseconds(),
-    ).padStart(3, '0')}`
-  );
+async function readerCaseSources(
+  context: Context<AuthEnv & AuthorizationEnv>,
+  connection: DatabaseConnection,
+): Promise<DraftSimilarCaseSources | undefined> {
+  const decision = await context.get('authz').authorize({
+    resource: { type: 'composite', id: 'fqc' },
+    action: 'view',
+  });
+  if (
+    decision.effect === 'deny' ||
+    decision.conditions?.database === undefined
+  ) {
+    return undefined;
+  }
+  const screenings = decision.conditions.database.fqcScreenings;
+  const messages = decision.conditions.database.fqcMessages;
+  const reviews = decision.conditions.database.fqcScreeningReviews;
+  if (!screenings || !messages || !reviews) {
+    return undefined;
+  }
+  if (
+    screenings.read === false ||
+    messages.read === false ||
+    reviews.read === false
+  ) {
+    return undefined;
+  }
+  return {
+    screenings: connection.repository('fqcScreenings').withPolicy(screenings),
+    messages: connection.repository('fqcMessages').withPolicy(messages),
+    reviews: connection
+      .repository('fqcScreeningReviews')
+      .withPolicy(reviews),
+  };
 }
 
 /**
@@ -141,7 +191,11 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
     const auth = app.container.resolve(authenticationToken);
     const authz = app.container.resolve(authorizationToken);
     const screening = app.container.resolve(qualityScreeningToken);
+    const drafting = app.container.resolve(qualityDraftingToken);
     const database = app.container.resolve(databaseManagerToken);
+    const logger = app.container.has(loggingToken)
+      ? app.container.resolve(loggingToken).getLogger('quality')
+      : undefined;
 
     /**
      * 投递在同一个事务里写三张表，每张表用「投递」决策给出的范围。
@@ -174,14 +228,32 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         content: input.content,
         rawContentType: input.contentType,
         receivedAt: storedDateTime(receivedAt),
-        status: 'screened',
+        // R-026：反馈单的状态取值是 open（待处理与在办）与 discarded（已丢弃）。
+        // 投递写进来的每一行都是「已经记下来的反馈」，写 open，不再写 R-013 的 screened。
+        status: 'open',
         createdAt: storedNow,
         updatedAt: storedNow,
       };
-      await transaction
-        .repository('fqcMessages')
-        .withPolicy(policies.messages)
-        .createMany({ values: [message] });
+      try {
+        await transaction
+          .repository('fqcMessages')
+          .withPolicy(policies.messages)
+          .createMany({ values: [message] });
+      } catch (error) {
+        // R-026 验收10：同一个 (channel, externalId) 再投是 409 FEEDBACK_ALREADY_RECORDED，
+        // 不是不透明的 500。不先查再写：直接写，撞上迁移加的唯一约束时事务已经回滚，
+        // 把驱动错误换成带原因码的 409；响应里不带已有那一行的标识（投递不带读）。
+        if (isUniqueConstraintViolation(error)) {
+          throw new ApiError({
+            status: 'ALREADY_EXISTS',
+            reason: 'FEEDBACK_ALREADY_RECORDED',
+            domain: 'quality',
+            message:
+              'A feedback with this channel and external id has already been recorded.',
+          });
+        }
+        throw error;
+      }
 
       const record = {
         id: randomUUID(),
@@ -193,16 +265,17 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         confidence: confidenceText(result.confidence, transaction.dialect),
         evidence: result.evidence,
         modelName: 'rule-baseline',
-        // R-002 的六个出处列与确认记录指针。这一段只出规则版：开关默认关着，模型那一步
-        // 在事务提交之后由第二个切片接上；写 model-disabled 与设计里「开关关着」的取值一致。
+        // R-002 的六个出处列与确认记录指针。这一段只出规则版：开关与模型的结果在
+        // 事务提交之后才知道。`degradeReason` 先留空 —— 没跑过模型就不声称任何
+        // 「已回落」的原因；提交之后的那一笔按真实结果补（开关关着才写 model-disabled）。
         engine: 'rules',
         promptVersion: null,
         degraded: false,
-        degradeReason: 'model-disabled',
+        degradeReason: null,
         knowledgeRefs: [],
         redacted: false,
         reviewId: null,
-        outcome: result.confidence >= 0.5 ? 'auto' : 'needs-review',
+        outcome: screeningOutcome(result.confidence),
         createdAt: storedNow,
         updatedAt: storedNow,
       };
@@ -311,7 +384,78 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
             }),
         });
         context.header('Idempotency-Replayed', String(result.replayed));
-        return context.json({ data: result.data }, 201);
+        const ingested = result.data.screening as unknown as Record<
+          string,
+          unknown
+        >;
+        let screening = ingested;
+        if (result.replayed) {
+          // 重放回与库里一致的值，但必须经请求自己的读范围：拿不带策略的仓储按第一次
+          // 落库的 id 读，范围窄的人重放别人的单号就能拿到那一行草稿。读不到（没有读
+          // 资格、或这一行不在范围内）与「重复投递」同形：409 `OPERATION_CONFLICT`，
+          // 响应只有 `error`，不带任何记录字段（与 R-026 唯一冲突的口径一致）。
+          const policy = await readerScreeningPolicy(context);
+          const current = policy
+            ? await database
+                .connection()
+                .repository('fqcScreenings')
+                .withPolicy(policy)
+                .findOne({ filter: { id: String(ingested.id) } })
+            : undefined;
+          if (!current) {
+            throw new ApiError({
+              status: 'ALREADY_EXISTS',
+              reason: 'OPERATION_CONFLICT',
+              domain: 'app',
+              message:
+                'The replayed intake is not readable in this caller\'s range.',
+            });
+          }
+          // 初次 201 已经给过这次的调用方那一行（含读者范围读不到、但建行时写进去的列）；
+          // 范围确认之后用它补齐，重放与第一次 201 才是同一组字段（只补第一次 201 返回过的列，不含 `ownerId`）。
+          screening = { ...ingested, ...current };
+        } else {
+          // 模型升级在事务提交之后、响应回去之前。这一步的任何失败都不回滚投递、
+          // 也不把 201 变成 500：反馈已经落库了。
+          const session = context.get('auth');
+          const reader =
+            session?.user?.id === undefined
+              ? undefined
+              : { userId: String(session.user.id) };
+          try {
+            const cases = await readerCaseSources(
+              context,
+              database.connection(),
+            );
+            const upgrade = await upgradeScreeningDraft({
+              connection: database.connection(),
+              policy: policyOf(decision, 'fqcScreenings'),
+              screeningId: String(ingested.id),
+              text: body.content,
+              ...(reader === undefined ? {} : { reader }),
+              ...(cases === undefined ? {} : { cases }),
+              drafting,
+            });
+            if (upgrade.written) {
+              screening = { ...ingested, ...upgrade.values };
+            } else {
+              // 0 行不算成功：确认抢先，或这一行已不在投递的范围里。
+              logger?.info(
+                { screeningId: ingested.id, source: 'fqc.draft' },
+                'The model upgrade matched no row; nothing was written.',
+              );
+            }
+          } catch (error) {
+            logger?.warn(
+              { error },
+              'The post-commit model upgrade failed; the intake stands.',
+            );
+          }
+        }
+        return context.json(
+          { data: { ...result.data, screening } },
+          201,
+        );
       },
     );
 

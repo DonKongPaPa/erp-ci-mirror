@@ -153,7 +153,8 @@ async function insertMessage(
       content: '频道显示名测试消息',
       rawContentType: 'text',
       receivedAt,
-      status: 'screened',
+      // R-026：反馈单的状态只有 open 与 discarded；样例数据跟设计走。
+      status: 'open',
       createdAt: receivedAt,
       updatedAt: receivedAt,
     },

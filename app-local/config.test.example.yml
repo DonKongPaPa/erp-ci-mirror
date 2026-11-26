@@ -1,0 +1,72 @@
+# R-053 第一片：test 环境配置样例。复制成 config.yml 后由部署方保管，不入库。
+# 密钥和部署专属值一律走环境变量：框架只认各配置节显式声明的映射，YAML 里的 ${NAME} 是字面文本，不会插值。
+# 环境变量名见 app-local/dist/variables.json；`pnpm nocobase config env` 可查每项是否已设置。
+
+app:
+  # 等 X-07：测试环境正式访问地址未定，这里是醒目占位，不带 /main 后缀。
+  publicOrigin: https://WAITING-X-07.example.invalid
+
+client:
+  app:
+    title: NocoBase
+
+# 初始管理员只在用户表为空时建一次；部署方注入 INITIAL_ADMIN_USERNAME、INITIAL_ADMIN_EMAIL、
+# INITIAL_ADMIN_PASSWORD，不要把口令写进本文件。
+
+# 主密钥由 SECRETS_KEYS=1:<openssl rand -hex 32> 注入；不写 secrets.keys，也不写 auth.secret / session.secret。
+
+auth:
+  # hooks 由框架自己的守护占用，任何写法都会让应用拒绝启动。
+  emailAndPassword:
+    enabled: true
+    autoSignIn: true
+  session:
+    storeSessionInDatabase: true
+
+notification:
+  channels:
+    inbox:
+      type: in-app
+
+database:
+  default: main
+  connections:
+    main:
+      dialect: postgres
+      # DB_HOST / DB_PORT / DB_DATABASE / DB_USERNAME / DB_PASSWORD / DB_SSL 由部署方按 test 实例注入。
+      debug: false
+      schemaManagement: managed
+      migrations:
+        autoRun: true
+      seeds:
+        autoRun: true
+
+snowflake:
+  # 多实例并行时每个实例要用不同的 workerId。
+  workerId: 0
+  epoch: 1605024000
+
+# 单实例用内存适配器；改成 Redis 要先装商业插件，等部署形态定稿后再定。
+jobs:
+  default: memory
+queue:
+  default: memory
+
+mail:
+  providers: {}
+
+logging:
+  level: info
+  file:
+    enabled: true
+    retentionDays: 7
+    name: app
+    maxFileSizeMB: 10
+    maxTotalSizeMB: 500
+  loggers:
+    request:
+      file:
+        name: request
+  console:
+    enabled: true
+    pretty: false
