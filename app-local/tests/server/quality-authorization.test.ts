@@ -536,7 +536,7 @@ test('R-003 S2: the screening list marks canReview for quality roles; the depart
 
   // 三种状态各一行：只有「待人工复核」算可以确认。
   const seeded = new Map<string, string>();
-  for (const outcome of ['needs-review', 'auto', 'reviewed']) {
+  for (const outcome of ['needs-review', 'suggested', 'reviewed']) {
     seeded.set(outcome, await insertScreening(connection, outcome));
   }
 

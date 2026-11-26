@@ -20,7 +20,10 @@ import FeedbackListPage from '../../client/pages/feedbacks/index.js';
 import FeedbackNewPage from '../../client/pages/feedbacks/new.js';
 import FeedbackDetailPage from '../../client/pages/feedbacks/detail.js';
 import { FeedbackClient } from '../../client/pages/feedbacks/client.js';
-import { useFeedbackColumns } from '../../client/pages/feedbacks/columns.js';
+import {
+  FEEDBACK_COLUMNS,
+  useFeedbackColumns,
+} from '../../client/pages/feedbacks/columns.js';
 import enUS from '../../client/locales/en-US.js';
 
 import packageMetadata from '../../package.json' with { type: 'json' };
@@ -739,6 +742,37 @@ describe('R-026 稳定性', () => {
     expect(list.querySelectorAll('[data-testid="feedback-skeleton-row"]')).toHaveLength(0);
   });
 
+  it('骨架行与数据行共用带 min-h 的行类和同一组列：数据到达时行高不变', async () => {
+    permissions = fqcGrant('maintain');
+    const gate = Promise.withResolvers<unknown>();
+    answer = (call) => {
+      if (call.path === 'authorization/permissions') return { data: permissions };
+      if (call.path === 'quality/feedbacks') return gate.promise;
+      return new Response(null, { status: 404 });
+    };
+    await renderAt('/feedbacks');
+
+    const list = await screen.findByTestId('feedback-list');
+    const skeletonRows = list.querySelectorAll('[data-testid="feedback-skeleton-row"]');
+    expect(skeletonRows, '请求被门控时骨架先铺着').toHaveLength(8);
+    const skeletonRow = skeletonRows[0] as HTMLElement;
+    // 行高由共享行类里的 min-h 钉住，不受单元格内容（按钮 vs h-3 骨架）影响。
+    expect(skeletonRow, '共享行类要锁定到能容纳操作按钮的最小高度，骨架与数据才等高').toHaveClass('min-h-14');
+    const skeletonCells = skeletonRow.children.length;
+    expect(skeletonCells, '骨架行单元格数 = 列数 + 操作列').toBe(FEEDBACK_COLUMNS.length + 1);
+    const rowClass = skeletonRow.className;
+
+    await act(async () => gate.resolve({ data: [row()], meta: { total: 1 } }));
+
+    const dataRow = (await within(list).findByText('Acme')).closest(
+      '[data-testid="feedback-row-cells"]',
+    ) as HTMLElement | null;
+    expect(dataRow, '数据行要出现').not.toBeNull();
+    expect(dataRow!.className, '数据行与骨架行用同一个行类，行高差为 0').toBe(rowClass);
+    expect(dataRow!.children.length, '数据行与骨架行用同一组列').toBe(skeletonCells);
+    expect(list.querySelectorAll('[data-testid="feedback-skeleton-row"]')).toHaveLength(0);
+  });
+
   it('列定义是模块级的稳定引用，不随渲染新建', () => {
     const seen: unknown[] = [];
     const view = renderHook(() => {
@@ -748,5 +782,160 @@ describe('R-026 稳定性', () => {
     view.rerender();
     expect(seen).toHaveLength(2);
     expect(seen[1]).toBe(seen[0]);
+  });
+
+  it('新建表单附件区与提示区定高：0/1/3 个附件和出错提示都不挤动字段', async () => {
+    let nextId = 0;
+    const spy = vi
+      .spyOn(FeedbackClient.prototype, 'upload')
+      .mockImplementation(async (file) => ({
+        id: `file-${nextId++}`,
+        filename: file.name,
+        mimeType: file.type || 'image/png',
+        size: file.size,
+      }));
+    try {
+      await renderAt('/feedbacks/new');
+      const dialog = await screen.findByRole('dialog', {
+        name: enUS.feedbacks.form.titleNew,
+      });
+      const fields = within(dialog).getByTestId('feedback-form-fields');
+      const product = within(fields).getByRole('textbox', {
+        name: enUS.feedbacks.form.productName,
+      });
+      const attachmentList = within(dialog).getByTestId('feedback-attachment-list');
+      const messages = within(dialog).getByTestId('feedback-form-messages');
+      // 空态也占一样高：附件增加只在自己的定高窗口里滚动，提示出现不撑开容器。
+      expect(attachmentList, '附件区定高，空态也占位').toHaveClass('h-20');
+      expect(attachmentList, '附件多了内部滚动，不把按钮顶走').toHaveClass('overflow-y-auto');
+      expect(messages, '提示区定高，空态也占位').toHaveClass('h-16');
+      expect(messages, '提示过多时内部滚动，不顶走按钮').toHaveClass('overflow-y-auto');
+      expect(attachmentList.children).toHaveLength(0);
+
+      const fileInput = within(dialog).getByLabelText(enUS.feedbacks.form.attachments);
+      await userEvent.upload(fileInput, new File(['a'], 'one.png', { type: 'image/png' }));
+      await waitFor(() => expect(attachmentList.children).toHaveLength(1));
+      expect(within(dialog).getByTestId('feedback-form-fields')).toBe(fields);
+      expect(within(fields).getByRole('textbox', { name: enUS.feedbacks.form.productName })).toBe(product);
+
+      await userEvent.upload(fileInput, [
+        new File(['b'], 'two.png', { type: 'image/png' }),
+        new File(['c'], 'three.png', { type: 'image/png' }),
+      ]);
+      await waitFor(() => expect(attachmentList.children).toHaveLength(3));
+      expect(within(dialog).getByTestId('feedback-form-fields')).toBe(fields);
+      expect(attachmentList).toHaveClass('h-20');
+
+      // 空描述提交触发校验提示：字段节点不变，提示区仍定高。
+      await userEvent.click(
+        within(dialog).getByRole('button', { name: enUS.feedbacks.form.submit }),
+      );
+      expect(
+        await within(messages).findByText(enUS.feedbacks.form.contentRequired),
+      ).toBeVisible();
+      expect(messages).toHaveClass('h-16');
+      expect(within(dialog).getByTestId('feedback-form-fields')).toBe(fields);
+      expect(within(fields).getByRole('textbox', { name: enUS.feedbacks.form.productName })).toBe(product);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('编辑态带三个附件时操作行 sticky 在滚动体内，提交按钮初始可见', async () => {
+    permissions = fqcGrant('maintain');
+    answer = (call) => {
+      if (call.path === 'authorization/permissions') return { data: permissions };
+      if (call.path === 'quality/feedbacks/f-1')
+        return {
+          data: row({
+            attachments: [1, 2, 3].map((n) => ({
+              id: `a-${n}`,
+              filename: `file-${n}.png`,
+              mimeType: 'image/png',
+              size: 70,
+              url: `/api/files/${n}`,
+            })),
+          }),
+        };
+      return new Response(null, { status: 404 });
+    };
+    await renderAt('/feedbacks/f-1');
+
+    const dialog = await screen.findByRole('dialog', {
+      name: enUS.feedbacks.form.titleEdit,
+    });
+    // 等详情数据装配完，再量列表里的三个附件，不是空态。
+    const attachmentList = await within(dialog).findByTestId('feedback-attachment-list');
+    expect(attachmentList.children).toHaveLength(3);
+    const body = dialog.querySelector('[data-slot="route-overlay-body"]');
+    expect(body, '内容在可滚动体里').toHaveClass('overflow-y-auto');
+    const actions = within(dialog).getByTestId('feedback-form-actions');
+    // sticky 把操作行钉在滚动体底部：再多附件也不会把提交按钮挤出可视区。
+    expect(actions, '操作行 sticky 在滚动体底部').toHaveClass('sticky');
+    expect(actions).toHaveClass('bottom-0');
+    expect(actions, '按钮有底色，滚动内容不会透出来').toHaveClass('bg-popover');
+    expect(
+      within(actions).getByRole('button', { name: enUS.feedbacks.form.save }),
+    ).toBeVisible();
+  });
+
+  it('新建态加载占位与落定表单共用同一高度类：首帧和落定对话框一样高', async () => {
+    const gate = Promise.withResolvers<unknown>();
+    const priorAnswer = answer;
+    answer = (call) => {
+      if (call.path === 'authorization/permissions') return gate.promise;
+      return priorAnswer(call);
+    };
+    try {
+      await renderAt('/feedbacks/new');
+      const dialog = await screen.findByRole('dialog', {
+        name: enUS.feedbacks.form.titleNew,
+      });
+      const shell = await within(dialog).findByTestId('feedback-form-shell');
+      expect(shell, '权限判定中的占位与落定同高').toHaveClass('min-h-dvh');
+      const loadingClass = shell.className;
+
+      await act(async () => gate.resolve({ data: permissions }));
+
+      const settled = await within(dialog).findByTestId('feedback-form-shell');
+      expect(settled, '还是同一个外壳节点').toBe(shell);
+      expect(settled.className, '高度类前后一致，对话框顶边不动').toBe(loadingClass);
+      expect(
+        await within(settled).findByRole('button', { name: enUS.feedbacks.form.submit }),
+      ).toBeInTheDocument();
+    } finally {
+      answer = priorAnswer;
+    }
+  });
+
+  it('编辑态加载占位与落定表单共用同一高度类：首帧和落定对话框一样高', async () => {
+    permissions = fqcGrant('maintain');
+    const gate = Promise.withResolvers<unknown>();
+    const priorAnswer = answer;
+    answer = (call) => {
+      if (call.path === 'authorization/permissions') return { data: permissions };
+      if (call.path === 'quality/feedbacks/f-1') return gate.promise;
+      return priorAnswer(call);
+    };
+    try {
+      await renderAt('/feedbacks/f-1');
+      const dialog = await screen.findByRole('dialog', {
+        name: enUS.feedbacks.form.titleEdit,
+      });
+      const shell = await within(dialog).findByTestId('feedback-form-shell');
+      expect(shell, '详情读取中的占位与落定同高').toHaveClass('min-h-dvh');
+      const loadingClass = shell.className;
+
+      await act(async () => gate.resolve({ data: row() }));
+
+      const settled = await within(dialog).findByTestId('feedback-form-shell');
+      expect(settled, '还是同一个外壳节点').toBe(shell);
+      expect(settled.className, '高度类前后一致，对话框顶边不动').toBe(loadingClass);
+      expect(
+        await within(settled).findByRole('button', { name: enUS.feedbacks.form.save }),
+      ).toBeInTheDocument();
+    } finally {
+      answer = priorAnswer;
+    }
   });
 });

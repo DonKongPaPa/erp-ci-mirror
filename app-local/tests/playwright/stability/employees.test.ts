@@ -103,6 +103,12 @@ function row(page: Page, employeeNo: string) {
   return page.locator('[data-testid="employee-row"]').filter({ hasText: employeeNo });
 }
 
+/** 行操作收进菜单后：先开这一行的菜单，再点菜单项。 */
+async function runRowAction(page: Page, name: string, action: string): Promise<void> {
+  await page.getByRole('button', { name: `Actions for ${name}` }).click();
+  await page.getByRole('menuitem', { name: action }).click();
+}
+
 test.describe('R-011 员工管理页的四条清单流程', () => {
   test('入职一个人并放进一个部门：列表有一行，没有邮箱栏', async ({ page }) => {
     await signIn(page);
@@ -143,17 +149,13 @@ test.describe('R-011 员工管理页的四条清单流程', () => {
     await signIn(page);
     const data = await seed(page);
     await openEmployees(page);
-    await row(page, data.employeeNo)
-      .getByRole('button', { name: 'Change this employee’s position' })
-      .click();
+    await runRowAction(page, data.name, 'Change position');
     const transfer = page.getByRole('dialog', { name: 'Change position' });
     await transfer.getByRole('button', { name: `Technician ${data.positionId.slice(3)}` }).click();
     await transfer.getByRole('button', { name: 'Save' }).click();
     await expect(transfer).toBeHidden();
 
-    await row(page, data.employeeNo)
-      .getByRole('button', { name: 'View employee details' })
-      .click();
+    await runRowAction(page, data.name, 'Details');
     const detail = page.getByRole('dialog', { name: 'Employee details' });
     await expect(detail.getByText(`Technician ${data.positionId.slice(3)}`)).toBeVisible();
     await expect(detail.getByText('Position', { exact: true }).first()).toBeVisible();
@@ -164,9 +166,7 @@ test.describe('R-011 员工管理页的四条清单流程', () => {
     const data = await seed(page);
     await openEmployees(page);
     await page.getByRole('radio', { name: 'Include former employees' }).check();
-    await row(page, data.employeeNo)
-      .getByRole('button', { name: 'Process this employee’s departure' })
-      .click();
+    await runRowAction(page, data.name, 'Process departure');
     const leave = page.getByRole('dialog', { name: 'Process a departure' });
     await leave.getByLabel('Left on').fill('2026-11-25');
     await leave.getByRole('button', { name: 'Confirm' }).click();
@@ -178,9 +178,7 @@ test.describe('R-011 员工管理页的四条清单流程', () => {
     });
     expect(JSON.stringify(await members.json())).not.toContain(data.name);
 
-    await row(page, data.employeeNo)
-      .getByRole('button', { name: 'View employee details' })
-      .click();
+    await runRowAction(page, data.name, 'Details');
     const detail = page.getByRole('dialog', { name: 'Employee details' });
     const changes = detail.getByRole('region', { name: 'Change history' });
     await expect(changes.getByText('Hired', { exact: true })).toBeVisible();
@@ -192,9 +190,7 @@ test.describe('R-011 员工管理页的四条清单流程', () => {
     const data = await seed(page, 'left');
     await openEmployees(page);
     await page.getByRole('radio', { name: 'Include former employees' }).check();
-    await row(page, data.employeeNo)
-      .getByRole('button', { name: 'Rehire this employee' })
-      .click();
+    await runRowAction(page, data.name, 'Rehire');
     const rehire = page.getByRole('dialog', { name: 'Rehire an employee' });
     await rehire.getByLabel('Hired on').fill('2026-11-26');
     await rehire.getByLabel('Primary department').click();

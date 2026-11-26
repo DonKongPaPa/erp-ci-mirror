@@ -7,6 +7,7 @@ import {
   type ReactElement,
 } from 'react';
 
+import { RowActions } from '#components/row-actions';
 import { Alert, AlertDescription } from '#components/ui/alert';
 import { Button } from '#components/ui/button';
 import { Input } from '#components/ui/input';
@@ -33,7 +34,13 @@ import {
   TransferDialog,
 } from './dialogs.js';
 import { employeeMessage, rejectionReasons } from './messages.js';
-import { EMPLOYEE_ROW_CLASS, SKELETON_WIDTHS } from './model.js';
+import {
+  EMPLOYEE_ACTIONS_CLASS,
+  EMPLOYEE_CELL_CLASS,
+  EMPLOYEE_ROW_CLASS,
+  employeeLabel,
+  SKELETON_WIDTHS,
+} from './model.js';
 import { EMPLOYEES_RESOURCE } from './page-id.js';
 
 type Dialog = 'detail' | 'hire' | 'link' | 'transfer' | 'leave' | 'rehire' | null;
@@ -147,16 +154,7 @@ export default function EmployeesPage(): ReactElement {
             <p className='text-sm text-muted-foreground'>{t('employees.empty')}</p>
           ) : (
             <div data-testid='employee-list' role='table' aria-label={t('employees.list')}>
-              <div role='row' className={cn(EMPLOYEE_ROW_CLASS, 'border-b-2 font-medium')}>
-                {columns.map((column) => (
-                  <span role='columnheader' key={column.id}>
-                    {t(column.headerKey)}
-                  </span>
-                ))}
-                <span role='columnheader' className='sr-only'>
-                  {t('employees.actions')}
-                </span>
-              </div>
+              <EmployeeHeaderRow />
               {rows.map((row) => (
                 <div
                   key={row.userId}
@@ -165,69 +163,59 @@ export default function EmployeesPage(): ReactElement {
                   className={EMPLOYEE_ROW_CLASS}
                 >
                   {columns.map((column) => {
-                    const value = column.value(row);
+                    const raw = column.value(row);
+                    const value =
+                      raw === 'employees.active'
+                        ? t('employees.active')
+                        : raw === 'employees.left'
+                          ? t('employees.left')
+                          : (raw ?? '—');
                     return (
-                      <span role='cell' key={column.id} className='min-w-0 break-words'>
-                        {value === 'employees.active'
-                          ? t('employees.active')
-                          : value === 'employees.left'
-                            ? t('employees.left')
-                            : (value ?? '—')}
+                      <span role='cell' key={column.id} className={EMPLOYEE_CELL_CLASS} title={value}>
+                        {value}
                       </span>
                     );
                   })}
-                  <span role='cell' className='flex flex-wrap justify-end gap-1'>
-                    <Button
-                      variant='ghost'
-                      size='sm'
-                      aria-label={t('employees.detailsFor')}
-                      onClick={() => {
-                        setActive(row);
-                        setDialog('detail');
-                      }}
-                    >
-                      {t('employees.details')}
-                    </Button>
-                    {manage.can ? (
-                      <>
-                        <Button
-                          variant='ghost'
-                          size='sm'
-                          aria-label={t('employees.transferFor')}
-                          onClick={() => {
+                  <span role='cell' data-testid='employee-actions' className={EMPLOYEE_ACTIONS_CLASS}>
+                    <RowActions
+                      label={t('settings.actionsFor', { name: employeeLabel(row) })}
+                      actions={[
+                        {
+                          key: 'details',
+                          label: t('employees.details'),
+                          onClick: () => {
+                            setActive(row);
+                            setDialog('detail');
+                          },
+                        },
+                        manage.can && {
+                          key: 'transfer',
+                          label: t('employees.transfer'),
+                          onClick: () => {
                             setActive(row);
                             setDialog('transfer');
-                          }}
-                        >
-                          {t('employees.transfer')}
-                        </Button>
-                        {row.status === 'active' ? (
-                          <Button
-                            variant='ghost'
-                            size='sm'
-                            aria-label={t('employees.leaveFor')}
-                            onClick={() => {
-                              setActive(row);
-                              setDialog('leave');
-                            }}
-                          >
-                            {t('employees.leave')}
-                          </Button>
-                        ) : (
-                          <Button
-                            variant='ghost'
-                            size='sm'
-                            aria-label={t('employees.rehireFor')}
-                            onClick={() => {
-                              setActive(row);
-                              setDialog('rehire');
-                            }}
-                          >
-                            {t('employees.rehire')}
-                          </Button>
-                        )}
-                      </>
-                    ) : null}
+                          },
+                        },
+                        manage.can &&
+                          (row.status === 'active'
+                            ? {
+                                key: 'leave',
+                                label: t('employees.leave'),
+                                onClick: () => {
+                                  setActive(row);
+                                  setDialog('leave');
+                                },
+                              }
+                            : {
+                                key: 'rehire',
+                                label: t('employees.rehire'),
+                                onClick: () => {
+                                  setActive(row);
+                                  setDialog('rehire');
+                                },
+                              }),
+                      ]}
+                    />
                   </span>
                 </div>
               ))}
@@ -294,11 +282,32 @@ export default function EmployeesPage(): ReactElement {
   );
 }
 
+/**
+ * 表头行是骨架态与数据态共用的同一个组件：列、行类、高度都相同。
+ * 反馈单与用户管理页也是先渲染表头再铺骨架，首行 y 才不会在数据到达时跳。
+ */
+function EmployeeHeaderRow(): ReactElement {
+  const { t } = useTranslation();
+  return (
+    <div role='row' className={cn(EMPLOYEE_ROW_CLASS, 'border-b-2 font-medium')}>
+      {employeeColumns().map((column) => (
+        <span role='columnheader' key={column.id}>
+          {t(column.headerKey)}
+        </span>
+      ))}
+      <span role='columnheader' className='sr-only'>
+        {t('employees.actions')}
+      </span>
+    </div>
+  );
+}
+
 /** 骨架与数据行同高：九列里只有数据位放骨架块，行标签是真实文本。 */
 function SkeletonList(): ReactElement {
   const { t } = useTranslation();
   return (
     <div data-testid='employee-list' role='table' aria-busy='true' aria-label={t('employees.list')}>
+      <EmployeeHeaderRow />
       {SKELETON_WIDTHS.map((width, index) => (
         <div key={width} data-testid='employee-skeleton-row' className={EMPLOYEE_ROW_CLASS}>
           <span className='sr-only'>

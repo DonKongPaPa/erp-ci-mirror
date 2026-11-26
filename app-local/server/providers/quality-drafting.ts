@@ -749,9 +749,17 @@ export function storedDateTime(value: Date): string {
   );
 }
 
-/** 与投递里规则版相同的复核线：模型版的结果也用它重算 `outcome`。 */
-export function screeningOutcome(confidence: number): 'auto' | 'needs-review' {
-  return confidence >= AUTO_CONFIDENCE_THRESHOLD ? 'auto' : 'needs-review';
+/**
+ * 与投递里规则版相同的复核线：模型版的结果也用它重算 `outcome`。
+ *
+ * R-003：复核线以上写 `suggested`（不再是 `auto`；迁移 202611260003 已把存量
+ * `auto` 改成 `suggested`），以下写 `needs-review`。`reviewed` 由确认与派单写入，
+ * 不在这里产生。
+ */
+export function screeningOutcome(
+  confidence: number,
+): 'suggested' | 'needs-review' {
+  return confidence >= AUTO_CONFIDENCE_THRESHOLD ? 'suggested' : 'needs-review';
 }
 
 /**

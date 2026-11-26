@@ -771,11 +771,19 @@ test('R-026 14: 维护反馈单可以按状态、渠道、时间与正文筛选'
       content: '关键词客户甲的尺寸问题',
       customerName: '客户甲',
       productName: '产品甲',
+      // 网页入口带了也不落库；这个串只在联系方式里出现，不参与 q。
+      senderContact: '联系人李四',
     }),
     201,
   )) as FeedbackBody).data.id;
   const proxy = ((await expectJson(
-    await postFeedback(staff, { channel: 'proxy', customerName: '客户乙', content: '另一条' }),
+    await postFeedback(staff, {
+      channel: 'proxy',
+      customerName: '客户乙',
+      content: '另一条',
+      // 这一行真的把联系方式落库了；q 不搜它，下面的反向断言才不是空的。
+      senderContact: '联系人赵六',
+    }),
     201,
   )) as FeedbackBody).data.id;
   await connection.repository('fqcMessages').updateMany({
@@ -799,7 +807,10 @@ test('R-026 14: 维护反馈单可以按状态、渠道、时间与正文筛选'
   expect(ours(await idsOf('?status=discarded'), [open, proxy])).toEqual([proxy]);
   expect(ours(await idsOf('?channel=proxy'), [open, proxy])).toEqual([proxy]);
   expect(ours(await idsOf('?q=%E5%AE%A2%E6%88%B7%E7%94%B2'), [open, proxy])).toEqual([open]);
-  // 联系方式不参与搜索：content 与 customerName 都没有这个串。
+  // 对照：proxy 行的客户名搜得到，证明它在可见范围里、查询确实在跑。
+  expect(ours(await idsOf('?q=%E5%AE%A2%E6%88%B7%E4%B9%99'), [open, proxy])).toEqual([proxy]);
+  // 联系方式确实落库了，但 q 只搜客户、产品、型号、批次与原文，不搜它。
+  expect((await messageOf(connection, proxy)).senderContact).toBe('联系人赵六');
   expect(ours(await idsOf('?q=%E8%81%94%E7%B3%BB%E4%BA%BA'), [open, proxy])).toEqual([]);
 
   const old = randomUUID();

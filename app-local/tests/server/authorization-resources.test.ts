@@ -1154,7 +1154,7 @@ test('R-002 21: 投递对初筛表能改的十五列逐项固定，reviewId 与�
     values: {
       summary: '模型版摘要',
       confidence: '0.8000',
-      outcome: 'auto',
+      outcome: 'suggested',
       updatedAt: new Date('2026-11-20T10:01:00'),
     },
   });
@@ -1163,7 +1163,7 @@ test('R-002 21: 投递对初筛表能改的十五列逐项固定，reviewId 与�
     .findOne({ filter: { id: screeningId } });
   expect(updated).toMatchObject({
     summary: '模型版摘要',
-    outcome: 'auto',
+    outcome: 'suggested',
   });
 
   // 主键、创建时间、两个溯源指针写不进去：授权层在仓库写入之前拒绝。

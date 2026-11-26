@@ -198,7 +198,7 @@ export function FeedbackSheetForm({
       </div>
     );
     return (
-      <div className='grid gap-3 sm:grid-cols-2'>
+      <div data-testid='feedback-form-fields' className='grid gap-3 sm:grid-cols-2'>
         {proxy
           ? [
               text('customerName', customerName, setCustomerName),
@@ -305,13 +305,20 @@ export function FeedbackSheetForm({
           disabled={files.length >= MAX_ATTACHMENTS || busy}
           onChange={(event) => void upload(event.target.files)}
         />
-        {uploading > 0 ? (
-          <p role='status' className='flex items-center gap-2 text-sm'>
-            <Loader2 className='size-4 animate-spin' />
-            {t('feedbacks.form.uploading')}
-          </p>
-        ) : null}
-        <ul className='flex flex-col gap-1'>
+        {/* 固定高度的上传状态行：上传提示出现/消失不顶动下面的字段与按钮。 */}
+        <div className='flex min-h-5 items-center'>
+          {uploading > 0 ? (
+            <p role='status' className='flex items-center gap-2 text-sm'>
+              <Loader2 className='size-4 animate-spin' />
+              {t('feedbacks.form.uploading')}
+            </p>
+          ) : null}
+        </div>
+        {/* 定高的附件窗口：0 个附件也占位，多了在内部滚动，不把提交按钮顶走（R-026）。 */}
+        <ul
+          data-testid='feedback-attachment-list'
+          className='flex h-20 flex-col gap-1 overflow-y-auto'
+        >
           {files.map((file) => (
             <li key={file.id} className='flex items-center gap-2 text-sm'>
               <Paperclip className='size-4 shrink-0' />
@@ -337,18 +344,28 @@ export function FeedbackSheetForm({
         </ul>
       </div>
 
-      {validationError ? (
-        <Alert variant='destructive' role='alert'>
-          <AlertDescription>{validationError}</AlertDescription>
-        </Alert>
-      ) : null}
-      {serverError ? (
-        <Alert variant='destructive' role='alert'>
-          <AlertDescription>{serverError}</AlertDescription>
-        </Alert>
-      ) : null}
+      {/* 定高的提示区：空态也占位，出错提示出现/消失不改变上方字段与下方按钮的坐标（R-026）。 */}
+      <div
+        data-testid='feedback-form-messages'
+        className='flex h-16 flex-col gap-2 overflow-y-auto'
+      >
+        {validationError ? (
+          <Alert variant='destructive' role='alert'>
+            <AlertDescription>{validationError}</AlertDescription>
+          </Alert>
+        ) : null}
+        {serverError ? (
+          <Alert variant='destructive' role='alert'>
+            <AlertDescription>{serverError}</AlertDescription>
+          </Alert>
+        ) : null}
+      </div>
 
-      <div className='flex items-center gap-2'>
+      {/* 操作行钉在滚动体底部：编辑态附件再多也不会把提交按钮挤出可视区（R-026）。 */}
+      <div
+        data-testid='feedback-form-actions'
+        className='sticky bottom-0 z-10 flex items-center gap-2 bg-popover'
+      >
         <Button type='submit' disabled={busy}>
           {busy ? <Loader2 data-icon='inline-start' className='animate-spin' /> : null}
           {submitLabel}

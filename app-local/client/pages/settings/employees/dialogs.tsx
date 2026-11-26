@@ -31,7 +31,7 @@ import {
   type EmployeeRow,
 } from './client.js';
 import { employeeMessage, rejectionReasons } from './messages.js';
-import { employeeLabel } from './model.js';
+import { changeDisplayValue, employeeLabel } from './model.js';
 
 type Option = { readonly value: string; readonly label: string };
 
@@ -469,15 +469,22 @@ export function DetailDialog({
   const { t } = useTranslation();
   const [detail, setDetail] = useState<EmployeeDetail | undefined>();
   const [changes, setChanges] = useState<readonly EmployeeChange[]>([]);
+  const [positionTitles, setPositionTitles] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [error, setError] = useState<unknown>();
 
   useEffect(() => {
     let live = true;
-    void Promise.all([client.detail(row.userId), client.changes(row.userId)]).then(
-      ([nextDetail, nextChanges]) => {
+    void Promise.all([
+      client.detail(row.userId),
+      client.changes(row.userId),
+      // 岗位字典查不到时变动记录退回原代码，详情本身不受影响。
+      client.positions().catch(() => []),
+    ]).then(
+      ([nextDetail, nextChanges, nextPositions]) => {
         if (!live) return;
         setDetail(nextDetail);
         setChanges(nextChanges);
+        setPositionTitles(new Map(nextPositions.map((position) => [position.id, position.title])));
       },
       (next: unknown) => {
         if (live) setError(next);
@@ -519,16 +526,19 @@ export function DetailDialog({
             <section aria-label={t('employees.changes')} className='grid gap-2'>
               <Label>{t('employees.changes')}</Label>
               <ul className='grid gap-1 text-sm'>
-                {changes.map((change) => (
-                  <li key={`${change.kind}:${change.createdAt}:${change.toValue ?? ''}`} className='flex flex-wrap gap-2 border-b py-1'>
-                    <span>{t(`employees.change.${change.kind}`, { defaultValue: change.kind })}</span>
-                    <span>{change.fromValue ?? '—'}</span>
-                    <span>→</span>
-                    <span>{change.toValue ?? '—'}</span>
-                    <span className='text-muted-foreground'>{change.occurredOn}</span>
-                    <span className='text-muted-foreground'>{change.actorName ?? ''}</span>
-                  </li>
-                ))}
+                {changes.map((change) => {
+                  const value = changeDisplayValue(change, positionTitles);
+                  return (
+                    <li key={`${change.kind}:${change.createdAt}:${change.toValue ?? ''}`} className='flex flex-wrap gap-2 border-b py-1'>
+                      <span>{t(`employees.change.${change.kind}`, { defaultValue: change.kind })}</span>
+                      <span>{value.from ?? '—'}</span>
+                      <span>→</span>
+                      <span>{value.to ?? '—'}</span>
+                      <span className='text-muted-foreground'>{change.occurredOn}</span>
+                      <span className='text-muted-foreground'>{change.actorName ?? ''}</span>
+                    </li>
+                  );
+                })}
               </ul>
             </section>
           </div>

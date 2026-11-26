@@ -138,6 +138,20 @@ beforeEach(() => {
   answerList([employeeRow()]);
 });
 
+/** 行操作入口：先开这一行的菜单，再点菜单项；测试只关心「点了哪个动作」。 */
+async function clickRowAction(label: string): Promise<void> {
+  const trigger = await screen.findByRole('button', {
+    name: 'Actions for Ada Lin',
+    expanded: false,
+  });
+  await userEvent.click(trigger);
+  await userEvent.click(await screen.findByRole('menuitem', { name: label }));
+}
+
+async function openDetails(): Promise<HTMLElement> {
+  await clickRowAction(enUS.employees.details);
+  return await screen.findByRole('dialog', { name: enUS.employees.detailTitle });
+}
 
 describe('R-011 员工列表', () => {
   it('列出八列，没有邮箱一栏，默认只看在职', async () => {
@@ -256,15 +270,15 @@ describe('R-011 员工列表', () => {
     permissions = employeeGrant('view');
     await renderAt();
     await screen.findByText('E000001');
-    for (const name of [
-      enUS.employees.hire,
-      enUS.employees.link,
-      enUS.employees.transferFor,
-      enUS.employees.leaveFor,
-      enUS.employees.rehireFor,
-      enUS.employees.deactivate,
-    ])
+    for (const name of [enUS.employees.hire, enUS.employees.link, enUS.employees.deactivate])
       expect(screen.queryByRole('button', { name })).toBeNull();
+    // 写动作收进了行菜单：打开菜单后逐项确认它们真的不在，而不是把「按钮查不到」当成通过。
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Actions for Ada Lin', expanded: false }),
+    );
+    expect(await screen.findByRole('menuitem', { name: enUS.employees.details })).toBeVisible();
+    for (const name of [enUS.employees.transfer, enUS.employees.leave, enUS.employees.rehire])
+      expect(screen.queryByRole('menuitem', { name })).toBeNull();
     const writes = api.mock.calls.filter(
       ([call]) => call.method !== 'GET',
     );
@@ -291,13 +305,38 @@ describe('R-011 详情与变动记录', () => {
     };
     await renderAt();
     await screen.findByText('E000001');
-    await userEvent.click(screen.getByRole('button', { name: enUS.employees.detailsFor }));
-
-    const dialog = await screen.findByRole('dialog', { name: enUS.employees.detailTitle });
-    expect(within(dialog).getByText('Quality')).toBeInTheDocument();
-    expect(within(dialog).getByText('Grace Hopper')).toBeInTheDocument();
-    expect(within(dialog).getByText('Technician II')).toBeInTheDocument();
+    const dialog = await openDetails();
+    expect(await within(dialog).findByText('Quality')).toBeVisible();
+    expect(await within(dialog).findByText('Grace Hopper')).toBeVisible();
+    expect(await within(dialog).findByText('Technician II')).toBeVisible();
     expect(dialog).not.toHaveTextContent('@');
+  });
+
+  it('变动记录里岗位显示标题，拿不到标题时退回代码', async () => {
+    answer = (call) => {
+      if (call.path === 'authorization/permissions') return { data: permissions };
+      if (call.path === 'employees' && call.method === 'GET') return { data: [employeeRow()], meta: { total: 1 } };
+      if (call.path === 'employees/u-1') return { data: employeeRow() };
+      if (call.path === 'employees/u-1/changes')
+        return {
+          data: [
+            changeRow('position', null, 'PC11AQE52R'),
+            changeRow('position', 'OLDCODE', 'NEWCODE'),
+          ],
+        };
+      if (call.path === 'positions')
+        return { data: [{ id: 'PC11AQE52R', title: 'Senior Technician', active: true, sortOrder: 1 }] };
+      if (call.path === 'job-grades') return { data: [] };
+      return new Response(null, { status: 404 });
+    };
+    await renderAt();
+    await screen.findByText('E000001');
+    const dialog = await openDetails();
+    const history = await within(dialog).findByRole('region', { name: enUS.employees.changes });
+    expect(await within(history).findByText('Senior Technician')).toBeVisible();
+    expect(within(history).queryByText('PC11AQE52R')).toBeNull();
+    expect(await within(history).findByText('OLDCODE')).toBeVisible();
+    expect(await within(history).findByText('NEWCODE')).toBeVisible();
   });
 });
 
@@ -369,13 +408,35 @@ describe('R-011 调岗、离职、复聘', () => {
     };
     await renderAt();
     await screen.findByText('E000001');
-    await userEvent.click(screen.getByRole('button', { name: enUS.employees.transferFor }));
+    await clickRowAction(enUS.employees.transfer);
     const dialog = await screen.findByRole('dialog', { name: enUS.employees.transferTitle });
     await userEvent.click(within(dialog).getByRole('button', { name: 'Technician II' }));
     await userEvent.click(within(dialog).getByRole('button', { name: enUS.employees.form.save }));
 
     await waitFor(() => expect(patch).toBeDefined(), { timeout: 15_000 });
     expect(patch?.json).toEqual({ positionId: 'p2' });
+  });
+
+  it('调岗对话框只列在用岗位，停用岗位不出现在选项里', async () => {
+    answer = (call) => {
+      if (call.path === 'authorization/permissions') return { data: permissions };
+      if (call.path === 'employees' && call.method === 'GET') return { data: [employeeRow()], meta: { total: 1 } };
+      if (call.path === 'positions')
+        return { data: [
+          { id: 'p-active', title: 'Active Position', active: true, sortOrder: 1 },
+          { id: 'p-closed', title: 'Closed Position', active: false, sortOrder: 2 },
+        ] };
+      if (call.path === 'job-grades') return { data: [] };
+      return new Response(null, { status: 404 });
+    };
+    await renderAt();
+    await screen.findByText('E000001');
+    await clickRowAction(enUS.employees.transfer);
+    const dialog = await screen.findByRole('dialog', { name: enUS.employees.transferTitle });
+    const group = await within(dialog).findByRole('group', { name: enUS.employees.columns.position });
+    // 真的等到在用岗位按钮出现再断言「停用岗位不在」，避免对着空容器下结论。
+    expect(await within(group).findByRole('button', { name: 'Active Position' })).toBeVisible();
+    expect(within(group).queryByRole('button', { name: 'Closed Position' })).toBeNull();
   });
 
   it('离职被多条理由拦住时分行显示', async () => {
@@ -390,7 +451,7 @@ describe('R-011 调岗、离职、复聘', () => {
     };
     await renderAt();
     await screen.findByText('E000001');
-    await userEvent.click(screen.getByRole('button', { name: enUS.employees.leaveFor }));
+    await clickRowAction(enUS.employees.leave);
     const dialog = await screen.findByRole('dialog', { name: enUS.employees.leaveTitle });
     await userEvent.type(within(dialog).getByLabelText(enUS.employees.form.leftOn), '2026-11-25');
     await userEvent.click(within(dialog).getByRole('button', { name: enUS.employees.form.confirm }));
@@ -416,7 +477,7 @@ describe('R-011 调岗、离职、复聘', () => {
     };
     await renderAt();
     await screen.findByText('E000001');
-    await userEvent.click(screen.getByRole('button', { name: enUS.employees.rehireFor }));
+    await clickRowAction(enUS.employees.rehire);
     const dialog = await screen.findByRole('dialog', { name: enUS.employees.rehireTitle });
     await userEvent.type(within(dialog).getByLabelText(enUS.employees.form.hiredOn), '2026-11-26');
     await userEvent.click(within(dialog).getByRole('button', { name: enUS.employees.form.confirm }));
@@ -505,6 +566,39 @@ describe('R-011 稳定性', () => {
     expect(screen.queryAllByTestId('employee-skeleton-row')).toHaveLength(0);
   });
 
+  it('骨架态与数据态都有同一个表头行，行类一致', async () => {
+    const gate = Promise.withResolvers<unknown>();
+    answer = (call) => {
+      if (call.path === 'authorization/permissions') return { data: permissions };
+      if (call.path === 'employees' && call.method === 'GET') return gate.promise;
+      if (call.path === 'positions') return { data: [] };
+      if (call.path === 'job-grades') return { data: [] };
+      return new Response(null, { status: 404 });
+    };
+    await renderAt();
+    // 真的等到骨架铺满再断言表头，不能对着空容器下结论。
+    const skeletonList = await screen.findByTestId('employee-list');
+    await waitFor(() =>
+      expect(within(skeletonList).getAllByTestId('employee-skeleton-row')).toHaveLength(9),
+    );
+    const skeletonHeaders = within(skeletonList).getAllByRole('columnheader');
+    expect(skeletonHeaders).toHaveLength(9);
+    const skeletonHeaderRow = skeletonHeaders[0]!.closest('[role="row"]') as HTMLElement;
+    expect(skeletonList.firstElementChild, '表头要在骨架行之前').toBe(skeletonHeaderRow);
+    const headerTexts = skeletonHeaders.map((node) => node.textContent);
+    const headerClass = skeletonHeaderRow.className;
+
+    await act(async () => gate.resolve({ data: [employeeRow()], meta: { total: 1 } }));
+
+    const cell = await screen.findByText('Ada Lin');
+    const dataList = cell.closest('[data-testid="employee-list"]') as HTMLElement;
+    const dataHeaders = within(dataList).getAllByRole('columnheader');
+    expect(dataHeaders.map((node) => node.textContent)).toEqual(headerTexts);
+    const dataHeaderRow = dataHeaders[0]!.closest('[role="row"]') as HTMLElement;
+    expect(dataList.firstElementChild).toBe(dataHeaderRow);
+    expect(dataHeaderRow.className, '骨架与数据的表头行类一致，高度才不会跳').toBe(headerClass);
+  });
+
   it('列定义是模块级的稳定引用，不随渲染新建', () => {
     const seen: unknown[] = [];
     const view = renderHook(() => {
@@ -515,5 +609,49 @@ describe('R-011 稳定性', () => {
     expect(seen).toHaveLength(2);
     expect(seen[1]).toBe(seen[0]);
     expect(seen[0]!.map((column) => column.id)).not.toContain('email');
+  });
+
+  it('每个数据单元格与表头按顺序一一对应，溢出有完整值提示', async () => {
+    await renderAt();
+    await screen.findByText('E000001');
+    const table = screen.getByTestId('employee-list');
+    const headers = within(table).getAllByRole('columnheader');
+    expect(headers.map((node) => node.textContent)).toEqual([
+      enUS.employees.columns.employeeNo,
+      enUS.employees.columns.name,
+      enUS.employees.columns.username,
+      enUS.employees.columns.primaryDepartment,
+      enUS.employees.columns.position,
+      enUS.employees.columns.grade,
+      enUS.employees.columns.status,
+      enUS.employees.columns.hiredOn,
+      enUS.employees.actions,
+    ]);
+    const cells = within(screen.getByTestId('employee-row')).getAllByRole('cell');
+    expect(cells).toHaveLength(headers.length);
+    const expected = [
+      'E000001', 'Ada Lin', 'adal', 'Assembly', 'Technician', 'P3',
+      enUS.employees.active, '2026-11-01',
+    ];
+    expect(cells.slice(0, -1).map((node) => node.textContent)).toEqual(expected);
+    cells.slice(0, -1).forEach((cell, index) => {
+      expect(cell, `第 ${index + 1} 列溢出省略`).toHaveClass('min-w-0', 'truncate');
+      expect(cell, `第 ${index + 1} 列完整值挂在 title`).toHaveAttribute('title', expected[index]);
+    });
+  });
+
+  it('操作单元格固定宽度，不与相邻的日期单元格重叠', async () => {
+    await renderAt();
+    await screen.findByText('E000001');
+    const row = screen.getByTestId('employee-row');
+    expect(row.className, '末列用宽度令牌固定（等于 7rem），八列在 1280 视口也放得下').toContain('--spacing(28)');
+    const cells = within(row).getAllByRole('cell');
+    const hiredOn = cells[7]!;
+    const actions = cells[8]!;
+    expect(hiredOn, '日期列溢出省略，不会压进操作列').toHaveClass('min-w-0');
+    expect(actions, '操作列固定宽度，不随内容伸缩').toHaveClass('w-28');
+    expect(actions).toHaveClass('shrink-0');
+    expect(actions).toHaveClass('justify-end');
+    expect(actions).toHaveAttribute('data-testid', 'employee-actions');
   });
 });

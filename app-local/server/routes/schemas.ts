@@ -90,6 +90,9 @@ export const MineFeedbackQuery = z.object({
 
 export type MineFeedbackQueryInput = z.infer<typeof MineFeedbackQuery>;
 
+/** R-003：初筛结论只有三个取值，改名前的 `auto` 已由迁移改成 `suggested`。 */
+const ScreeningOutcomeSchema = z.enum(['suggested', 'needs-review', 'reviewed']);
+
 /** 维护行里带出的初筛八列；列表里没有 `evidence` 等依据列。 */
 const ScreenShotSchema = z.object({
   id: z.string(),
@@ -99,7 +102,7 @@ const ScreenShotSchema = z.object({
   suggestedOwner: z.string().nullable(),
   summary: z.string().nullable(),
   confidence: z.string().nullable(),
-  outcome: z.string(),
+  outcome: ScreeningOutcomeSchema,
 });
 
 /** 一行反馈。`note` 与 `discardedBy` 只在「维护反馈单」的返回里有。 */
@@ -204,7 +207,7 @@ export const ScreeningSchema = z.object({
   knowledgeRefs: z.array(z.string()).nullable(),
   redacted: z.boolean(),
   reviewId: z.string().nullable(),
-  outcome: z.string(),
+  outcome: ScreeningOutcomeSchema,
   createdAt: z.string(),
   updatedAt: z.string(),
   review: ScreeningReviewSchema.nullable().optional(),
@@ -253,6 +256,38 @@ export const ListTicketsQuery = z.object({
 });
 
 /**
+ * R-003 流转：`name` 是五个转移之一，`input` 是转移自己的字段（解决说明、重开
+ * 原因、转派的新部门与经办人）。真正的规则在 lifecycle 的守卫里，客户端传什么
+ * 都不算数；这里只做形状校验。
+ */
+export const FireTransitionBody = z.object({
+  name: z.enum(['accept', 'resolve', 'close', 'reopen', 'reassign']),
+  input: z.record(z.string(), z.unknown()).optional(),
+});
+
+/** R-003 改经办人：`assigneeId` 可传空串以外的值或 null（清空），不换部门。 */
+export const SetAssigneeBody = z.strictObject({
+  assigneeId: z.union([z.string().min(1).max(64), z.null()]),
+});
+
+/**
+ * R-003 搜同事：`departmentId` 与关键字都必填，关键字 1–64 字符。空串在 schema
+ * 层就回 400；只回三列（标识、姓名、用户名），没有邮箱或手机号。
+ */
+export const TicketCandidatesQuery = z.object({
+  departmentId: z.string().min(1).max(64),
+  q: z.string().min(1).max(64),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+});
+
+export const TicketCandidateSchema = z.object({
+  id: z.string(),
+  name: z.string().nullable(),
+  username: z.string().nullable(),
+});
+
+/**
  * 投递 201 的一行消息：验收 9 起比 `/quality/messages` 的十一列多出五个表单列。
  * `MessageSchema` 仍给按「查看」取行的列表端点用，两者不要混。
  * `ownerId` 机器入口不带，给了也不回；schema 允许它缺席。
@@ -282,6 +317,41 @@ export const ApproveScreeningBody = z.object({
   category: z.enum(DEFECT_CATEGORIES).optional(),
   severity: z.enum(['critical', 'major', 'minor', 'info']).optional(),
   departmentId: z.string().max(64).optional(),
+});
+
+/**
+ * R-003 派单的请求体。四个值都可缺省：类别、严重度、责任部门按请求 →
+ * 最近一次确认记录 → 草稿／派单规则的顺序取（见 R-003「派单」），经办人只取请求。
+ * 空串在 schema 层就挡掉，不给「空部门」落库的机会。
+ */
+export const DispatchScreeningBody = z.object({
+  category: z.enum(DEFECT_CATEGORIES).optional(),
+  severity: z.enum(['critical', 'major', 'minor', 'info']).optional(),
+  departmentId: z.string().min(1).max(64).optional(),
+  assigneeId: z.string().min(1).max(64).optional(),
+});
+
+/** 派单 201 回的新建工单一行；状态与 lifecycle 的三列由服务端写，请求碰不到。 */
+export const DispatchedTicketSchema = z.object({
+  id: z.string(),
+  code: z.string(),
+  title: z.string(),
+  description: z.string().nullable(),
+  sourceMessageId: z.string().nullable(),
+  screeningId: z.string().nullable(),
+  category: z.string().nullable(),
+  severity: z.string(),
+  departmentId: z.string().nullable(),
+  createdBy: z.string().nullable(),
+  assigneeId: z.string().nullable(),
+  state: z.string(),
+  closedAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  statusChangedAt: z.string().nullable(),
+  lifecycleVersion: z.number().int(),
+  lifecycleDefinition: z.string().nullable(),
+  reopenCount: z.number().int(),
 });
 
 /**

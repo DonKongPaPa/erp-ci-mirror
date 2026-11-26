@@ -7,6 +7,7 @@ import EmployeesProvider from './employee-service.js';
 import EmployeeMutationsProvider from './employees.js';
 import FeedbackReminderProvider from './feedback-reminder.js';
 import KnowledgeAccessProvider from './knowledge-access.js';
+import LifecycleProvider from './lifecycles.js';
 import NotificationManagementProvider from './notification-management.js';
 import QualityDraftingProvider from './quality-drafting.js';
 import QualityModelGatewayProvider from './quality-model-gateway.js';
@@ -32,6 +33,8 @@ const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
   QualityDraftingProvider,
   // R-002：知识库的空间与访问解析器。知识库插件问它「这个读者在这个空间里能做什么」。
   KnowledgeAccessProvider,
+  // R-003 S5：唯一的 lifecycle 运行时（R-017 未落地，由本片带上）。
+  LifecycleProvider,
   // R-026：建「人」的账号时指派基线角色 staff。放在建演示账户之前：它们也是建人。
   StaffBaselineProvider,
   DevAccountSwitcherProvider,

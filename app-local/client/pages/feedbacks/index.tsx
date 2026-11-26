@@ -34,8 +34,10 @@ import { DiscardControl } from './discard.js';
 import { FQC_RESOURCE } from './page-id.js';
 import { feedbackErrorText } from './reasons.js';
 
+// min-h 钉住行高：骨架末格是 h-3 骨架块（约 12px），数据末格是 h-7 的操作按钮（约 28px），
+// 两态的内容高度不同。共享行类给一个足够容纳按钮的最小高度，替换时每一行 y 都不动（R-026）。
 const ROW_CLASS =
-  'grid grid-cols-6 items-center gap-2 border-b border-border px-3 py-3 text-sm';
+  'grid min-h-14 grid-cols-6 items-center gap-2 border-b border-border px-3 py-3 text-sm';
 const SKELETON_ROWS = 8;
 const PAGE_SIZE = 20;
 

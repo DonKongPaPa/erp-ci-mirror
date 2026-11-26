@@ -103,9 +103,9 @@ test.describe('FQC 客户反馈链路', () => {
     expect(['critical', 'major', 'minor', 'info']).toContain(
       data.screening.severity,
     );
-    // schema 里 outcome 是 z.string()，没有枚举；R-003 的 auto→suggested 改名在后面的
-    // 迁移片，当前主线仍会回 auto，所以两种都认，但不接受空串或任意值。
-    expect(['auto', 'suggested', 'needs-review', 'reviewed']).toContain(
+    // R-003：投递只会写 suggested / needs-review（确认与派单才写 reviewed）。
+    // 改名前的 auto 不再由任何路径产生，也不接受空串或任意值。
+    expect(['suggested', 'needs-review', 'reviewed']).toContain(
       data.screening.outcome,
     );
     expect(

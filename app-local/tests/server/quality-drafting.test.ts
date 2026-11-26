@@ -1171,7 +1171,7 @@ test('R-002 3: 模型版写入只改十五列里的那些，reviewId 与 message
     degraded: false,
     degradeReason: null,
     modelName: 'fake-service/fake-model',
-    outcome: 'auto',
+    outcome: 'suggested',
     updatedAt: stored.updatedAt,
     confidence: stored.confidence,
     category: stored.category,

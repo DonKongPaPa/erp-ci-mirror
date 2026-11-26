@@ -35,7 +35,13 @@ import {
   repositoryIdempotencyToken,
   type AppApiRouteContribution,
 } from '@nocobase/app-server/router';
+import {
+  LifecycleError,
+  lifecycleErrorFields,
+  type JsonObject,
+} from '@nocobase/lifecycle';
 import { Hono, type Context } from 'hono';
+import { z } from 'zod';
 import { bodyLimit } from 'hono/body-limit';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
@@ -43,10 +49,13 @@ import { Readable } from 'node:stream';
 import {
   ApproveScreeningBody,
   CreateFeedbackBody,
+  DispatchScreeningBody,
+  DispatchedTicketSchema,
   DiscardFeedbackBody,
   DraftingStatsQuery,
   DraftingStatsSchema,
   FeedbackFileSchema,
+  FireTransitionBody,
   FeedbackSchema,
   IngestMessageBody,
   IngestResultSchema,
@@ -56,6 +65,9 @@ import {
   MineFeedbackQuery,
   ScreeningListItemSchema,
   ScreeningReviewResultSchema,
+  SetAssigneeBody,
+  TicketCandidateSchema,
+  TicketCandidatesQuery,
   TicketSchema,
   UpdateFeedbackBody,
   type CreateFeedbackInput,
@@ -75,11 +87,39 @@ import {
   screenByRules,
   type ScreeningResult,
 } from '../providers/quality-screening.js';
-import { peopleQueryServiceToken } from '../providers/departments.js';
+import {
+  departmentServiceToken,
+  peopleQueryServiceToken,
+} from '../providers/departments.js';
+import {
+  inTicketScope,
+  ticketScopeOfDecision,
+} from '../ticket-scope.js';
+import { lifecycleRuntimeToken } from '../providers/lifecycles.js';
 
-type FqcAction = 'view' | 'handle' | 'intake' | 'submit' | 'maintain';
+type FqcAction =
+  | 'view'
+  | 'handle'
+  | 'intake'
+  | 'submit'
+  | 'maintain'
+  | 'ticket';
 type FqcTable =
-  'fqcMessages' | 'fqcScreenings' | 'fqcTickets' | 'fqcScreeningReviews';
+  | 'fqcMessages'
+  | 'fqcScreenings'
+  | 'fqcTickets'
+  | 'fqcScreeningReviews'
+  | 'fqcRoutingRules';
+
+/** 422 没有共享错误响应组件（框架状态表不含 422），照 departments.ts 就地声明。 */
+const unprocessableResponse = {
+  description: 'The request violates a quality rule (422).',
+  content: {
+    'application/json': {
+      schema: { $ref: '#/components/schemas/ApiErrorBody' },
+    },
+  },
+} as const;
 type FqcDecision = AuthorizationDecision<CompositeResourceConditions>;
 
 /** 列表随行带出去的确认记录，只比库里那一行多一个姓名（不回邮箱、手机号）。 */
@@ -575,6 +615,48 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
     }
 
     const people = app.container.resolve(peopleQueryServiceToken);
+    const departments = app.container.resolve(departmentServiceToken);
+    const lifecycle = app.container.resolve(lifecycleRuntimeToken);
+
+    /** lifecycle 的拒绝映射成设计的 HTTP 码；服务端自己的故障仍原样抛出成 500。 */
+    function toLifecycleApiError(error: unknown): unknown {
+      if (!(error instanceof LifecycleError)) return error;
+      const blocker = error.blockers?.[0];
+      if (
+        blocker?.code === 'ASSIGNED_TO_OTHER' ||
+        blocker?.code === 'DEPARTMENT_DISABLED' ||
+        error.code === 'INVALID_STATE'
+      ) {
+        return new ApiError({
+          status: 'ABORTED',
+          reason:
+            error.code === 'INVALID_STATE'
+              ? 'INVALID_TRANSITION'
+              : (blocker?.code ?? 'INVALID_TRANSITION'),
+          domain: 'quality',
+          message: error.message,
+        });
+      }
+      if (blocker?.code === 'DEPARTMENT_OUT_OF_SCOPE') {
+        return new ApiError({
+          status: 'PERMISSION_DENIED',
+          reason: 'DEPARTMENT_OUT_OF_SCOPE',
+          domain: 'quality',
+          message: error.message,
+        });
+      }
+      if (blocker?.code === 'ASSIGNEE_NOT_DEPARTMENT_MEMBER') {
+        return new ApiError({
+          status: 'FAILED_PRECONDITION',
+          httpStatus: 422,
+          reason: 'ASSIGNEE_NOT_DEPARTMENT_MEMBER',
+          domain: 'quality',
+          message: error.message,
+        });
+      }
+      const fields = lifecycleErrorFields(error, { inputField: 'input' });
+      return fields ? new ApiError({ ...fields, domain: 'quality' }) : error;
+    }
 
     // ---- R-026 S4：附件上传与取内容 ----
 
@@ -815,6 +897,7 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
     );
     router.use('/quality/tickets', auth.required(), authz.middleware());
     router.use('/quality/tickets/*', auth.required(), authz.middleware());
+    router.use('/quality/ticket-candidates', auth.required(), authz.middleware());
     router.use('/quality/messages', auth.required(), authz.middleware());
     router.use('/quality/screenings', auth.required(), authz.middleware());
     router.use('/quality/screenings/*', auth.required(), authz.middleware());
@@ -1010,6 +1093,215 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
       },
     );
 
+    /**
+     * R-003 流转：只经 lifecycle 改状态，路由不直接写 `state`。
+     *
+     * 先按「处理工单」授权、再用带范围的仓储按 id 取行：范围外的行与不存在同形
+     * 404。之后交给唯一的运行时 fire，`manual: true` 让五个转移都能由人点；
+     * 并发靠运行时的同版本条件更新裁决，另一个请求得到 409。
+     */
+    router.post(
+      '/quality/tickets/:ticketId/transitions',
+      describeRoute({
+        tags: ['Quality'],
+        summary: 'Fire a lifecycle transition on a quality ticket',
+        operationId: 'transitionQualityTicket',
+        responses: {
+          '200': dataResponse(z.unknown()),
+          '400': apiErrorResponse(400),
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '404': apiErrorResponse(404),
+          '409': apiErrorResponse(409),
+          '422': unprocessableResponse,
+          '500': apiErrorResponse(500),
+        },
+      }),
+      apiValidator('json', FireTransitionBody),
+      async (context) => {
+        const ticketId = context.req.param('ticketId');
+        const body = context.req.valid('json');
+        const decision = await authorizeFqc(context, 'ticket');
+        const session = context.get('auth');
+        if (!session?.user?.id) {
+          throw new ApiError({
+            status: 'PERMISSION_DENIED',
+            reason: 'PRINCIPAL_REQUIRED',
+            domain: 'quality',
+            message: 'An authenticated principal is required.',
+          });
+        }
+        const actor = { id: String(session.user.id) };
+        const found = await database
+          .connection()
+          .repository('fqcTickets')
+          .withPolicy(policyOf(decision, 'fqcTickets'))
+          .findOne({ filter: { id: ticketId } });
+        if (!found) {
+          throw new ApiError({
+            status: 'NOT_FOUND',
+            reason: 'TICKET_NOT_FOUND',
+            domain: 'quality',
+            message: `Ticket ${ticketId} was not found.`,
+          });
+        }
+        try {
+          const result = await lifecycle.fire(
+            'fqcTickets',
+            ticketId,
+            body.name,
+            {
+              actor,
+              manual: true,
+              input: (body.input ?? {}) as JsonObject,
+            },
+          );
+          const view = await lifecycle.view('fqcTickets', ticketId, actor);
+          return context.json({
+            data: { ...view, replayed: result.replayed === true },
+          });
+        } catch (error) {
+          throw toLifecycleApiError(error);
+        }
+      },
+    );
+
+    /** 只换经办人，不换部门；不是流转，所以状态与版本都不动。 */
+    router.post(
+      '/quality/tickets/:ticketId/assignee',
+      describeRoute({
+        tags: ['Quality'],
+        summary: 'Change the assignee of a quality ticket',
+        operationId: 'setQualityTicketAssignee',
+        responses: {
+          '200': dataResponse(z.unknown()),
+          '400': apiErrorResponse(400),
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '404': apiErrorResponse(404),
+          '409': apiErrorResponse(409),
+          '422': unprocessableResponse,
+          '500': apiErrorResponse(500),
+        },
+      }),
+      apiValidator('json', SetAssigneeBody),
+      async (context) => {
+        const ticketId = context.req.param('ticketId');
+        const assigneeId = context.req.valid('json').assigneeId;
+        const decision = await authorizeFqc(context, 'ticket');
+        const repo = database
+          .connection()
+          .repository('fqcTickets')
+          .withPolicy(policyOf(decision, 'fqcTickets'));
+        const ticket = await repo.findOne({ filter: { id: ticketId } });
+        if (!ticket) {
+          throw new ApiError({
+            status: 'NOT_FOUND',
+            reason: 'TICKET_NOT_FOUND',
+            domain: 'quality',
+            message: `Ticket ${ticketId} was not found.`,
+          });
+        }
+        if (ticket.state === 'closed') {
+          throw new ApiError({
+            status: 'ABORTED',
+            reason: 'TICKET_CLOSED',
+            domain: 'quality',
+            message: 'The ticket is closed; reopen it before changing the assignee.',
+          });
+        }
+        if (assigneeId !== null) {
+          const memberIds = await departments.memberIdsOf(
+            asText(ticket.departmentId),
+          );
+          if (!memberIds.includes(assigneeId)) {
+            throw new ApiError({
+              status: 'FAILED_PRECONDITION',
+              httpStatus: 422,
+              reason: 'ASSIGNEE_NOT_DEPARTMENT_MEMBER',
+              domain: 'quality',
+              message: 'The assignee is not a member of the responsible department.',
+            });
+          }
+        }
+        const changed = await repo.updateMany({
+          filter: { id: ticketId },
+          values: { assigneeId },
+        });
+        if (changed.updatedCount !== 1) {
+          throw new ApiError({
+            status: 'ABORTED',
+            reason: 'TICKET_ASSIGNEE_CONFLICT',
+            domain: 'quality',
+            message: 'The ticket changed while changing the assignee.',
+          });
+        }
+        const updated = await repo.findOne({ filter: { id: ticketId } });
+        return context.json({ data: updated });
+      },
+    );
+
+    /**
+     * R-003 搜同事：只回标识、姓名、用户名三列，只在目标部门的未停用成员里搜。
+     *
+     * 目标部门必须存在、未停用、且在调用者按「处理工单」在工单表上的范围里；三者
+     * 同形回 404（与不存在、已停用的部门一样），故意不暴露部门是否存在。范围解析
+     * 与转派共用 `ticket-scope.ts`，关键字只按姓名与用户名匹配（共用的搜人服务，
+     * 不经过会连邮箱一起匹配的账号管理搜索）。
+     */
+    router.get(
+      '/quality/ticket-candidates',
+      describeRoute({
+        tags: ['Quality'],
+        summary: 'Search colleagues of a department for ticket assignment',
+        operationId: 'searchTicketCandidates',
+        responses: {
+          '200': listResponse(TicketCandidateSchema),
+          '400': apiErrorResponse(400),
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '404': apiErrorResponse(404),
+          '500': apiErrorResponse(500),
+        },
+      }),
+      apiValidator('query', TicketCandidatesQuery),
+      async (context) => {
+        const { departmentId, q, page, pageSize } =
+          context.req.valid('query');
+        const decision = await authorizeFqc(context, 'ticket');
+        const scope = ticketScopeOfDecision(decision);
+        const notFound = () =>
+          new ApiError({
+            status: 'NOT_FOUND',
+            reason: 'DEPARTMENT_NOT_FOUND',
+            domain: 'quality',
+            message: `Department ${departmentId} is unavailable.`,
+          });
+        // 范围解析不出来（含 {scope:true}）时拒绝，绝不退化成「全部成员」。
+        if (scope === null || !inTicketScope(scope, departmentId)) throw notFound();
+        // 部门不存在或已停用时 subtreeIds 回空；与范围外同形。
+        if ((await departments.subtreeIds(departmentId)).length === 0) throw notFound();
+
+        const memberIds = await departments.memberIdsOf(departmentId);
+        const result = await people.search({
+          q,
+          userIds: memberIds,
+          page,
+          pageSize,
+        });
+        // 共用服务只 select 三列，匹配只按姓名与用户名，不按邮箱；再显式裁一次，
+        // 以后服务若扩列也不会从这里漏出去。
+        return context.json({
+          data: result.rows.map((row) => ({
+            id: row.id,
+            name: row.name,
+            username: row.username,
+          })),
+          meta: { page, pageSize, total: result.total },
+        });
+      },
+    );
+
     router.get(
       '/quality/messages',
       describeRoute({
@@ -1107,8 +1399,263 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
       },
     );
 
+    /**
+     * R-003 派单：把一份草稿变成一张 open 工单。
+     *
+     * 四个生效值按字段回退（各自取第一个有的）：类别与严重度取请求 → 最近一次确认
+     * 记录 → 草稿；责任部门取请求 → 确认记录 → 这一类的派单规则（草稿的
+     * `suggestedOwner` 是规则版路由键，不是部门，绝不参与）；经办人只取请求。
+     * 写 dispatch 确认记录、把初筛的 reviewId 指过去、outcome 记成 reviewed、建工单，
+     * 四件事同一个事务。`screeningId` 的唯一约束是「一份草稿一张单」的最后仲裁，
+     * 先查到的重复只给一个清楚的 409。
+     */
+    router.post(
+      '/quality/screenings/:screeningId/dispatch',
+      describeRoute({
+        tags: ['Quality'],
+        summary: 'Confirm a screening and dispatch an internal ticket',
+        operationId: 'dispatchQualityScreening',
+        responses: {
+          '201': dataResponse(DispatchedTicketSchema),
+          '400': apiErrorResponse(400),
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '404': apiErrorResponse(404),
+          '409': apiErrorResponse(409),
+          '422': unprocessableResponse,
+          '500': apiErrorResponse(500),
+        },
+      }),
+      apiValidator('json', DispatchScreeningBody),
+      async (context) => {
+        const screeningId = context.req.param('screeningId');
+        const body = context.req.valid('json');
+        const decision = await authorizeFqc(context, 'handle');
+        const session = context.get('auth');
+        if (!session?.user?.id) {
+          throw new ApiError({
+            status: 'PERMISSION_DENIED',
+            reason: 'PRINCIPAL_REQUIRED',
+            domain: 'quality',
+            message: 'An authenticated principal is required.',
+          });
+        }
+        const actorId = String(session.user.id);
+
+        const screeningNotFound = () =>
+          new ApiError({
+            status: 'NOT_FOUND',
+            reason: 'SCREENING_NOT_FOUND',
+            domain: 'quality',
+            message: `Screening ${screeningId} was not found.`,
+          });
+        const alreadyDispatched = () =>
+          new ApiError({
+            status: 'ABORTED',
+            reason: 'SCREENING_ALREADY_DISPATCHED',
+            domain: 'quality',
+            message: 'A ticket already exists for this screening.',
+          });
+
+        const ticket = await database.connection().transaction(async (transaction) => {
+          const screenings = transaction
+            .repository('fqcScreenings')
+            .withPolicy(policyOf(decision, 'fqcScreenings'));
+          const reviews = transaction
+            .repository('fqcScreeningReviews')
+            .withPolicy(policyOf(decision, 'fqcScreeningReviews'));
+          const tickets = transaction
+            .repository('fqcTickets')
+            .withPolicy(policyOf(decision, 'fqcTickets'));
+          const routing = transaction
+            .repository('fqcRoutingRules')
+            .withPolicy(policyOf(decision, 'fqcRoutingRules'));
+
+          const existing = await screenings.findOne({ filter: { id: screeningId } });
+          if (!existing) throw screeningNotFound();
+          if (
+            await transaction
+              .repository('fqcTickets')
+              .findOne({ filter: { screeningId } })
+          ) {
+            throw alreadyDispatched();
+          }
+
+          // 最近一次确认记录：按 createdAt、id 都倒序，只取第一条。
+          const reviewPolicy = policyOf(decision, 'fqcScreeningReviews');
+          let latest: Record<string, unknown> | undefined;
+          if (reviewPolicy.read !== false) {
+            const rows = (await reviews.findMany({
+              filter: (filter) =>
+                filter.string('screeningId').eq(screeningId),
+              sort: {
+                kind: 'sort',
+                version: 1,
+                items: [
+                  { kind: 'field', path: ['createdAt'], direction: 'desc' },
+                  { kind: 'field', path: ['id'], direction: 'desc' },
+                ],
+              },
+              limit: 1,
+            })) as unknown as Record<string, unknown>[];
+            latest = rows[0];
+          }
+
+          const category =
+            body.category || asText(latest?.category) || asText(existing.category);
+          const severity =
+            body.severity || asText(latest?.severity) || asText(existing.severity);
+          if (!category || !severity) {
+            throw new ApiError({
+              status: 'INVALID_ARGUMENT',
+              reason: 'SCREENING_DRAFT_INCOMPLETE',
+              domain: 'quality',
+              message:
+                'Neither the request, a confirmation nor the draft has a category and severity.',
+            });
+          }
+
+          let departmentId =
+            body.departmentId ??
+            (latest && asText(latest.departmentId).length > 0
+              ? asText(latest.departmentId)
+              : null);
+          if (!departmentId) {
+            const rule = await routing.findOne({ filter: { category } });
+            departmentId = rule ? asText(rule.departmentId) : null;
+          }
+          if (!departmentId) {
+            throw new ApiError({
+              status: 'FAILED_PRECONDITION',
+              httpStatus: 422,
+              reason: 'ROUTING_RULE_MISSING',
+              domain: 'quality',
+              message:
+                'This category has no routing rule; pass a departmentId to dispatch.',
+            });
+          }
+
+          // 不变量 3：责任部门必须在派单那一刻存在且未停用。与转派同一处部门服务判定；
+          // 校验放在写确认记录与建工单之前，失败时两样都不落库。
+          if ((await departments.subtreeIds(departmentId)).length === 0) {
+            throw new ApiError({
+              status: 'FAILED_PRECONDITION',
+              httpStatus: 422,
+              reason: 'DEPARTMENT_NOT_FOUND',
+              domain: 'quality',
+              message: `Department ${departmentId} does not exist or is disabled.`,
+            });
+          }
+
+          const assigneeId = body.assigneeId ?? null;
+          if (assigneeId !== null) {
+            const memberIds = await departments.memberIdsOf(departmentId);
+            if (!memberIds.includes(assigneeId)) {
+              throw new ApiError({
+                status: 'FAILED_PRECONDITION',
+                httpStatus: 422,
+                reason: 'ASSIGNEE_NOT_DEPARTMENT_MEMBER',
+                domain: 'quality',
+                message: 'The assignee is not a member of the responsible department.',
+              });
+            }
+          }
+
+          const reviewId = randomUUID();
+          await reviews.createMany({
+            values: [
+              {
+                id: reviewId,
+                screeningId,
+                kind: 'dispatch',
+                category,
+                severity,
+                departmentId,
+                actorId,
+                createdAt: new Date(),
+              },
+            ],
+          });
+
+          // 与确认同一套版本前提：并发派单只让一个 UPDATE 匹配到行。
+          const observedReviewId =
+            typeof existing.reviewId === 'string' && existing.reviewId.length > 0
+              ? existing.reviewId
+              : null;
+          const changed = await screenings.updateMany({
+            filter: (filter) =>
+              filter.and([
+                filter.string('id').eq(screeningId),
+                observedReviewId === null
+                  ? filter.string('reviewId').empty()
+                  : filter.string('reviewId').eq(observedReviewId),
+              ]),
+            values: { outcome: 'reviewed', reviewId, updatedAt: new Date() },
+          });
+          if (changed.updatedCount !== 1) {
+            throw new ApiError({
+              status: 'ABORTED',
+              reason: 'SCREENING_REVIEW_CONFLICT',
+              domain: 'quality',
+              message: 'This screening changed while dispatching. Reload and try again.',
+            });
+          }
+
+          const messageId = asText(existing.messageId);
+          const message = messageId
+            ? await transaction
+                .repository('fqcMessages')
+                .withPolicy(policyOf(decision, 'fqcMessages'))
+                .findOne({ filter: { id: messageId } })
+            : null;
+          const now = new Date();
+          const values = {
+            id: randomUUID(),
+            code: `FQC-${String(now.getTime()).slice(-8)}`,
+            title: `${category} / ${severity}`,
+            description: message
+              ? asText(message.content).slice(0, 2000)
+              : null,
+            sourceMessageId: messageId.length > 0 ? messageId : null,
+            screeningId,
+            category,
+            severity,
+            departmentId,
+            createdBy: actorId,
+            assigneeId,
+            state: 'open',
+            closedAt: null,
+            createdAt: now,
+            updatedAt: now,
+            statusChangedAt: null,
+            lifecycleVersion: 0,
+            lifecycleDefinition: 'fqcTickets',
+          };
+          try {
+            await tickets.createMany({ values: [values] as never });
+          } catch (error) {
+            if (isUniqueConstraintViolation(error)) throw alreadyDispatched();
+            throw error;
+          }
+          const stored = await tickets.findOne({ filter: { id: values.id } });
+          if (!stored) {
+            throw new ApiError({
+              status: 'INTERNAL',
+              reason: 'TICKET_NOT_WRITTEN',
+              domain: 'quality',
+              message: 'The new ticket could not be read back.',
+            });
+          }
+          return stored;
+        });
+
+        return context.json({ data: ticket }, 201);
+      },
+    );
+
     // 人工确认（R-002 起语义改了）：不再原地改写草稿。读初筛、写一行确认记录、把
     // outcome 记成 reviewed 并把 reviewId 指过去，三件事在同一个事务里。
+    // 有工单时这是改判：另写一行 rejudge，工单的类别与严重度跟着改（R-003 验收 6）。
     // 确认可以不止一次，每一次都留一行；响应里的 review 是刚读回来的那一行（读权不是
     // 可选的：少了它，这个端点会在写完之前被仓库层拒绝）。
     router.post(
@@ -1124,6 +1671,7 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
           '403': apiErrorResponse(403),
           '404': apiErrorResponse(404),
           '409': apiErrorResponse(409),
+          '422': unprocessableResponse,
           '500': apiErrorResponse(500),
         },
       }),
@@ -1151,6 +1699,9 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
             const reviews = transaction
               .repository('fqcScreeningReviews')
               .withPolicy(policyOf(decision, 'fqcScreeningReviews'));
+            const tickets = transaction
+              .repository('fqcTickets')
+              .withPolicy(policyOf(decision, 'fqcTickets'));
             const existing = await screenings.findOne({
               filter: { id: screeningId },
             });
@@ -1163,9 +1714,37 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
                 message: `Screening ${screeningId} was not found.`,
               });
             }
+            // 有工单就是改判，没有才是确认。两个分支共用一个事务与确认记录指针，
+            // 区别只在 kind、工单要不要联动，以及两条额外的拒绝（R-003 验收 6）。
+            const ticket = await tickets.findOne({
+              filter: { screeningId },
+            });
+            const isRejudge = ticket !== null && ticket !== undefined;
+            if (isRejudge) {
+              if (ticket.state === 'closed') {
+                throw new ApiError({
+                  status: 'ABORTED',
+                  reason: 'TICKET_CLOSED',
+                  domain: 'quality',
+                  message: 'The ticket is closed; reopen it before rejudging.',
+                });
+              }
+              if (
+                body.departmentId !== undefined &&
+                asText(ticket.departmentId) !== body.departmentId
+              ) {
+                throw new ApiError({
+                  status: 'FAILED_PRECONDITION',
+                  httpStatus: 422,
+                  reason: 'USE_REASSIGN',
+                  domain: 'quality',
+                  message: 'Changing the responsible department is a reassignment.',
+                });
+              }
+            }
             // 请求体缺省时用草稿里的值：人没有改，就是确认 AI 的判断。
-            const category = body.category ?? existing.category;
-            const severity = body.severity ?? existing.severity;
+            const category = body.category ?? asText(existing.category);
+            const severity = body.severity ?? asText(existing.severity);
             if (!category || !severity) {
               throw new ApiError({
                 status: 'INVALID_ARGUMENT',
@@ -1179,10 +1758,14 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
             const reviewValues = {
               id: reviewId,
               screeningId,
-              kind: 'confirm',
+              kind: isRejudge ? 'rejudge' : 'confirm',
               category,
               severity,
-              departmentId: body.departmentId ?? null,
+              departmentId:
+                body.departmentId ??
+                (isRejudge && asText(ticket.departmentId).length > 0
+                  ? asText(ticket.departmentId)
+                  : null),
               actorId,
               createdAt: new Date(),
             };
@@ -1215,13 +1798,20 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
                 status: 'ABORTED',
                 reason: 'SCREENING_REVIEW_CONFLICT',
                 domain: 'quality',
-                message:
-                  'This screening was confirmed by someone else while this request was running. Reload it and confirm again.',
-              });
-            }
-            const updated = await screenings.findOne({
-              filter: { id: screeningId },
+              message:
+                'This screening was confirmed by someone else while this request was running. Reload it and confirm again.',
             });
+          }
+          if (isRejudge) {
+            // 只动类别与严重度：责任部门、经办人、状态、流转历史都不碰。
+            await tickets.updateMany({
+              filter: { id: asText(ticket.id) },
+              values: { category, severity },
+            });
+          }
+          const updated = await screenings.findOne({
+            filter: { id: screeningId },
+          });
             const review = await reviews.findOne({ filter: { id: reviewId } });
             if (!updated || !review) {
               throw new ApiError({

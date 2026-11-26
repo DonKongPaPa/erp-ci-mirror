@@ -528,6 +528,51 @@ test('R-011 验收10: rehire keeps the number, accepts a new position and can jo
   expect(new Set(kinds)).toEqual(new Set(['hired', 'left', 'rehired', 'position']));
 });
 
+test('R-011 缺口1: rehire with a department needs departments.manage before any write', async ({
+  testApp,
+  app,
+  connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const dept = await department(admin);
+  const person = await hireWithDepartment(admin, String(dept.id));
+  const userId = String(person.userId);
+  await admin.fetch(`/employees/${userId}/leave`, json({ leftOn: '2026-03-01' }));
+
+  // 持 employees.manage 与账号 enable，唯独没有「管理部门」：前两个守卫放行，第三个必须拦下。
+  const operator = await makeUser(admin, testApp, []);
+  await grant(app, operator.id, [employeeGrant(['manage']), userGrant(['enable'])]);
+
+  const accountsBefore = await connection.repository<Row>('user').count();
+  const profilesBefore = await connection.repository<Row>('employees').count();
+  const changesBefore = await connection.repository<Row>('employeeChanges').count();
+  const membersBefore = await connection.repository<Row>('departmentMembers').count();
+  await expectDenied(
+    await operator.session.fetch(`/employees/${userId}/rehire`, json({
+      hiredOn: '2026-04-01',
+      primaryDepartmentId: dept.id,
+    })),
+    '复聘带部门缺管理部门',
+  );
+  // 403 发生在开事务之前：账号、档案、变动记录、部门成员四张表一行都不多。
+  expect(await connection.repository<Row>('user').count()).toBe(accountsBefore);
+  expect(await connection.repository<Row>('employees').count()).toBe(profilesBefore);
+  expect(await connection.repository<Row>('employeeChanges').count()).toBe(changesBefore);
+  expect(await connection.repository<Row>('departmentMembers').count()).toBe(membersBefore);
+
+  // 补上「管理部门」后同一请求成功，且部门成员真的建起来了。
+  await grant(app, operator.id, [departmentGrant]);
+  const rehired = await dataOf(
+    await operator.session.fetch(`/employees/${userId}/rehire`, json({
+      hiredOn: '2026-04-01',
+      primaryDepartmentId: dept.id,
+    })),
+    201,
+  );
+  expect(rehired.status).toBe('active');
+  expect(await membershipsOf(connection, userId)).toHaveLength(1);
+});
+
 test('R-011 验收11/12/13: authorization matrix and per-entry columns', async ({
   testApp,
   app,
@@ -771,4 +816,101 @@ test('R-011 验收6: update refuses an inactive position and an inactive supervi
     422,
   );
   expect(supervisorError.reason).toBe('REPORTS_TO_NOT_ACTIVE');
+});
+
+test('R-011 补覆盖: rehire refuses an inactive grade', async ({ testApp }) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const grade = await dataOf(await admin.fetch('/job-grades', json({ id: unique('G'), title: 'Closed grade', rank: 1 })), 201);
+  await admin.fetch(`/job-grades/${grade.id}`, json({ active: false }, 'PATCH'));
+  const person = await hire(admin);
+  await admin.fetch(`/employees/${person.userId}/leave`, json({ leftOn: '2026-03-01' }));
+
+  const error = await expectError(
+    await admin.fetch(`/employees/${person.userId}/rehire`, json({
+      hiredOn: '2026-04-01',
+      gradeId: grade.id,
+    })),
+    422,
+  );
+  expect(error.reason).toBe('GRADE_INACTIVE');
+});
+
+test('R-011 补覆盖: rehire without a new position keeps the old one', async ({
+  testApp,
+  connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const oldPosition = await dataOf(await admin.fetch('/positions', json({ id: unique('P'), title: 'Kept Position' })), 201);
+  const person = await hire(admin, { positionId: oldPosition.id });
+  const userId = String(person.userId);
+  await admin.fetch(`/employees/${userId}/leave`, json({ leftOn: '2026-03-01' }));
+
+  const rehired = await dataOf(
+    await admin.fetch(`/employees/${userId}/rehire`, json({ hiredOn: '2026-04-01' })),
+    201,
+  );
+  expect(rehired.positionName).toBe('Kept Position');
+  const kinds = (await changesOf(connection, userId)).map((row) => row.kind);
+  expect(kinds).not.toContain('position');
+});
+
+test('R-011 补覆盖: rehire can clear the reporting line to null', async ({ testApp }) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const boss = await hire(admin);
+  const person = await hire(admin, { reportsToUserId: boss.userId });
+  const userId = String(person.userId);
+  await admin.fetch(`/employees/${userId}/leave`, json({ leftOn: '2026-03-01' }));
+
+  const rehired = await dataOf(
+    await admin.fetch(`/employees/${userId}/rehire`, json({
+      hiredOn: '2026-04-01',
+      reportsToUserId: null,
+    })),
+    201,
+  );
+  expect(rehired.reportsToName).toBeNull();
+});
+
+test('R-011 补覆盖: link with a department needs departments.manage', async ({
+  testApp,
+  app,
+  connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const dept = await department(admin);
+  const plain = await makeUser(admin, testApp, []);
+  const operator = await makeUser(admin, testApp, []);
+  await grant(app, operator.id, [employeeGrant(['manage'])]);
+
+  const profilesBefore = await connection.repository<Row>('employees').count();
+  await expectDenied(
+    await operator.session.fetch('/employees/link', json({
+      userId: plain.id,
+      hiredOn: '2026-02-01',
+      primaryDepartmentId: dept.id,
+    })),
+    '补档带部门缺管理部门',
+  );
+  expect(await connection.repository<Row>('employees').count()).toBe(profilesBefore);
+
+  await grant(app, operator.id, [departmentGrant]);
+  const linked = await dataOf(
+    await operator.session.fetch('/employees/link', json({
+      userId: plain.id,
+      hiredOn: '2026-02-01',
+      primaryDepartmentId: dept.id,
+    })),
+    201,
+  );
+  expect(linked.userId).toBe(plain.id);
+});
+
+test('R-011 补覆盖: quality_inspector role has no employees access', async ({ testApp }) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const inspector = await makeUser(admin, testApp, ['quality_inspector']);
+  await expectDenied(await inspector.session.fetch('/employees'), '质检员不读员工');
+  await expectDenied(
+    await inspector.session.fetch('/employees', json({ name: unique('Hire'), hiredOn: '2026-01-05' })),
+    '质检员不写员工',
+  );
 });
