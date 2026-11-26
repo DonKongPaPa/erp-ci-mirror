@@ -7,10 +7,10 @@ import {
   Check,
   Inbox,
   Loader2,
+  Plus,
   RefreshCw,
-  Send,
-  Sparkles,
 } from 'lucide-react';
+import { Link } from 'react-router';
 import {
   useCallback,
   useEffect,
@@ -22,7 +22,6 @@ import {
 import { PageContainer } from '#components/page-container';
 import { PageHeader } from '#components/page-header';
 import { StatusBadge } from '#components/status-badge';
-import { Alert, AlertDescription } from '#components/ui/alert';
 import { Button } from '#components/ui/button';
 import {
   Card,
@@ -31,9 +30,7 @@ import {
   CardHeader,
   CardTitle,
 } from '#components/ui/card';
-import { Input } from '#components/ui/input';
 import { Skeleton } from '#components/ui/skeleton';
-import { Textarea } from '#components/ui/textarea';
 
 import {
   QualityClient,
@@ -94,19 +91,12 @@ export default function QualityPage(): ReactElement {
   const { t } = useTranslation();
   const { locale } = useLocale();
   const api = useApiClient();
-  const toaster = useToaster();
   const client = useMemo(() => new QualityClient(api), [api]);
-  const { session } = useAuthentication();
 
   // 按钮按权限显隐。等待权限结果期间 `can` 是 false，所以按钮先不显示、后出现，
   // 不会先闪一下再消失。等待期用占位顶住同样的高度，免得下面的卡片被顶下去。
-  const intakeAccess = useCan({ resource: FQC_RESOURCE, action: 'intake' });
+  const submitAccess = useCan({ resource: FQC_RESOURCE, action: 'submit' });
   const handleAccess = useCan({ resource: FQC_RESOURCE, action: 'handle' });
-  // 投递的提交状态每身份一份，幂等键由钩子生成；scope 不与他人共享。
-  const intakeSubmission = useSubmission({
-    scope: `${session?.user.id}:quality:intake`,
-  });
-
   const [tickets, setTickets] = useState<QualityTicket[]>([]);
   const [messages, setMessages] = useState<QualityMessage[]>([]);
   const [screenings, setScreenings] = useState<QualityScreening[]>([]);
@@ -120,8 +110,6 @@ export default function QualityPage(): ReactElement {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
-  const [draft, setDraft] = useState('');
-  const [sender, setSender] = useState(() => t('quality.intake.defaultSender'));
   const [reloadToken, setReloadToken] = useState(0);
 
   const fetchAll = useCallback(async () => {
@@ -213,45 +201,6 @@ export default function QualityPage(): ReactElement {
     [refresh],
   );
 
-  const submit = async () => {
-    const content = draft.trim();
-    if (!content || intakeSubmission.submitting || intakeSubmission.pending) {
-      return;
-    }
-    try {
-      // 幂等键由 useSubmission 生成；返回 undefined 表示已有一个提交在途，
-      // 忽略这次点击，不提示失败。超时会抛 SubmissionTimeoutError，钩子保留原操作
-      // 供重试，页面按普通失败提示即可。
-      const result = await intakeSubmission.run(
-        { channel: 'wechat', senderName: sender.trim() || undefined, content },
-        (idempotencyKey, _signal, snapshot) =>
-          client.intake(snapshot, idempotencyKey),
-      );
-      if (!result) return;
-      toaster.show({
-        type: 'success',
-        title: t('quality.intake.created'),
-        description: `${t(
-          `quality.categories.${result.screening.category ?? 'other'}`,
-          {
-            defaultValue:
-              result.screening.category ?? t('quality.uncategorized'),
-          },
-        )} / ${t(`quality.severities.${result.screening.severity ?? 'info'}`, {
-          defaultValue: result.screening.severity ?? '-',
-        })}`,
-      });
-      setDraft('');
-      refresh();
-    } catch (next) {
-      toaster.show({
-        type: 'error',
-        title: t('quality.intake.failed'),
-        description: next instanceof Error ? next.message : String(next),
-      });
-    }
-  };
-
   const stats = useMemo(() => {
     const open = tickets.filter((ticket) => ticket.state === 'open').length;
     const critical = tickets.filter(
@@ -327,85 +276,24 @@ export default function QualityPage(): ReactElement {
 
       <div className='grid gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]'>
         <div className='flex flex-col gap-4'>
-          {/* 四个业务角色都不持有「投递」，业务用户默认看不到这个表单。权限没回来
-              之前不占位：给大多数人（无投递）先占一块再塌掉，会把「部门分流」
-              「代填效果」顶得上下跳（界面点验 2026-11-26，首屏上移 302px）。持有
-              「投递」的人在权限回来时看到表单插入到这一格。 */}
-          {intakeAccess.can ? (
-            <Card data-testid='intake-form' className='min-h-80'>
-              <CardHeader>
-                <CardTitle className='flex items-center gap-2 text-sm'>
-                  <Send className='size-4' />
-                  {t('quality.intake.title')}
-                </CardTitle>
-                <CardDescription>
-                  {t('quality.intake.description')}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className='flex flex-col gap-3'>
-                {intakeSubmission.pending ? (
-                  <Alert
-                    variant='destructive'
-                    data-testid='intake-outcome-unknown'
-                  >
-                    <AlertTriangle className='size-4' />
-                    <AlertDescription className='flex flex-col items-start gap-2'>
-                      <p>{t('quality.intake.outcomeUnknown')}</p>
-                      <Button
-                        variant='outline'
-                        size='sm'
-                        onClick={() => {
-                          // 钩子清掉 pending 后不会自己通知订阅者，借刷新列表再渲染
-                          // 一次；列表也正是用户刚核对过的地方。
-                          intakeSubmission.acknowledgeOutcome('not-committed');
-                          refresh();
-                        }}
-                      >
-                        {t('quality.intake.acknowledge')}
-                      </Button>
-                    </AlertDescription>
-                  </Alert>
-                ) : null}
-                <Input
-                  value={sender}
-                  onChange={(event) => setSender(event.target.value)}
-                  placeholder={t('quality.intake.senderPlaceholder')}
-                />
-                <Textarea
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  placeholder={t('quality.intake.contentPlaceholder')}
-                  rows={4}
-                  className='resize-y'
-                />
-                <Button
-                  onClick={() => void submit()}
-                  disabled={
-                    !draft.trim() ||
-                    intakeSubmission.submitting ||
-                    intakeSubmission.pending
-                  }
-                >
-                  {intakeSubmission.submitting ? (
-                    <Loader2
-                      data-icon='inline-start'
-                      className='animate-spin'
-                    />
-                  ) : (
-                    <Sparkles data-icon='inline-start' />
-                  )}
-                  {t('quality.intake.submit')}
-                </Button>
-              </CardContent>
-            </Card>
-          ) : intakeAccess.isPending ? null : intakeAccess.error ? (
-            <Alert variant='destructive' data-testid='intake-permission-error'>
-              <AlertTriangle className='size-4' />
-              <AlertDescription>
+          {/* R-026：演示投递表单已删。这里只留「新建反馈」入口（持 submit 的人才看得到）。
+              槽位固定高度：权限没回来时占位不塌、落定后按钮插入也不把下面的卡片顶下去。 */}
+          <div data-testid='feedback-entry' className='flex min-h-11 items-center'>
+            {submitAccess.can ? (
+              <Button
+                nativeButton={false}
+                render={<Link to='/feedbacks/new' />}
+                size='sm'
+              >
+                <Plus data-icon='inline-start' className='size-4' />
+                {t('quality.newFeedback')}
+              </Button>
+            ) : submitAccess.error ? (
+              <span role='alert' className='text-xs text-destructive'>
                 {t('quality.permissionFailed')}
-              </AlertDescription>
-            </Alert>
-          ) : null}
+              </span>
+            ) : null}
+          </div>
 
           <Card>
             <CardHeader>

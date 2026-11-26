@@ -11,4 +11,7 @@ export const pagePermissionTitles: PagePermissionTitles = {
   'runtimes-connect': 'settings.aiRuntimesConnect',
   'skills-new': 'settings.aiSkillsNew',
   'skills-detail': 'settings.aiSkillsDetail',
+  // R-026：两个覆盖在反馈单列表上的子路由继承父页授权，权限清单里要有可读的名字。
+  feedbackNew: 'feedbacks.form.titleNew',
+  feedbackDetail: 'feedbacks.form.titleEdit',
 };

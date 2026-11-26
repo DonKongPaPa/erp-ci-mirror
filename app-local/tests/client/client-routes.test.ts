@@ -189,6 +189,9 @@ describe('app client routes', () => {
       { name: 'home', authorizedAs: null },
       { name: 'inbox', authorizedAs: null },
       { name: 'quality', authorizedAs: 'quality' },
+      { name: 'feedbacks', authorizedAs: 'feedback' },
+      { name: 'feedbackNew', authorizedAs: 'feedback' },
+      { name: 'feedbackDetail', authorizedAs: 'feedback' },
       { name: 'apiKeysManagement', authorizedAs: null },
       // The AI Agent plugin's pages, in the order the application registers them. Each child route inherits its
       // parent page's grant, so `runtimes-connect`, `skills-new` and `skills-detail` share it.
@@ -276,6 +279,9 @@ describe('app client routes', () => {
       { name: 'home', authorizedAs: null },
       { name: 'inbox', authorizedAs: null },
       { name: 'quality', authorizedAs: 'quality' },
+      { name: 'feedbacks', authorizedAs: 'feedback' },
+      { name: 'feedbackNew', authorizedAs: 'feedback' },
+      { name: 'feedbackDetail', authorizedAs: 'feedback' },
       { name: 'apiKeysManagement', authorizedAs: null },
       { name: 'models', authorizedAs: 'settings:agents.services' },
       { name: 'agents', authorizedAs: 'agents' },

@@ -384,6 +384,8 @@ export default class AuthzUpgradeR002 extends AppCommand {
   static examples = ['<%= config.bin %> <%= command.id %>'];
 
   async run(): Promise<R002UpgradeReport> {
+    // 和 export/import 一样先解析：oclif 的 _run() 收尾看到 parsed 为空会发 UnparsedCommand 告警。
+    await this.parse(AuthzUpgradeR002);
     return this.withApp(async ({ app }) => {
       await app.start();
       // 命令树在 --help 时也会全部导入，重的东西留到真正执行时再加载。

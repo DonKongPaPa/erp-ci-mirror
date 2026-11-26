@@ -216,7 +216,7 @@ async function insertMessage(
 
 beforeEach(() => window.sessionStorage.clear());
 
-it('hides the intake form from a user without fqc.intake', async () => {
+it('shows the new-feedback entry to a seeded staff member', async () => {
   const { beforeRequest, requests } = recordRequests();
   await renderAuthenticatedClient(<QualityPage />, {
     route: '/quality',
@@ -227,57 +227,32 @@ it('hides the intake form from a user without fqc.intake', async () => {
   });
   await screen.findByText(enUS.quality.tickets.empty);
   await waitForPermissions(requests);
-  expect(
-    screen.queryByRole('button', { name: enUS.quality.intake.submit }),
-  ).not.toBeInTheDocument();
-  expect(
-    screen.queryByPlaceholderText(enUS.quality.intake.contentPlaceholder),
-  ).not.toBeInTheDocument();
+  const link = await within(screen.getByTestId('feedback-entry')).findByRole(
+    'button',
+    { name: enUS.quality.newFeedback },
+  );
+  expect(link.getAttribute('href')).toMatch(/\/feedbacks\/new$/);
+  expect(paths(requests, '/api/quality/intake', 'POST')).toHaveLength(0);
 });
 
-it('shows the intake form with fqc.intake and sends a fresh idempotency key per submission', async () => {
-  const user = userEvent.setup();
+it('shows the new-feedback entry to a user with fqc.submit and never posts the demo intake', async () => {
   const { beforeRequest, requests } = recordRequests();
   await renderAuthenticatedClient(<QualityPage />, {
     route: '/quality',
     locale: 'en-US',
     member: true,
-    grants: [fqcGrant('view', 'intake')],
+    grants: [fqcGrant('view', 'submit')],
     beforeRequest,
   });
-  const content = await screen.findByPlaceholderText(
-    enUS.quality.intake.contentPlaceholder,
-  );
+  const entry = await screen.findByTestId('feedback-entry');
+  const link = await within(entry).findByRole('button', {
+    name: enUS.quality.newFeedback,
+  });
+  expect(link.getAttribute('href')).toMatch(/\/feedbacks\/new$/);
   expect(
-    screen.getByRole('button', { name: enUS.quality.intake.submit }),
-  ).toBeVisible();
-
-  await user.type(content, 'First message: the parts do not fit');
-  await user.click(
-    screen.getByRole('button', { name: enUS.quality.intake.submit }),
-  );
-  await waitFor(() =>
-    expect(paths(requests, '/api/quality/intake', 'POST')).toHaveLength(1),
-  );
-  await waitFor(() => expect(content).toHaveValue(''));
-
-  await user.type(content, 'Second message: a different complaint');
-  await user.click(
-    screen.getByRole('button', { name: enUS.quality.intake.submit }),
-  );
-  await waitFor(() =>
-    expect(paths(requests, '/api/quality/intake', 'POST')).toHaveLength(2),
-  );
-
-  const [first, second] = paths(requests, '/api/quality/intake', 'POST');
-  expect(
-    first?.headers.get('Idempotency-Key'),
-    '投递必须带幂等键',
-  ).toBeTruthy();
-  expect(
-    second?.headers.get('Idempotency-Key'),
-    '两次不同的投递不能用同一个键',
-  ).not.toBe(first?.headers.get('Idempotency-Key'));
+    screen.queryByPlaceholderText(enUS.quality.intake.contentPlaceholder),
+  ).not.toBeInTheDocument();
+  expect(paths(requests, '/api/quality/intake', 'POST')).toHaveLength(0);
 });
 
 it('confirms a needs-review row with an empty body and refetches the list', async () => {
@@ -372,72 +347,29 @@ it('shows no confirm button to a user without fqc.handle', async () => {
   ).not.toBeInTheDocument();
 });
 
-it('offers a checked-the-list way out after an intake whose outcome is unknown', async () => {
-  const user = userEvent.setup();
+it('intake permission alone does not bring back the demo intake form', async () => {
   const { beforeRequest, requests } = recordRequests();
-  let failIntake = true;
   await renderAuthenticatedClient(<QualityPage />, {
     route: '/quality',
     locale: 'en-US',
     member: true,
     grants: [fqcGrant('view', 'intake')],
-    beforeRequest: async (request) => {
-      await beforeRequest(request);
-      if (
-        failIntake &&
-        new URL(request.url).pathname.endsWith('/api/quality/intake')
-      ) {
-        failIntake = false;
-        throw new Error('network down');
-      }
-    },
+    beforeRequest,
   });
-  const content = await screen.findByPlaceholderText(
-    enUS.quality.intake.contentPlaceholder,
+  await screen.findByText(enUS.quality.tickets.empty);
+  await waitForPermissions(requests);
+  const link = await within(screen.getByTestId('feedback-entry')).findByRole(
+    'button',
+    { name: enUS.quality.newFeedback },
   );
-  const submit = screen.getByRole('button', {
-    name: enUS.quality.intake.submit,
-  });
-
-  await user.type(content, 'First message: the parts do not fit');
-  await user.click(submit);
+  expect(link.getAttribute('href')).toMatch(/\/feedbacks\/new$/);
   expect(
-    await screen.findByText(enUS.quality.intake.outcomeUnknown),
-  ).toBeVisible();
-  expect(
-    paths(requests, '/api/quality/intake', 'POST'),
-    '第一次投递确实发出去了',
-  ).toHaveLength(1);
-  expect(submit, '结果未知时不能再投').toBeDisabled();
-
-  // 改过内容也发不出去：钩子会拿原操作核对，页面不应让它走到那一步。
-  await user.clear(content);
-  await user.type(content, 'Second message: a different complaint');
-  expect(submit).toBeDisabled();
-
-  await user.click(
-    screen.getByRole('button', { name: enUS.quality.intake.acknowledge }),
-  );
-  await waitFor(() =>
-    expect(
-      screen.queryByText(enUS.quality.intake.outcomeUnknown),
-    ).not.toBeInTheDocument(),
-  );
-  expect(submit).toBeEnabled();
-
-  await user.click(submit);
-  await waitFor(() =>
-    expect(paths(requests, '/api/quality/intake', 'POST')).toHaveLength(2),
-  );
-  const [first, second] = paths(requests, '/api/quality/intake', 'POST');
-  expect(
-    second?.headers.get('Idempotency-Key'),
-    '核对之后重新投递应当用新的幂等键',
-  ).not.toBe(first?.headers.get('Idempotency-Key'));
+    screen.queryByPlaceholderText(enUS.quality.intake.contentPlaceholder),
+  ).not.toBeInTheDocument();
+  expect(paths(requests, '/api/quality/intake', 'POST')).toHaveLength(0);
 });
 
-it('restores an unknown intake outcome after leaving and returning to the page', async () => {
-  const user = userEvent.setup();
+it('leaves no unknown-intake notice behind after leaving and returning to the page', async () => {
   function PageWithToggle(): ReactElement {
     const [shown, setShown] = useState(true);
     return (
@@ -450,52 +382,28 @@ it('restores an unknown intake outcome after leaving and returning to the page',
     );
   }
   const { beforeRequest, requests } = recordRequests();
-  let failIntake = true;
   await renderAuthenticatedClient(<PageWithToggle />, {
     route: '/quality',
     locale: 'en-US',
     member: true,
-    grants: [fqcGrant('view', 'intake')],
-    beforeRequest: async (request) => {
-      await beforeRequest(request);
-      if (
-        failIntake &&
-        new URL(request.url).pathname.endsWith('/api/quality/intake')
-      ) {
-        failIntake = false;
-        throw new Error('network down');
-      }
-    },
+    grants: [fqcGrant('view', 'intake', 'submit')],
+    beforeRequest,
   });
-  await user.type(
-    await screen.findByPlaceholderText(enUS.quality.intake.contentPlaceholder),
-    'The result will be lost',
-  );
-  await user.click(
-    screen.getByRole('button', { name: enUS.quality.intake.submit }),
-  );
   expect(
-    await screen.findByText(enUS.quality.intake.outcomeUnknown),
+    await screen.findByRole('button', { name: enUS.quality.newFeedback }),
   ).toBeVisible();
-  expect(paths(requests, '/api/quality/intake', 'POST')).toHaveLength(1);
-
-  await user.click(screen.getByRole('button', { name: 'Leave page' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Leave page' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Return to page' }));
   expect(
-    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
+    await screen.findByRole('button', { name: enUS.quality.newFeedback }),
+  ).toBeVisible();
+  expect(
     screen.queryByText(enUS.quality.intake.outcomeUnknown),
   ).not.toBeInTheDocument();
-  await user.click(screen.getByRole('button', { name: 'Return to page' }));
-
-  expect(
-    await screen.findByText(enUS.quality.intake.outcomeUnknown),
-    '回到页面后仍要告诉用户上一次的结果未知',
-  ).toBeVisible();
-  expect(
-    screen.getByRole('button', { name: enUS.quality.intake.submit }),
-  ).toBeDisabled();
+  expect(paths(requests, '/api/quality/intake', 'POST')).toHaveLength(0);
 });
 
-it('leaves the intake slot empty while permissions load and slots the form first when granted', async () => {
+it('keeps the feedback entry slot stable while permissions load', async () => {
   let releasePermissions: () => void = () => {};
   const permissionsGate = new Promise<void>((resolve) => {
     releasePermissions = resolve;
@@ -505,7 +413,7 @@ it('leaves the intake slot empty while permissions load and slots the form first
     route: '/quality',
     locale: 'en-US',
     member: true,
-    grants: [fqcGrant('view', 'handle', 'intake')],
+    grants: [fqcGrant('view', 'handle', 'submit')],
     beforeRequest: async (request) => {
       if (
         new URL(request.url).pathname.endsWith('/api/authorization/permissions')
@@ -523,28 +431,27 @@ it('leaves the intake slot empty while permissions load and slots the form first
     },
   });
 
-  // 权限悬置期左栏不占位：占位块在权限落定后塌掉，会把「部门分流」「代填效果」
-  // 顶得上下跳（界面点验 2026-11-26，首屏上移 302px）。等待期什么都没有。
   await screen.findByText('Permission placeholder row');
+  const entry = screen.getByTestId('feedback-entry');
+  expect(entry, '槽位从等待期就在，权限落定不新建节点').toHaveClass('min-h-11');
   expect(
-    screen.queryByTestId('intake-placeholder'),
-    '投递占位块已取消：不许再渲染',
+    within(entry).queryByRole('button', { name: enUS.quality.newFeedback }),
   ).not.toBeInTheDocument();
-  expect(screen.queryByTestId('intake-form')).not.toBeInTheDocument();
   expect(
     document.querySelector('[data-slot="review-placeholder"]'),
-    '权限等待期也要占住确认按钮的位置',
   ).not.toBeNull();
 
   await act(async () => releasePermissions());
 
-  const form = await screen.findByTestId('intake-form');
-  const column = form.parentElement as HTMLElement;
-  // 表单插在左栏最上面；它下面的两张卡保持原有相对顺序。
+  const link = await within(entry).findByRole('button', {
+    name: enUS.quality.newFeedback,
+  });
+  expect(screen.getByTestId('feedback-entry'), '槽位节点前后同一个').toBe(entry);
+  expect(link.getAttribute('href')).toMatch(/\/feedbacks\/new$/);
+  const column = entry.parentElement as HTMLElement;
   const columnTitles = [...column.children].map(
     (child) => child.querySelector('[data-slot="card-title"]')?.textContent,
   );
-  expect(columnTitles[0]).toBe(enUS.quality.intake.title);
   expect(columnTitles).toContain(enUS.quality.department.title);
   expect(columnTitles).toContain(enUS.quality.drafting.title);
   expect(
@@ -552,9 +459,7 @@ it('leaves the intake slot empty while permissions load and slots the form first
   ).toBeLessThan(columnTitles.indexOf(enUS.quality.drafting.title));
   expect(document.querySelector('[data-slot="review-placeholder"]')).toBeNull();
   expect(
-    await screen.findByRole('button', {
-      name: enUS.quality.screenings.review,
-    }),
+    await screen.findByRole('button', { name: enUS.quality.screenings.review }),
   ).toBeVisible();
   await waitForPermissions(requests);
 });
@@ -647,12 +552,12 @@ it('renders the drafting outcomes skeleton rows with the real labels so the line
   expect(card.querySelectorAll('div[aria-hidden="true"]')).toHaveLength(0);
 });
 
-it('shows a prompt where the intake form and review button would be when permissions fail to load', async () => {
+it('shows a prompt in the feedback entry slot and at the review button when permissions fail to load', async () => {
   await renderAuthenticatedClient(<QualityPage />, {
     route: '/quality',
     locale: 'en-US',
     member: true,
-    grants: [fqcGrant('view', 'handle', 'intake')],
+    grants: [fqcGrant('view', 'handle', 'submit')],
     beforeRequest: async (request) => {
       if (
         new URL(request.url).pathname.endsWith('/api/authorization/permissions')
@@ -669,30 +574,31 @@ it('shows a prompt where the intake form and review button would be when permiss
     },
   });
 
+  const entry = await screen.findByTestId('feedback-entry');
   expect(
-    await screen.findByTestId('intake-permission-error'),
-    '读取失败时投递表单的位置要有提示',
+    await within(entry).findByRole('alert'),
+    '读取失败时新建反馈入口的位置要有提示',
   ).toHaveTextContent(enUS.quality.permissionFailed);
-  expect(screen.queryByTestId('intake-form')).not.toBeInTheDocument();
-  expect(screen.queryByTestId('intake-placeholder')).not.toBeInTheDocument();
+  expect(
+    within(entry).queryByRole('button', { name: enUS.quality.newFeedback }),
+  ).not.toBeInTheDocument();
 
   expect(await screen.findByText('Permission read failed row')).toBeVisible();
   expect(
     await screen.findByTestId('review-permission-error'),
-    '读取失败时确认按钮的位置也要有提示',
   ).toHaveTextContent(enUS.quality.permissionFailed);
   expect(
     screen.queryByRole('button', { name: enUS.quality.screenings.review }),
   ).not.toBeInTheDocument();
 });
 
-it('shows neither the intake form nor a permission error when the user simply may not intake', async () => {
+it('keeps the feedback entry regardless of the handle permission', async () => {
   const { beforeRequest, requests } = recordRequests();
   await renderAuthenticatedClient(<QualityPage />, {
     route: '/quality',
     locale: 'en-US',
     member: true,
-    grants: [fqcGrant('view')],
+    grants: [fqcGrant('view', 'handle')],
     beforeRequest,
     prepare: async (server) => {
       await insertScreening(server, 'needs-review', 'No permission row');
@@ -701,23 +607,15 @@ it('shows neither the intake form nor a permission error when the user simply ma
   await waitForPermissions(requests);
   expect(await screen.findByText('No permission row')).toBeVisible();
 
-  // 投递区与确认按钮要等权限快照回来才换内容，比列表行晚一步；远端机器慢时行已经出来、
-  // 占位还在。这里要的是「稳定之后这些都不出现」，所以连着等，不在某一瞬间断言。
   await waitFor(() => {
-    expect(screen.queryByTestId('intake-form')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('intake-placeholder')).not.toBeInTheDocument();
+    const entry = screen.getByTestId('feedback-entry');
     expect(
-      screen.queryByTestId('intake-permission-error'),
-    ).not.toBeInTheDocument();
+      within(entry).getByRole('button', { name: enUS.quality.newFeedback }),
+    ).toBeVisible();
+    expect(within(entry).queryByRole('alert')).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: enUS.quality.screenings.review }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByTestId('review-permission-error'),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText(enUS.quality.permissionFailed),
-    ).not.toBeInTheDocument();
+      screen.getByRole('button', { name: enUS.quality.screenings.review }),
+    ).toBeVisible();
   });
 });
 
@@ -790,15 +688,21 @@ it('shows a known message channel by its localized name', async () => {
   expect(screen.queryByText('wechat')).not.toBeInTheDocument();
 });
 
-it('does not point users at an intake form they may not see', async () => {
+it('does not point users at a demo intake form they may not see', async () => {
+  const { beforeRequest, requests } = recordRequests();
   await renderAuthenticatedClient(<QualityPage />, {
     route: '/quality',
     locale: 'en-US',
     member: true,
     grants: [fqcGrant('view')],
+    beforeRequest,
   });
   expect(await screen.findByText(enUS.quality.tickets.empty)).toBeVisible();
   expect(enUS.quality.tickets.empty).not.toMatch(/form|submit/iu);
+  expect(
+    screen.queryByPlaceholderText(enUS.quality.intake.contentPlaceholder),
+  ).not.toBeInTheDocument();
+  expect(paths(requests, '/api/quality/intake', 'POST')).toHaveLength(0);
 });
 
 it('marks each screening row with its engine and the model reason (R-002 17)', async () => {

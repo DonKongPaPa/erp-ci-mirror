@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { PAGES as KNOWLEDGE_PAGES } from '@nocobase/app-plugin-knowledge/shared/access';
 import { describe, expect, it } from 'vitest';
 
+import { FEEDBACK_PAGE_ID } from '../../client/pages/feedbacks/page-id.js';
 import { businessPermissionSets } from '../../database/main/seeds/202611240001_seed_business_permission_sets.js';
 
 import { EMPLOYEES_PAGE_ID } from '../../client/pages/settings/employees/page-id.js';
@@ -61,6 +62,17 @@ describe('R-013 质量页的授权 id', () => {
       routePageIds,
       'client/routes.ts 里质量页路由的 authz.resource.id 不是 seed 写的 quality',
     ).toContain('quality');
+
+    // 反馈单页的 id 由共享常量给出：常量写成别的值、或路由没用这个常量，角色拿到的
+    // 页面授权就落不到这一页上。期望值写死在这里，改常量不会跟着改，断言不会空转。
+    expect(FEEDBACK_PAGE_ID, '反馈单页的 id 不是 seed 写的 feedback').toBe(
+      'feedback',
+    );
+    expect(
+      read('client', 'routes.ts'),
+      '反馈单路由没有用共享的页面 id 常量',
+    ).toContain('id: FEEDBACK_PAGE_ID');
+    expect(seedPageIds).toContain(FEEDBACK_PAGE_ID);
 
     // 知识库的页面 id 由插件定：写成别的值时角色编辑器里勾不上那一页。
     expect(

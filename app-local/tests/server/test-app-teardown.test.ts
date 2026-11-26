@@ -3,12 +3,13 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import type { TestApp } from '@nocobase/app-testing/server';
+import {
+  createTestAppConfig,
+  type TestApp,
+} from '@nocobase/app-testing/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createStandaloneServer } from '../../server/standalone.js';
 import {
-  createTestApp,
   openTestDatabaseAdmin,
   stabilizeTestApp,
   testDatabaseSchemaNames,
@@ -23,12 +24,6 @@ import {
  *
  * 测试只连 Postgres；`drop schema … cascade` 与 `pg_locks` 都在这一方言上。
  */
-
-const config = {
-  app: { publicOrigin: 'http://localhost' },
-  auth: { secret: 'test-auth-secret-at-least-32-characters' },
-  logging: { enabled: false },
-};
 
 type TestAppInstance = Awaited<ReturnType<typeof createPlainApp>>;
 
@@ -71,12 +66,28 @@ it('finishes an in-flight request before closing the application', async () => {
   ]);
 });
 
-async function createPlainApp() {
-  return createTestApp({
-    createServer: createStandaloneServer,
-    connections: ['main'],
+/**
+ * 只造收尾断言需要的东西：一份隔离的 Postgres schema。迁移、seed、Vite、provider
+ * 和插件都不参与这里的断言（不对应用发请求），所以不启完整服务器，只把配置交给
+ * 同一条收尾链（stabilizeTestApp）。两个用例各造自己的 schema，互不共享。
+ */
+async function createPlainApp(): Promise<TestApp> {
+  const config = await createTestAppConfig({ connections: ['main'], install: false });
+  const server = {
+    close: async () => undefined,
+    fetch: async () => new Response('unused'),
+  };
+  return stabilizeTestApp({
+    server,
+    application: undefined,
+    publicBasePath: '',
+    fetch: server.fetch,
+    database: undefined,
+    connection: undefined,
     config,
-  });
+    request: server.fetch,
+    close: async () => undefined,
+  } as unknown as TestApp);
 }
 
 interface SchemaLock {
@@ -105,9 +116,11 @@ async function holdSchemaLock(app: TestAppInstance): Promise<SchemaLock> {
       const pid = (rows as readonly { pid: number }[])[0]?.pid;
       if (pid === undefined)
         throw new Error('The lock holder has no backend pid.');
+      // 夹具不装迁移，schema 里没有业务表；造一张探针表给 drop 一个真实的锁对象。
       await transaction.raw(
-        'select 1 from "__nocobase_collection_metadata" limit 1',
+        'create table if not exists "__teardown_lock_probe" (id integer)',
       );
+      await transaction.raw('select 1 from "__teardown_lock_probe" limit 1');
       started(pid);
       await held;
     })

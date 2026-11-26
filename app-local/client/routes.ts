@@ -8,6 +8,7 @@ import {
   ChartColumn,
   Cpu,
   Home,
+  MessageSquareWarning,
   MonitorSmartphone,
   ShieldAlert,
   Users,
@@ -20,6 +21,7 @@ import {
   skillsRoute,
   usageRoute,
 } from '@nocobase/app-plugin-agents/client/routes';
+import { FEEDBACK_PAGE_ID } from './pages/feedbacks/page-id.js';
 import settingsShellRoutes from './pages/settings/shell-routes.js';
 import systemSettingsRoutes from './pages/settings/routes.js';
 import {
@@ -57,6 +59,33 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
     name: 'quality',
     navigation: { title: 'navigation.quality', icon: ShieldAlert },
     path: '/quality',
+  },
+  {
+    // R-026：反馈单。另设页面授权（两个动作任一都能进来），能做什么在页面里按动作分；
+    // 不挂在质量页下面，否则普通员工会连质量页一起打得开。
+    auth: 'required',
+    authz: {
+      resource: { type: 'page', id: FEEDBACK_PAGE_ID },
+      action: 'access',
+    },
+    componentLoader: () => import('./pages/feedbacks/index.js'),
+    name: 'feedbacks',
+    navigation: { title: 'navigation.feedbacks', icon: MessageSquareWarning },
+    path: '/feedbacks',
+    children: [
+      {
+        name: 'feedbackNew',
+        path: 'new',
+        presentation: { kind: 'dialog', title: 'feedbacks.form.titleNew' },
+        componentLoader: () => import('./pages/feedbacks/new.js'),
+      },
+      {
+        name: 'feedbackDetail',
+        path: ':feedbackId',
+        presentation: { kind: 'dialog', title: 'feedbacks.form.titleEdit' },
+        componentLoader: () => import('./pages/feedbacks/detail.js'),
+      },
+    ],
   },
   {
     // R-032「我的 API 密钥」：每个登录用户只管自己的密钥，接口只作用于本人。

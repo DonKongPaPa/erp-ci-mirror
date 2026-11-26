@@ -255,7 +255,7 @@ describe('System settings navigation', () => {
     ]);
     expect(
       buildRouteNavigation(routes, new Set()).map(({ route }) => route.name),
-    ).toEqual(['home', 'quality', 'ai', 'settingsHome']);
+    ).toEqual(['home', 'quality', 'feedbacks', 'ai', 'settingsHome']);
   });
 });
 
