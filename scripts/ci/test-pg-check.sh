@@ -2,6 +2,8 @@
 # 本地测试库的行为检查：容器身份（固定标签）+ 用 env 文件里的凭据真连一次。
 # 由 gate.sh 只在真正连库的档位调用；CI 不调用（连接由工作流注入的变量保证）。
 # 口令只从 600 的 .local/test-pg.env 读入进程环境，绝不打印。
+# R-059：探针顺带记下 pg_postmaster_start_time() 到 TEST_DB_STARTED_AT_FILE，
+# 测试阶段结束后由 test-db-restart-check.sh 复核；PG_PROBE_BIN 可注入替身供测试使用。
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -52,7 +54,16 @@ done < "$env_file"
 
 # 真连一次：容器在但凭据写岔也必须停下，不能让闸门假绿。
 # 必须从宿主侧走 TCP —— 容器内 loopback 是 trust 认证，错口令也返回 1。
-node "$ROOT/scripts/ci/pg-probe.mjs" ||
+PG_PROBE_START_TIME_FILE="${TEST_DB_STARTED_AT_FILE:-$ROOT/.ci/test-db-started-at}"
+start_dir="$(dirname "$PG_PROBE_START_TIME_FILE")"
+mkdir -p "$start_dir" || fail_check "建不了测试库启动时刻的目录 $start_dir；修好权限再跑。"
+export PG_PROBE_START_TIME_FILE
+if [ -n "${PG_PROBE_BIN:-}" ]; then
+  probe=("$PG_PROBE_BIN")
+else
+  probe=(node "$ROOT/scripts/ci/pg-probe.mjs")
+fi
+"${probe[@]}" ||
   fail_check "测试库连不上（宿主侧 TCP 探测失败）；$REBUILD 重建。"
 
 printf '[test-pg] 测试库 %s 身份与连接均正常\n' "$TEST_PG_CONTAINER"

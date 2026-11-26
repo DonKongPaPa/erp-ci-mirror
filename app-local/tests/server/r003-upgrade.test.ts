@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 
 import type { AppAuthorization } from '@nocobase/app-plugin-authorization';
 import { authorizationToken } from '@nocobase/app-plugin-authorization';
@@ -6,10 +7,14 @@ import {
   DEFAULT_ADMIN_CREDENTIALS,
   signIn,
 } from '@nocobase/app-plugin-authentication/testing';
+import { bindAppCommand, runAppCommand } from '@nocobase/app-testing/cli';
 import { createAppTest } from '../helpers/test-app.js';
 import { expect, vi } from 'vitest';
 
-import { upgradeR003 } from '../../cli/authz/upgrade-r003.js';
+import AuthzUpgradeR003, {
+  upgradeR003,
+  type R003UpgradeReport,
+} from '../../cli/authz/upgrade-r003.js';
 import { createStandaloneServer } from '../../server/standalone.js';
 
 /**
@@ -33,6 +38,27 @@ const QUALITY = ['quality_manager', 'quality_inspector'] as const;
 const FQC = { type: 'composite', id: 'fqc' } as const;
 const TICKET_SCOPES = { fqcTickets: 'allRecords' };
 const CONFIGURE_SCOPES = { fqcRoutingRules: 'allRecords' };
+const appRoot = fileURLToPath(new URL('../../', import.meta.url));
+
+/**
+ * 部署脚本看的是命令退出码。把命令钉在测试应用已经起好的服务上，按真实 oclif
+ * runner 跑一遍，收下它最终会退出的码；应用不要重复 start，也不要被命令关掉。
+ */
+const runUpgradeCommand = (authz: AppAuthorization) => {
+  const Bound = bindAppCommand(AuthzUpgradeR003, {
+    rootDir: appRoot,
+    id: 'authz:upgrade-r003',
+    loadRuntime: async () =>
+      ({ env: {}, scope: { destroy: async () => undefined } }) as never,
+    createApp: () =>
+      ({
+        start: async () => undefined,
+        shutdown: async () => undefined,
+        container: { resolve: () => authz },
+      }) as never,
+  });
+  return runAppCommand(Bound, []);
+};
 
 interface JsonAction {
   action: string;
@@ -660,6 +686,21 @@ test('R-003 复查：部门主管任一条 view 形状非法时整份标 invalid
     ),
     '日志要点名非法形状',
   ).toBe(true);
+
+  const command = await runUpgradeCommand(authz);
+  expect(
+    command.exitCode ?? 0,
+    '收窄没做成时命令必须非零退出，部署脚本才能发现',
+  ).toBeGreaterThan(0);
+  expect(
+    String(command.error ?? ''),
+    '错误信息要写清是哪一条收窄、怎么处理',
+  ).toMatch(/department manager view/u);
+  expect(String(command.error ?? '')).toMatch(/rerun/u);
+  expect(
+    command.stdout,
+    '退出前报告要照常打印完',
+  ).toContain('[r003-view] dept_manager: declaration mismatch:');
 });
 
 test('R-003 复查：validateGrant 的任何报错都阻断，不被正则过滤', async ({
@@ -675,10 +716,41 @@ test('R-003 复查：validateGrant 的任何报错都阻断，不被正则过滤
     const report = await upgradeR003(authz, { info: () => undefined });
     expect(report.intakeScopes.invalid).toContain('r003-invalid-intake');
     expect(report.intakeScopes.changed).not.toContain('r003-invalid-intake');
+    const command = await runUpgradeCommand(authz);
+    expect(
+      command.exitCode ?? 0,
+      '投递收窄没做成时命令必须非零退出',
+    ).toBeGreaterThan(0);
+    expect(String(command.error ?? '')).toMatch(/intake/u);
   } finally {
     validate.mockRestore();
   }
   expect(grantsOf((await authz.permissionSets.get('r003-invalid-intake'))!)).toEqual(
     before,
   );
+});
+
+test('R-003 升级：两处收窄都做成时命令以 0 退出', async ({ app }) => {
+  const authz = app.container.resolve(authorizationToken);
+  const key = 'r003-exit-zero-intake';
+  await createOldIntakeSet(authz, key);
+  await widenDeptView(authz);
+
+  const command = await runUpgradeCommand(authz);
+  expect(command.error, `命令不该报错：${String(command.error)}`).toBeUndefined();
+  expect(command.exitCode ?? 0, '两处收窄都做成时以 0 退出').toBe(0);
+  const report = command.result as R003UpgradeReport | undefined;
+  expect(report?.intakeScopes.changed).toEqual([key]);
+  expect(report?.intakeScopes.invalid).toEqual([]);
+  expect(report?.deptManagerView.changed).toEqual(['dept_manager']);
+  expect(report?.deptManagerView.invalid).toEqual([]);
+  expect(
+    scopesOfAction(grantsOf((await authz.permissionSets.get(key))!), 'intake'),
+  ).toEqual({ fqcMessages: 'allRecords', fqcScreenings: 'allRecords' });
+  expect(
+    scopesOfAction(
+      grantsOf((await authz.permissionSets.get('dept_manager'))!),
+      'view',
+    ),
+  ).toEqual({ fqcTickets: 'org.myDepartmentsAndBelow' });
 });

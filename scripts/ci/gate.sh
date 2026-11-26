@@ -35,6 +35,33 @@ fail() {
   exit 1
 }
 
+# R-059：每次运行一个独立目录放测试库时刻文件，不共用固定路径 ——
+# 同一副本里并发的 docs / fast / unit 档不能互相清掉对方的前置时刻，
+# 更不能让对方的新时刻被误读成「这一轮确认没重启」。
+if [ -f "$ROOT/scripts/ci/test-db-state.sh" ]; then
+  TEST_DB_RUN_DIR="$(bash "$ROOT/scripts/ci/test-db-state.sh" init "$CI_DIR")" ||
+    fail "建不了测试库时刻目录：$CI_DIR"
+else
+  # 守门测试的临时仓库只拷了 gate.sh，内联建同样的目录，行为一致。
+  TEST_DB_RUN_DIR="$(mktemp -d "$CI_DIR/test-db-run.XXXXXX")" ||
+    fail "建不了测试库时刻目录：$CI_DIR"
+fi
+TEST_DB_STARTED_AT_FILE="$TEST_DB_RUN_DIR/started-at"
+TEST_DB_AFTER_FILE="$TEST_DB_RUN_DIR/after-started-at"
+TEST_DB_RESTARTED_FILE="$TEST_DB_RUN_DIR/restarted"
+export TEST_DB_RUN_DIR TEST_DB_STARTED_AT_FILE TEST_DB_AFTER_FILE TEST_DB_RESTARTED_FILE
+# 判据里是否写 testDb，只认这一轮真的做了容器核对（不核对的档位绝不吃旧文件）。
+export TEST_DB_CHECKED=0
+cleanup_test_db_run() {
+  local dir="${TEST_DB_RUN_DIR:-}"
+  [ -n "$dir" ] || return 0
+  case "$dir" in
+    "$CI_DIR"/test-db-run.*) rm -rf -- "$dir" ;;
+  esac
+  TEST_DB_RUN_DIR=''
+}
+trap cleanup_test_db_run EXIT
+
 step() {
   printf '\n\033[36m[gate] %s\033[0m\n' "$1"
 }
@@ -270,6 +297,11 @@ write_verdict() {
   for name in "${SKIPPED_STAGES[@]+"${SKIPPED_STAGES[@]}"}"; do
     skip_args+=(--skip "$name")
   done
+  # R-059：测试阶段结束后再读一次测试库启动时刻。只提示，不改退出码、不把红判成绿。
+  # CI 上不做容器核对（TEST_DB_CHECKED=0），这条分支保持原样。
+  if [ "$TEST_DB_CHECKED" -eq 1 ]; then
+    bash "$ROOT/scripts/ci/test-db-restart-check.sh" || true
+  fi
   node "$ROOT/scripts/ci/verdict.mjs" \
     --stage "$STAGE" \
     --out "$CI_DIR/verdict.json" \
@@ -441,9 +473,12 @@ case "$STAGE" in
     if "$ROOT/scripts/ci/changed-needs-db.sh" "$ROOT"; then need_test_db=1; fi
     ;;
 esac
+# 时刻文件在本轮自己的目录里，不互相清；不核对的档位也不会写 testDb。
 if [ "$need_test_db" -eq 1 ]; then
   if [ -z "${POSTGRES_HOST:-}" ] && [ "${CI:-0}" != "true" ] && [ "${GITHUB_ACTIONS:-}" != "true" ]; then
     "$ROOT/scripts/ci/test-pg-check.sh" || exit 1
+    TEST_DB_CHECKED=1
+    export TEST_DB_CHECKED
   fi
 else
   # 不连库的档位给配置层一个显式信号：只定方言、缺参数不报错，但不回落 SQLite。

@@ -61,6 +61,15 @@ function git(...args) {
   }
 }
 
+/** 读一个由闸门生成的单值文件；不存在或读不出就返回空串。 */
+function readTrim(file) {
+  try {
+    return readFileSync(file, 'utf8').trim();
+  } catch {
+    return '';
+  }
+}
+
 /** 收集测试套件的机器可读摘要（vitest --reporter=json 的产物）。 */
 function readTestSummary(file) {
   try {
@@ -96,6 +105,16 @@ const stages = (STAGE_PLANS[options.stage] ?? STAGE_PLANS.unit)
   });
 
 const tests = readTestSummary(path.join(REPO_ROOT, '.ci/vitest.json'));
+const startedAtFile = process.env.TEST_DB_STARTED_AT_FILE ??
+  path.join(REPO_ROOT, '.ci', 'test-db-started-at');
+const restartedFile = process.env.TEST_DB_RESTARTED_FILE ??
+  path.join(REPO_ROOT, '.ci', 'test-db-restarted');
+const startedAt = readTrim(startedAtFile);
+const restartedFlag = readTrim(restartedFile);
+// 三态：真重启 / 确认没重启 / 没法判断（复核失败或时刻文件为空）。
+const restartedDuringRun = restartedFlag === '1' ? true : restartedFlag === '0' ? false : null;
+// 只有这一轮真的做过容器核对才写 testDb；旧文件不算证据（复查应改 1）。
+const dbChecked = process.env.TEST_DB_CHECKED === '1';
 const failedStages = stages.filter((stage) => stage.status !== 'passed');
 const verdict = {
   // 追溯三要素：哪次运行、哪个提交、什么时候。
@@ -118,6 +137,16 @@ const verdict = {
   },
   stages,
   tests,
+  // R-059：只有跑过本地容器核对才写 testDb；CI 注入 POSTGRES_HOST 的分支保持原样。
+  // 核对过但读不到时刻时，两个字段都写 null —— 不能让「没写」被误读成「没重启」。
+  ...(dbChecked
+    ? {
+        testDb: {
+          startedAt: startedAt || null,
+          restartedDuringRun,
+        },
+      }
+    : {}),
   verdict: failedStages.length === 0 ? 'passed' : 'failed',
   failedStages: failedStages.map((stage) => stage.name),
 };

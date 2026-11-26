@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expectListRowsStable } from '../list-stability.js';
 
 /**
  * 稳定性测试（R-026 验收 39）：反馈单的三个页面。
@@ -173,5 +174,26 @@ test.describe('反馈单三个页面的稳定性', () => {
     const noteAgain = page.getByLabel(/^Note$|^备注$/);
     await noteAgain.waitFor({ state: 'visible' });
     await expect(noteAgain).toHaveValue(saved);
+  });
+
+  test('骨架行与数据行同高、表头与首两行不跳（R-059）', async ({ page }) => {
+    await signIn(page);
+    // 两行真实数据，第 2 行才可量；helper 负责延迟取数、装 CLS 探针与导航。
+    await seedFeedback(page);
+    await seedFeedback(page);
+    await expectListRowsStable(page, {
+      url: feedbacksPath(),
+      list: list(page),
+      listSelector: '[data-testid="feedback-list"]',
+      skeletonRows: page.locator('[data-testid="feedback-skeleton-row"]'),
+      dataRows: rows(page),
+      headerRow: page
+        .locator('[data-testid="feedback-list"] [role="row"]')
+        .filter({ has: page.locator('[role="columnheader"]') })
+        .first(),
+      afterList: page.locator('[data-testid="feedback-list"] + div'),
+      afterListFollowsRows: true,
+      isListRequest: isFeedbackListRequest,
+    });
   });
 });

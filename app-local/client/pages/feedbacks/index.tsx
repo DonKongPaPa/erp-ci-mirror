@@ -257,13 +257,20 @@ export default function FeedbackListPage(): ReactElement {
               </CardTitle>
             </CardHeader>
             <CardContent className='p-0'>
-              <div className={ROW_CLASS} aria-hidden='true'>
+              <div role='table'>
+                <div className={ROW_CLASS} role='row'>
                 {columns.map((column) => (
-                  <span key={column.key} className='text-xs font-medium text-muted-foreground'>
+                  <span
+                    key={column.key}
+                    role='columnheader'
+                    className='text-xs font-medium text-muted-foreground'
+                  >
                     {t(column.labelKey)}
                   </span>
                 ))}
-                <span className='sr-only'>{t('feedbacks.list.actions')}</span>
+                <span role='columnheader' className='sr-only'>
+                  {t('feedbacks.list.actions')}
+                </span>
               </div>
 
               {showSkeleton ? (
@@ -304,6 +311,7 @@ export default function FeedbackListPage(): ReactElement {
                   ))}
                 </ul>
               )}
+              </div>
             </CardContent>
           </Card>
 

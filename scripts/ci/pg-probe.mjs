@@ -1,6 +1,8 @@
 // R-056 收尾 A1：从宿主侧用 env 里的凭据走 TCP 真连测试库。
 // 容器内的 psql 走 loopback，镜像 pg_hba 对它是 trust —— 口令错了也照样返回 1，
 // 验不出凭据写岔。这里按 POSTGRES_* 走 TCP，口令只在进程环境里，不进任何输出。
+// R-059：顺带读 pg_postmaster_start_time()，闸门据此分辨「代码红了」与「测试库中途重启过」。
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,11 +40,21 @@ const client = new Client({
   database: POSTGRES_DATABASE,
   connectionTimeoutMillis: 5000,
 });
+const startFile = process.env.PG_PROBE_START_TIME_FILE ?? '';
 try {
   await client.connect();
   const { rows } = await client.query('select 1 as ok');
   if (rows[0]?.ok !== 1) throw new Error('unexpected probe result');
-  process.stdout.write('[pg-probe] 测试库 TCP 连接正常（口令不回显）\n');
+  const postmaster = await client.query('select pg_postmaster_start_time() as started_at');
+  const startedAt = postmaster.rows[0]?.started_at;
+  if (!(startedAt instanceof Date)) throw new Error('unexpected postmaster start time');
+  const iso = startedAt.toISOString();
+  if (startFile) {
+    const resolved = path.resolve(startFile);
+    mkdirSync(path.dirname(resolved), { recursive: true });
+    writeFileSync(resolved, `${iso}\n`);
+  }
+  process.stdout.write(`[pg-probe] 测试库 TCP 连接正常（口令不回显），启动时刻 ${iso}\n`);
   await client.end();
   process.exit(0);
 } catch (error) {

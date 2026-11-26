@@ -90,25 +90,24 @@ describe('gate.sh 并发治理（R-055 / R-058）', () => {
   it('keeps fast and docs out of the lock and locks before the heavy stages', () => {
     const callAnchor =
       '# 重阶段从这里开始排队：fast / docs 在前面已经 exit\nacquire_heavy_lock';
-    const fastBlock = gate.slice(
-      gate.indexOf('if [ "$STAGE" = "fast" ]'),
-      gate.indexOf('if [ "$STAGE" = "docs" ]'),
-    );
+    // 锚点找不到时 indexOf 返回 -1，直接 slice 会得到空串、让下面的 not.toContain 恒真。
+    // 先把三个锚点的位置守住，再按位置切片（R-055 的 fast / docs 早退契约）。
+    const fastIdx = gate.indexOf('if [ "$STAGE" = "fast" ]');
+    const docsIdx = gate.indexOf('if [ "$STAGE" = "docs" ]', fastIdx + 1);
+    const callIdx = gate.indexOf(callAnchor, docsIdx + 1);
+    expect(fastIdx, 'gate.sh 里找不到 fast 档早退分支。').toBeGreaterThan(-1);
+    expect(docsIdx, 'gate.sh 里找不到 docs 档早退分支。').toBeGreaterThan(fastIdx);
+    expect(callIdx, '抢锁的调用点必须在 fast / docs 的早退之后。').toBeGreaterThan(docsIdx);
+    const fastBlock = gate.slice(fastIdx, docsIdx);
     expect(
       fastBlock.includes('acquire_heavy_lock'),
       'fast 档是快速反馈，不能也去排队。',
     ).toBe(false);
-    const docsBlock = gate.slice(
-      gate.indexOf('if [ "$STAGE" = "docs" ]'),
-      gate.indexOf(callAnchor),
-    );
+    const docsBlock = gate.slice(docsIdx, callIdx);
     expect(
       docsBlock.includes('acquire_heavy_lock'),
       'docs 档只跑项目组测试与两个扫描，不入锁。',
     ).toBe(false);
-    expect(gate.includes(callAnchor), '抢锁的调用点必须在 fast / docs 的早退之后。').toBe(
-      true,
-    );
     expect(
       gate.includes(
         'acquire_heavy_lock\n\nrun_stage lint pnpm lint\nrun_stage typecheck pnpm typecheck',

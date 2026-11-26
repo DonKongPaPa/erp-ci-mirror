@@ -1,5 +1,5 @@
 import type { AppAuthorization } from '@nocobase/app-plugin-authorization';
-import { AppCommand } from '@nocobase/app-cli';
+import { AppCommand, CommandError } from '@nocobase/app-cli';
 import {
   PermissionSetConflictError,
   type CreatePermissionSetInput,
@@ -590,6 +590,37 @@ export async function upgradeR003(
   return { grants, handleRouting, intakeScopes, deptManagerView };
 }
 
+/**
+ * 两处收窄只要有一条落进 invalid 就非零退出。报告在 `upgradeR003` 里已经打印完，
+ * 前面生效的授权保持原样；部署脚本按退出码判断升级是否完成，静默跳过会让它以为
+ * 升级成功，而部门主管仍读得到全公司的消息正文。
+ */
+export function assertR003NarrowingsSucceeded(report: R003UpgradeReport): void {
+  const failed: string[] = [];
+  if (report.intakeScopes.invalid.length > 0) {
+    failed.push(`intake scopes (${report.intakeScopes.invalid.join(', ')})`);
+  }
+  if (report.deptManagerView.invalid.length > 0) {
+    failed.push(
+      `department manager view (${report.deptManagerView.invalid.join(', ')})`,
+    );
+  }
+  if (failed.length === 0) {
+    return;
+  }
+  throw new CommandError(
+    `R-003: narrowing failed for ${failed.join(' and ')}; see the [r003-intake] / [r003-view] declaration mismatch lines above. Fix the named permission set, reload and rerun pnpm nocobase authz upgrade-r003.`,
+    {
+      code: 'R003_NARROWING_FAILED',
+      suggestions: ['Reload and rerun pnpm nocobase authz upgrade-r003'],
+      details: {
+        intakeScopes: [...report.intakeScopes.invalid],
+        deptManagerView: [...report.deptManagerView.invalid],
+      },
+    },
+  );
+}
+
 export default class AuthzUpgradeR003 extends AppCommand {
   static summary =
     'Bring existing environments up to date with R-003: new grants, intake scopes and the department manager view.';
@@ -610,9 +641,12 @@ export default class AuthzUpgradeR003 extends AppCommand {
       const authz = app.container.resolve(
         authorizationToken,
       ) as unknown as UpgradeAuthorization;
-      return upgradeR003(authz, {
+      const report = await upgradeR003(authz, {
         info: (message) => this.log(message),
       });
+      // 报告已打印完；收窄没做成时非零退出，别让部署脚本把静默跳过当成成功。
+      assertR003NarrowingsSucceeded(report);
+      return report;
     });
   }
 }

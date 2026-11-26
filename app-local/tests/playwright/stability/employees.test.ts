@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { expect, test, type Page } from '@playwright/test';
+import { expectListRowsStable } from '../list-stability.js';
 
 /**
  * R-011 验收第 18 条的四个清单流程，各一条稳定性测试：
@@ -204,5 +205,27 @@ test.describe('R-011 员工管理页的四条清单流程', () => {
       headers: { origin: origin() },
     });
     expect(JSON.stringify(await members.json())).toContain(data.name);
+  });
+
+  test('骨架行与数据行同高、表头与首两行不跳（R-059）', async ({ page }) => {
+    await signIn(page);
+    // 造两行，保证量得到第 1、2 行；helper 自己装 CLS 探针、延迟列表请求并导航。
+    await seed(page);
+    await seed(page);
+    await expectListRowsStable(page, {
+      url: `${application()}/settings/employees`,
+      list: page.locator('[data-testid="employee-list"]'),
+      listSelector: '[data-testid="employee-list"]',
+      skeletonRows: page.locator('[data-testid="employee-skeleton-row"]'),
+      dataRows: page.locator('[data-testid="employee-row"]'),
+      headerRow: page
+        .locator('[data-testid="employee-list"] [role="row"]')
+        .filter({ has: page.locator('[role="columnheader"]') })
+        .first(),
+      afterList: page.locator('section[aria-label] + div').first(),
+      afterListFollowsRows: false,
+      isListRequest: (url) =>
+        url.pathname.endsWith('/api/employees') && url.searchParams.has('page'),
+    });
   });
 });
