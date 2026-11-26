@@ -15,6 +15,7 @@ import { type ReactElement } from 'react';
 import { Route, Routes, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import applicationRoutes from '../../client/routes.js';
 import QualityPage from '../../client/pages/quality/index.js';
 import FeedbackListPage from '../../client/pages/feedbacks/index.js';
 import FeedbackNewPage from '../../client/pages/feedbacks/new.js';
@@ -879,63 +880,41 @@ describe('R-026 稳定性', () => {
     ).toBeVisible();
   });
 
-  it('新建态加载占位与落定表单共用同一高度类：首帧和落定对话框一样高', async () => {
-    const gate = Promise.withResolvers<unknown>();
-    const priorAnswer = answer;
-    answer = (call) => {
-      if (call.path === 'authorization/permissions') return gate.promise;
-      return priorAnswer(call);
-    };
-    try {
-      await renderAt('/feedbacks/new');
-      const dialog = await screen.findByRole('dialog', {
-        name: enUS.feedbacks.form.titleNew,
-      });
-      const shell = await within(dialog).findByTestId('feedback-form-shell');
-      expect(shell, '权限判定中的占位与落定同高').toHaveClass('min-h-dvh');
-      const loadingClass = shell.className;
+});
 
-      await act(async () => gate.resolve({ data: permissions }));
+describe('R-026 对话框路由的页面模块在打开前就绪', () => {
+  /** 从真实的应用路由树里取反馈单的子路由，守的是用户实际走的那条路由。 */
+  function dialogLoader(name: string) {
+    const contribution = applicationRoutes.find((part) =>
+      part.routes.some((route) => route.name === 'feedbacks'),
+    );
+    expect(contribution, '反馈单路由贡献要在应用路由里').toBeDefined();
+    const feedbacks = contribution!.routes.find(
+      (route) => route.name === 'feedbacks',
+    );
+    expect(feedbacks, '反馈单路由要在应用路由树里').toBeDefined();
+    const child = feedbacks!.children?.find((route) => route.name === name);
+    expect(child, `${name} 路由要挂在反馈单下面`).toBeDefined();
+    const loader = child!.componentLoader;
+    expect(loader, `${name} 路由要有页面 loader`).toBeTypeOf('function');
+    return loader!;
+  }
 
-      const settled = await within(dialog).findByTestId('feedback-form-shell');
-      expect(settled, '还是同一个外壳节点').toBe(shell);
-      expect(settled.className, '高度类前后一致，对话框顶边不动').toBe(loadingClass);
-      expect(
-        await within(settled).findByRole('button', { name: enUS.feedbacks.form.submit }),
-      ).toBeInTheDocument();
-    } finally {
-      answer = priorAnswer;
-    }
-  });
+  it('新建与详情的 loader 返回同一份已就绪模块，打开时不再现场 import', async () => {
+    const newLoader = dialogLoader('feedbackNew');
+    const detailLoader = dialogLoader('feedbackDetail');
 
-  it('编辑态加载占位与落定表单共用同一高度类：首帧和落定对话框一样高', async () => {
-    permissions = fqcGrant('maintain');
-    const gate = Promise.withResolvers<unknown>();
-    const priorAnswer = answer;
-    answer = (call) => {
-      if (call.path === 'authorization/permissions') return { data: permissions };
-      if (call.path === 'quality/feedbacks/f-1') return gate.promise;
-      return priorAnswer(call);
-    };
-    try {
-      await renderAt('/feedbacks/f-1');
-      const dialog = await screen.findByRole('dialog', {
-        name: enUS.feedbacks.form.titleEdit,
-      });
-      const shell = await within(dialog).findByTestId('feedback-form-shell');
-      expect(shell, '详情读取中的占位与落定同高').toHaveClass('min-h-dvh');
-      const loadingClass = shell.className;
+    // 现场 import() 每次调用都返回一个新 Promise：开对话框那一刻才发模块请求，宿主先渲染「Loading page」占位。
+    // 已预加载的 loader 每次给出同一份已 resolve 的模块，打开时没有模块请求也没有占位帧。
+    expect(newLoader(), '新建模块不是打开时现场 import').toBe(newLoader());
+    expect(detailLoader(), '详情模块不是打开时现场 import').toBe(detailLoader());
 
-      await act(async () => gate.resolve({ data: row() }));
-
-      const settled = await within(dialog).findByTestId('feedback-form-shell');
-      expect(settled, '还是同一个外壳节点').toBe(shell);
-      expect(settled.className, '高度类前后一致，对话框顶边不动').toBe(loadingClass);
-      expect(
-        await within(settled).findByRole('button', { name: enUS.feedbacks.form.save }),
-      ).toBeInTheDocument();
-    } finally {
-      answer = priorAnswer;
-    }
+    // 同一份模块还得是真页面，不能用一个空壳把断言糊过去。
+    expect((await newLoader()).default, 'loader 给出的是真正的新建页').toBe(
+      FeedbackNewPage,
+    );
+    expect((await detailLoader()).default, 'loader 给出的是真正的详情页').toBe(
+      FeedbackDetailPage,
+    );
   });
 });

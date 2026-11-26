@@ -14,7 +14,6 @@ import { StatusBadge } from '#components/status-badge';
 
 import { FeedbackClient, type FeedbackRow } from './client.js';
 import { DiscardControl } from './discard.js';
-import { FEEDBACK_FORM_SHELL_CLASS } from './layout.js';
 import {
   FeedbackSheetForm,
   type FeedbackFormValues,
@@ -90,9 +89,9 @@ function FeedbackDetailSheet(): ReactElement {
     }
   };
 
-  // 权限判定、详情读取、落定三态共用同一个外壳：首帧就把对话框撑到视口上限，顶边不跳。
+  // 页面模块已随入口包就绪；占位只在权限判定与详情读取中出现，高度接近表单即可，不撑满视口。
   return (
-    <div data-testid='feedback-form-shell' className={FEEDBACK_FORM_SHELL_CLASS}>
+    <>
       {maintain.isPending ? (
         <p role='status' className='flex items-center gap-2 text-sm'>
           <Loader2 className='size-4 animate-spin' />
@@ -116,7 +115,7 @@ function FeedbackDetailSheet(): ReactElement {
           </div>
         )
       ) : (
-        <>
+        <div className='flex flex-col gap-4'>
           <div className='flex flex-wrap items-center gap-2'>
             <StatusBadge tone={item.status === 'open' ? 'info' : 'neutral'} size='sm'>
               {t(`feedbacks.status.${item.status}`)}
@@ -188,8 +187,8 @@ function FeedbackDetailSheet(): ReactElement {
               onDiscarded={() => setReloadToken((value) => value + 1)}
             />
           ) : null}
-        </>
+        </div>
       )}
-    </div>
+    </>
   );
 }

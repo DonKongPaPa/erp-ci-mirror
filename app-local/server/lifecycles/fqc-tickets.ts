@@ -84,12 +84,20 @@ export const fqcTicketsLifecycle: Lifecycle<FqcTicketTypes> =
       accept: {
         from: ['open', 'reopened'],
         to: 'in_progress',
-        // 「可以带经办人，不带就是自己」：input 里的经办人写进工单，写之前校验
-        // 他是责任部门的成员。已经指派给别人时仍只有那个人能点。
+        // 「可以带经办人，不带就是自己」。经办人只走 set：先收敛成非空字符串，
+        // 再校验他是责任部门成员。不能用 accept: ['assigneeId'] —— 框架会把 input
+        // 原样写列（'' / 123 / true 分别落成 '' / '123' / 'true'），绕过校验且卡死
+        // 后续 resolve。带了非法值时这里拒绝（422），不带才回落到受理人自己。
         guard: async ({ record, actor, input, services }) => {
           const mayAct = assigneeMayAct(record, actor.id);
           if (mayAct !== true) return mayAct;
-          if (nonEmpty(input, 'assigneeId')) {
+          if (Object.prototype.hasOwnProperty.call(input, 'assigneeId')) {
+            if (!nonEmpty(input, 'assigneeId')) {
+              return {
+                code: 'ASSIGNEE_NOT_DEPARTMENT_MEMBER',
+                message: 'The assignee must be a non-empty user id.',
+              };
+            }
             const assigneeId = textOf(input, 'assigneeId');
             const departmentId = record.departmentId ?? '';
             if (!(await services.memberOf(departmentId, assigneeId))) {
@@ -101,11 +109,11 @@ export const fqcTicketsLifecycle: Lifecycle<FqcTicketTypes> =
           }
           return true;
         },
-        accept: ['assigneeId'],
-        set: ({ input }) =>
-          nonEmpty(input, 'assigneeId')
-            ? { assigneeId: textOf(input, 'assigneeId') }
-            : {},
+        set: ({ input, actor }) => ({
+          assigneeId: nonEmpty(input, 'assigneeId')
+            ? textOf(input, 'assigneeId')
+            : actor.id,
+        }),
       },
       resolve: {
         from: 'in_progress',

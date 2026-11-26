@@ -630,3 +630,49 @@ test('R-003 验收E：改经办人并发两次都 200，后写生效，不设版
   expect(after?.lifecycleVersion).toBe(before?.lifecycleVersion);
   expect(await logsOf(connection, ticket.id)).toHaveLength(0);
 });
+
+test('R-003 受理：空串/数字/布尔经办人一律 422，工单经办人不变、无日志', async ({
+  testApp,
+  connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const manager = await createUser(admin, uniq('badacceptinput'), { app: ['quality_manager'] });
+  const dept = await createDepartment(admin, uniq('badacceptinput'));
+  const session = await signInAs(testApp, manager.username);
+
+  for (const bad of ['', 123, true]) {
+    const ticket = await insertTicket(connection, { departmentId: dept.id });
+    const error = await expectError(
+      await fire(session, ticket.id, 'accept', { assigneeId: bad }),
+      422,
+    );
+    expect(error.reason).toBe('ASSIGNEE_NOT_DEPARTMENT_MEMBER');
+    const stored = await ticketOf(connection, ticket.id);
+    expect(stored?.assigneeId).toBeNull();
+    expect(stored?.state).toBe('open');
+    expect(await logsOf(connection, ticket.id)).toHaveLength(0);
+  }
+});
+
+test('R-003 受理不带经办人时记成受理人自己，随后能解决', async ({
+  testApp,
+  connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const manager = await createUser(admin, uniq('selfaccept'), { app: ['quality_manager'] });
+  const dept = await createDepartment(admin, uniq('selfaccept'));
+  const session = await signInAs(testApp, manager.username);
+  const ticket = await insertTicket(connection, { departmentId: dept.id });
+
+  await expectJson(await fire(session, ticket.id, 'accept'), 200);
+  const accepted = await ticketOf(connection, ticket.id);
+  expect(accepted?.assigneeId).toBe(manager.id);
+  expect(accepted?.state).toBe('in_progress');
+
+  // 经办人是自己，resolve 的指派守卫放行，工单不会卡死。
+  await expectJson(
+    await fire(session, ticket.id, 'resolve', { resolution: '已修复' }),
+    200,
+  );
+  expect((await ticketOf(connection, ticket.id))?.state).toBe('resolved');
+});

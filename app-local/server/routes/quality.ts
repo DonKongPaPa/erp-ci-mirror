@@ -1473,6 +1473,11 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
 
           const existing = await screenings.findOne({ filter: { id: screeningId } });
           if (!existing) throw screeningNotFound();
+          // 派单幂等有三道防线，彼此互为兜底：这里的显式查重、下面初筛 reviewId
+          // 的版本前提、以及建工单时 screeningId 唯一约束到 409 的映射。拆掉任意
+          // 一道，另两道仍能挡住重复派单，所以无法在不改实现的前提下写出「只剩这一道」
+          // 的定向用例；定向用例只覆盖版本前提（SCREENING_REVIEW_CONFLICT）与库约束
+          // 直插被拒，其余两道由顺序重放 [409] 与并发 [201,409] 覆盖。
           if (
             await transaction
               .repository('fqcTickets')

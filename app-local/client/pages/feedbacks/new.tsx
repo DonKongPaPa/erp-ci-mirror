@@ -8,7 +8,6 @@ import { RouteDialog } from '#components/route-dialog';
 import { useRouteOverlay } from '#components/use-route-overlay';
 
 import { FeedbackClient, type CreateFeedbackInput } from './client.js';
-import { FEEDBACK_FORM_SHELL_CLASS } from './layout.js';
 import { FQC_RESOURCE } from './page-id.js';
 import {
   FeedbackSheetForm,
@@ -49,25 +48,26 @@ function NewFeedbackSheet(): ReactElement {
     void close();
   };
 
-  // 三态共用同一个外壳：权限判定中的占位与落定表单一样高，首帧不会先是个居中小框。
+  // 页面模块已随入口包就绪，对话框首帧就是这个页面；占位只在权限判定中短暂出现，不再撑满视口。
+  if (submit.isPending) {
+    return <p role='status' className='text-sm text-muted-foreground'>{t('feedbacks.loading')}</p>;
+  }
+  if (!submit.can) {
+    // 页面授权只管能不能打开这一页；能不能提交是另一个动作，详情页同样这么分。
+    return (
+      <p role='status' className='text-sm text-muted-foreground'>
+        {t('feedbacks.newNoAccess')}
+      </p>
+    );
+  }
+
   return (
-    <div data-testid='feedback-form-shell' className={FEEDBACK_FORM_SHELL_CLASS}>
-      {submit.isPending ? (
-        <p role='status' className='text-sm text-muted-foreground'>{t('feedbacks.loading')}</p>
-      ) : !submit.can ? (
-        // 页面授权只管能不能打开这一页；能不能提交是另一个动作，详情页同样这么分。
-        <p role='status' className='text-sm text-muted-foreground'>
-          {t('feedbacks.newNoAccess')}
-        </p>
-      ) : (
-        <FeedbackSheetForm
-          mode='create'
-          client={client}
-          saving={submission.submitting}
-          onSave={onSave}
-          onCancel={() => void close()}
-        />
-      )}
-    </div>
+    <FeedbackSheetForm
+      mode='create'
+      client={client}
+      saving={submission.submitting}
+      onSave={onSave}
+      onCancel={() => void close()}
+    />
   );
 }

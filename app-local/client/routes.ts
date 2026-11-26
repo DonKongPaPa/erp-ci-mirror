@@ -21,6 +21,10 @@ import {
   skillsRoute,
   usageRoute,
 } from '@nocobase/app-plugin-agents/client/routes';
+import {
+  loadFeedbackDetailModule,
+  loadFeedbackNewModule,
+} from './pages/feedbacks/preload.js';
 import { FEEDBACK_PAGE_ID } from './pages/feedbacks/page-id.js';
 import settingsShellRoutes from './pages/settings/shell-routes.js';
 import systemSettingsRoutes from './pages/settings/routes.js';
@@ -77,13 +81,13 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
         name: 'feedbackNew',
         path: 'new',
         presentation: { kind: 'dialog', title: 'feedbacks.form.titleNew' },
-        componentLoader: () => import('./pages/feedbacks/new.js'),
+        componentLoader: loadFeedbackNewModule,
       },
       {
         name: 'feedbackDetail',
         path: ':feedbackId',
         presentation: { kind: 'dialog', title: 'feedbacks.form.titleEdit' },
-        componentLoader: () => import('./pages/feedbacks/detail.js'),
+        componentLoader: loadFeedbackDetailModule,
       },
     ],
   },
