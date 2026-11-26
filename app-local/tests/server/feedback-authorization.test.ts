@@ -821,3 +821,189 @@ test('R-026 24: 「提交反馈」的范围带上谓词只改到本人的初筛�
     '提交反馈的范围读得了初筛表',
   ).rejects.toThrow();
 });
+
+/**
+ * 第三片把声明接到了端点上。上面钉的是仓储层的按列与按范围，这里端到端再验一次：
+ * 从实际请求进来、经授权的范围，写入清单外的列和读到清单外的列都不成立。
+ */
+test('R-026 18: 端点上按列生效——PATCH 改不了原文，mine 读不到内部列', async ({
+  app,
+  testApp,
+  connection,
+}) => {
+  expect(
+    app.container.resolve(authorizationToken).compositeResources.getAction('fqc', 'submit'),
+    'fqc.submit 没注册，端点上的 403 不算授权意义',
+  ).toBeDefined();
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const authz: AppAuthorization = app.container.resolve(authorizationToken);
+  await authz.permissionSets.create({
+    key: 'r026-s3-maintain',
+    grants: [
+      grant('maintain', {
+        fqcMessages: 'allRecords',
+        fqcScreenings: 'allRecords',
+        fqcTickets: 'allRecords',
+      }),
+    ],
+  });
+  await admin.fetch('/users', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      origin: 'http://localhost',
+      'Idempotency-Key': `${Date.now()}.${randomUUID()}`,
+    },
+    body: JSON.stringify({
+      name: 'r026s3maintain',
+      username: 'r026s3maintain',
+      email: 'r026s3maintain@example.test',
+      password: PASSWORD,
+      roleScopes: { app: ['r026-s3-maintain'] },
+    }),
+  });
+  await admin.fetch('/users', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      origin: 'http://localhost',
+      'Idempotency-Key': `${Date.now()}.${randomUUID()}`,
+    },
+    body: JSON.stringify({
+      name: 'r026s3submit',
+      username: 'r026s3submit',
+      email: 'r026s3submit@example.test',
+      password: PASSWORD,
+      roleScopes: { app: [] },
+    }),
+  });
+
+  const submitter = await signIn(testApp, {
+    username: 'r026s3submit',
+    password: PASSWORD,
+  });
+  const maintainer = await signIn(testApp, {
+    username: 'r026s3maintain',
+    password: PASSWORD,
+  });
+  const created = await submitter.fetch('/quality/feedbacks', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      origin: 'http://localhost',
+      'Idempotency-Key': `${Date.now()}.${randomUUID()}`,
+    },
+    body: JSON.stringify({ channel: 'web', content: '原文不许改' }),
+  });
+  expect(created.status).toBe(201);
+  const id = ((await created.json()) as { data: { id: string } }).data.id;
+
+  // 请求体里多写三列：其中两列在维护动作里根本没有改权。
+  const patched = await maintainer.fetch(`/quality/feedbacks/${id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', origin: 'http://localhost' },
+    body: JSON.stringify({
+      note: '可以写',
+      content: '想改原文',
+      senderName: '想改发件人',
+    }),
+  });
+  expect(patched.status).toBe(200);
+  const stored = await connection.repository('fqcMessages').findOne({ filter: { id } });
+  expect(stored).toMatchObject({
+    content: '原文不许改',
+    senderName: null,
+    note: '可以写',
+  });
+
+  // 同样的行，提交人经「提交反馈」读不到内部列；维护的人读得到。
+  const mine = await submitter.fetch('/quality/feedbacks/mine', {
+    headers: { origin: 'http://localhost' },
+  });
+  expect(mine.status).toBe(200);
+  const mineRow = ((await mine.json()) as { data: Record<string, unknown>[] }).data[0];
+  expect(mineRow).not.toHaveProperty('note');
+  expect(mineRow).not.toHaveProperty('discardedBy');
+
+  const detail = await maintainer.fetch(`/quality/feedbacks/${id}`, {
+    headers: { origin: 'http://localhost' },
+  });
+  expect(detail.status).toBe(200);
+  const detailRow = ((await detail.json()) as { data: Record<string, unknown> }).data;
+  expect(detailRow).toHaveProperty('note');
+  expect(detailRow).toHaveProperty('discardedBy');
+});
+
+test('R-026 24: 带范围的更新只改本人的行——两个真实用户各试一次', async ({
+  app,
+  testApp,
+  connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const left = await decisionFor(app, admin, 'r026-s3-left', 'submit', {
+    fqcMessages: 'recordsIOwn',
+    fqcScreenings: 'recordsIOwn',
+  });
+  const right = await decisionFor(app, admin, 'r026-s3-right', 'submit', {
+    fqcMessages: 'recordsIOwn',
+    fqcScreenings: 'recordsIOwn',
+  });
+  const authz: AppAuthorization = app.container.resolve(authorizationToken);
+  expect(left.effect).toBe('conditional');
+  expect(right.effect).toBe('conditional');
+
+  const leftId = await insertScreening(connection, randomUUID());
+  const rightId = await insertScreening(connection, randomUUID());
+  // 把两行分别归到两个用户：仓库里 ownerId 就是「仅本人」比的那一列。
+  const ownerOf = async (username: string) =>
+    String(
+      (
+        await connection.repository('user').findOne({ filter: { username } })
+      )!.id,
+    );
+  const decisionOf = async (username: string) =>
+    authz
+      .for({ principal: { type: 'user', id: await ownerOf(username) } })
+      .authorize({ resource: FQC, action: 'submit' });
+  const leftOwner = await ownerOf('r026s3left');
+  const rightOwner = await ownerOf('r026s3right');
+  expect(leftOwner).not.toBe(rightOwner);
+  await connection.repository('fqcScreenings').updateMany({
+    filter: { id: leftId },
+    values: { ownerId: leftOwner },
+  });
+  await connection.repository('fqcScreenings').updateMany({
+    filter: { id: rightId },
+    values: { ownerId: rightOwner },
+  });
+
+  const updateAs = async (decision: FqcDecision, id: string, summary: string) => {
+    const policy = databasePolicies(decision).fqcScreenings as RepositoryPolicy;
+    return connection
+      .repository('fqcScreenings')
+      .withPolicy(policy)
+      .updateMany({
+        filter: (filter) =>
+          filter.and([
+            filter.string('id').eq(id),
+            filter.string('reviewId').empty(),
+          ]),
+        values: { summary, updatedAt: new Date() },
+      });
+  };
+  const leftPolicy = await decisionOf('r026s3left');
+  const rightPolicy = await decisionOf('r026s3right');
+  expect((await updateAs(leftPolicy, leftId, '左改自己')).updatedCount).toBe(1);
+  expect((await updateAs(leftPolicy, rightId, '左改别人')).updatedCount).toBe(0);
+  expect((await updateAs(rightPolicy, rightId, '右改自己')).updatedCount).toBe(1);
+  expect((await updateAs(rightPolicy, leftId, '右改别人')).updatedCount).toBe(0);
+
+  const leftRow = await connection
+    .repository('fqcScreenings')
+    .findOne({ filter: { id: leftId } });
+  const rightRow = await connection
+    .repository('fqcScreenings')
+    .findOne({ filter: { id: rightId } });
+  expect(leftRow?.summary).toBe('左改自己');
+  expect(rightRow?.summary).toBe('右改自己');
+});

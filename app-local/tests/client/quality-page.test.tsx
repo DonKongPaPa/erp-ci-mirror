@@ -560,7 +560,7 @@ it('leaves the intake slot empty while permissions load and slots the form first
   await waitForPermissions(requests);
 });
 
-it('renders the drafting outcomes skeleton rows in the same line boxes as the number rows', async () => {
+it('renders the drafting outcomes skeleton rows with the real labels so the line boxes match', async () => {
   let releaseStats: () => void = () => {};
   const statsGate = new Promise<void>((resolve) => {
     releaseStats = resolve;
@@ -584,16 +584,44 @@ it('renders the drafting outcomes skeleton rows in the same line boxes as the nu
     },
   });
 
-  // 骨架态：14 行，行类与数字行完全一致（含 `text-sm`），骨架块的高度令牌
-  // `h-5` 就是 `text-sm` 的行高（`--spacing(5)`）—— 行数、行高都一致，
-  // 数据到达时卡片一像素也不长（界面点验 2026-11-26：380.05 → 447.20）。
+  // 骨架态：14 行都是真实标签 + 不撑高行盒的骨架块（`h-3` 小于文本行盒）。
+  // 行里有了真实文本，行盒与加载完成后的数字行完全一致 —— 固定高度的块猜
+  // 行高猜不准（`h-5` 在运行态解析成 18px，行盒 19.19px，重量报告量过）。
+  const expectedLabels = [
+    enUS.quality.drafting.total,
+    enUS.quality.drafting.rules,
+    enUS.quality.drafting.model,
+    enUS.quality.drafting.confirmed,
+    enUS.quality.drafting.categoryMatched,
+    enUS.quality.drafting.categoryMismatched,
+    enUS.quality.drafting.severityMatched,
+    enUS.quality.drafting.severityMismatched,
+    enUS.quality.drafting.redacted,
+    enUS.quality.screenings.degrade['model-disabled'],
+    enUS.quality.screenings.degrade['model-not-configured'],
+    enUS.quality.screenings.degrade['model-error'],
+    enUS.quality.screenings.degrade.timeout,
+    enUS.quality.screenings.degrade['invalid-output'],
+  ];
   const card = await screen.findByTestId('drafting-stats');
   const skeletonRows = card.querySelectorAll('div[aria-hidden="true"]');
   expect(skeletonRows, '骨架行要铺满 14 行').toHaveLength(14);
+  const rowTexts = [...skeletonRows].map((row) => row.textContent ?? '');
+  for (const text of rowTexts) {
+    expect(text.length, '每个骨架行都要含文本节点（真实标签）').toBeGreaterThan(
+      0,
+    );
+  }
+  expect(
+    [...rowTexts].sort(),
+    '骨架行要渲染全部 14 个行标签',
+  ).toEqual([...expectedLabels].sort());
   const skeletonClassName = skeletonRows[0]!.className;
   expect(skeletonClassName).toBe('flex items-center justify-between text-sm');
-  expect(skeletonRows[0]!.firstElementChild).toHaveClass('h-5');
-  expect(skeletonRows[0]!.lastElementChild).toHaveClass('h-5');
+  expect(
+    skeletonRows[0]!.querySelector('[data-slot="skeleton"]'),
+    '数字位的骨架块不许撑高行盒',
+  ).toHaveClass('h-3');
 
   await act(async () => releaseStats());
 

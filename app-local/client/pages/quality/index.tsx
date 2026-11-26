@@ -817,8 +817,11 @@ function StatCard({
  * 「代填效果」（R-002）：草稿与人工确认的对照，数据来自统计端点，页面只看不存。
  *
  * 数字是「近一年」（端点允许的最大跨度）内出的草稿，全是规则版、没有模型版数据时
- * 也如实显示：模型草稿是 0、各回落原因各一行，不空白也不报错。行数固定，读取期间
- * 铺同样行数的骨架，数据到了不挪布局。
+ * 也如实显示：模型草稿是 0、各回落原因各一行，不空白也不报错。骨架行直接渲染
+ * 真实的行标签（14 行的标签都是静态的），只有数字的位置放一块不撑高行盒的骨架
+ * （`h-3` 小于文本行盒）：行里有真实文本，行盒与加载完成后的数字行完全一致，
+ * 高度差为 0。不要用固定高度的块去猜行高 —— `h-5` 在运行态的 `--spacing` 标度下
+ * 解析成 18px，而 `text-sm` 的行盒是 19.19px，量过（重量报告 2026-11-26）。
  *
  * 刷新失败时保留上一轮的数字，但把失败亮出来（stale 提示加重试），不把旧数字
  * 悄悄当成当前值；第一次就没读到时整卡显示读取失败，同样给重试。
@@ -833,48 +836,41 @@ function DraftingOutcomesCard({
   readonly onRetry: () => void;
 }): ReactElement {
   const { t } = useTranslation();
-  const rows: readonly (readonly [string, number])[] = stats
+  // 14 行的标签是静态的，骨架态也照实渲染；数字只有读到之后才有，两个数组按下标一一对应。
+  const labels: readonly string[] = [
+    t('quality.drafting.total'),
+    t('quality.drafting.rules'),
+    t('quality.drafting.model'),
+    t('quality.drafting.confirmed'),
+    t('quality.drafting.categoryMatched'),
+    t('quality.drafting.categoryMismatched'),
+    t('quality.drafting.severityMatched'),
+    t('quality.drafting.severityMismatched'),
+    t('quality.drafting.redacted'),
+    t('quality.screenings.degrade.model-disabled'),
+    t('quality.screenings.degrade.model-not-configured'),
+    t('quality.screenings.degrade.model-error'),
+    t('quality.screenings.degrade.timeout'),
+    t('quality.screenings.degrade.invalid-output'),
+  ];
+  const values: readonly number[] | undefined = stats
     ? [
-        [t('quality.drafting.total'), stats.total],
-        [t('quality.drafting.rules'), stats.engines.rules],
-        [t('quality.drafting.model'), stats.engines.model],
-        [t('quality.drafting.confirmed'), stats.confirmed],
-        [
-          t('quality.drafting.categoryMatched'),
-          stats.agreement.category.matched,
-        ],
-        [
-          t('quality.drafting.categoryMismatched'),
-          stats.agreement.category.mismatched,
-        ],
-        [
-          t('quality.drafting.severityMatched'),
-          stats.agreement.severity.matched,
-        ],
-        [
-          t('quality.drafting.severityMismatched'),
-          stats.agreement.severity.mismatched,
-        ],
-        [t('quality.drafting.redacted'), stats.redacted],
-        [
-          t('quality.screenings.degrade.model-disabled'),
-          stats.degradeReasons['model-disabled'],
-        ],
-        [
-          t('quality.screenings.degrade.model-not-configured'),
-          stats.degradeReasons['model-not-configured'],
-        ],
-        [
-          t('quality.screenings.degrade.model-error'),
-          stats.degradeReasons['model-error'],
-        ],
-        [t('quality.screenings.degrade.timeout'), stats.degradeReasons.timeout],
-        [
-          t('quality.screenings.degrade.invalid-output'),
-          stats.degradeReasons['invalid-output'],
-        ],
+        stats.total,
+        stats.engines.rules,
+        stats.engines.model,
+        stats.confirmed,
+        stats.agreement.category.matched,
+        stats.agreement.category.mismatched,
+        stats.agreement.severity.matched,
+        stats.agreement.severity.mismatched,
+        stats.redacted,
+        stats.degradeReasons['model-disabled'],
+        stats.degradeReasons['model-not-configured'],
+        stats.degradeReasons['model-error'],
+        stats.degradeReasons.timeout,
+        stats.degradeReasons['invalid-output'],
       ]
-    : [];
+    : undefined;
 
   return (
     <Card data-testid='drafting-stats'>
@@ -894,14 +890,14 @@ function DraftingOutcomesCard({
             </Button>
           </div>
         ) : null}
-        {stats ? (
-          rows.map(([label, value]) => (
+        {values ? (
+          labels.map((label, index) => (
             <div
               key={label}
               className='flex items-center justify-between text-sm'
             >
               <span className='text-muted-foreground'>{label}</span>
-              <span className='tabular-nums'>{value}</span>
+              <span className='tabular-nums'>{values[index]}</span>
             </div>
           ))
         ) : error ? (
@@ -912,18 +908,16 @@ function DraftingOutcomesCard({
             </Button>
           </div>
         ) : (
-          // 骨架行与数字行同一个行盒：同一个行类（含 `text-sm`），骨架块的高度用
-          // `h-5` —— 它与 `text-sm` 的行高是同一个令牌（`--spacing(5)`）。行数一致、
-          // 行高一致，数据到达时卡片一像素也不长（界面点验 2026-11-26：骨架
-          // 380.05px → 数字 447.20px 的差就是骨架行矮了 5px）。
-          Array.from({ length: 14 }, (_, index) => (
+          // 骨架行渲染真实的行标签，只有数字的位置放骨架；`h-3` 小于文本行盒，
+          // 不会把行撑高 —— 行盒来自标签文本，与加载完成后的数字行完全一致。
+          labels.map((label) => (
             <div
-              key={index}
+              key={label}
               aria-hidden='true'
               className='flex items-center justify-between text-sm'
             >
-              <Skeleton className='h-5 w-28' />
-              <Skeleton className='h-5 w-8' />
+              <span className='text-muted-foreground'>{label}</span>
+              <Skeleton className='h-3 w-8' />
             </div>
           ))
         )}

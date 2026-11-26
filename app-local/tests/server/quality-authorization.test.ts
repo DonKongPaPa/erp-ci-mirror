@@ -875,7 +875,15 @@ test('R-013: the intake response matches the stored message, screening and ticke
     (row) => row.id === ingested.data.message.id,
   );
   expect(storedMessage, '列表里找不到刚投递的那条消息').toBeDefined();
-  expectSameRecord(ingested.data.message, storedMessage!, '消息');
+  // R-026 起投递的 201 还带新加的表单字段，「查看」只读原来的十一列；
+  // 按读者实际读到的列投影后再比，仍然逐字段相等。
+  const viewedMessage = Object.fromEntries(
+    Object.keys(storedMessage!).map((key) => [
+      key,
+      (ingested.data.message as Record<string, unknown>)[key],
+    ]),
+  );
+  expectSameRecord(viewedMessage, storedMessage!, '消息');
 
   const screeningRows = (
     (await expectJson(await viewer.fetch('/quality/screenings'), 200)) as {

@@ -17,6 +17,7 @@ import {
   databaseManagerToken,
   isUniqueConstraintViolation,
   type DatabaseConnection,
+  type FilterBuilder,
   type RepositoryPolicy,
 } from '@nocobase/db';
 import {
@@ -36,15 +37,22 @@ import { randomUUID } from 'node:crypto';
 
 import {
   ApproveScreeningBody,
+  CreateFeedbackBody,
+  DiscardFeedbackBody,
   DraftingStatsQuery,
   DraftingStatsSchema,
+  FeedbackSchema,
   IngestMessageBody,
   IngestResultSchema,
+  ListFeedbackQuery,
   ListTicketsQuery,
   MessageSchema,
+  MineFeedbackQuery,
   ScreeningListItemSchema,
   ScreeningReviewResultSchema,
   TicketSchema,
+  UpdateFeedbackBody,
+  type CreateFeedbackInput,
   type IngestMessageInput,
 } from './schemas.js';
 import {
@@ -56,9 +64,14 @@ import {
   upgradeScreeningDraft,
   type DraftSimilarCaseSources,
 } from '../providers/quality-drafting.js';
-import { qualityScreeningToken } from '../providers/quality-screening.js';
+import {
+  qualityScreeningToken,
+  screenByRules,
+  type ScreeningResult,
+} from '../providers/quality-screening.js';
+import { peopleQueryServiceToken } from '../providers/departments.js';
 
-type FqcAction = 'view' | 'handle' | 'intake';
+type FqcAction = 'view' | 'handle' | 'intake' | 'submit' | 'maintain';
 type FqcTable =
   'fqcMessages' | 'fqcScreenings' | 'fqcTickets' | 'fqcScreeningReviews';
 type FqcDecision = AuthorizationDecision<CompositeResourceConditions>;
@@ -175,6 +188,219 @@ async function readerCaseSources(
   };
 }
 
+/** 反馈单的两个入口共用的字段；`ownerId` 永远由调用方按会话写进来。 */
+export interface FeedbackIngestInput {
+  readonly channel: string;
+  readonly externalId?: string | null;
+  readonly senderName?: string | null;
+  readonly senderContact?: string | null;
+  readonly content: string;
+  readonly contentType: string;
+  readonly receivedAt?: string;
+  readonly customerName?: string | null;
+  readonly productName?: string | null;
+  readonly model?: string | null;
+  readonly batchNo?: string | null;
+  readonly attachmentIds?: readonly string[] | null;
+  readonly ownerId: string | null;
+}
+
+/** 迁移 `202611260002` 加的唯一约束名；只有撞上它才换成领域原因码。 */
+const UNIQUE_CHANNEL_EXTERNAL = 'uq_fqc_messages_channel_external';
+
+/**
+ * 外部标识的空串在进库前归一成 NULL。schema 已经直接拒空串，这里再守一道：
+ * 唯一约束对 NULL 不生效，「空的两条可并存」指的是 NULL 而不是空串。
+ */
+export function feedbackExternalId(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+/** 仓储记录里的未知值转文本；不靠 String(object) 的默认字符串化。 */
+function asText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return '';
+}
+
+/**
+ * 把 `(channel, externalId)` 这一个唯一约束的冲突换成领域 409。
+ *
+ * 别的主键或唯一索引撞了仍然是未识别的数据库错误（500），绝不戴上
+ * `FEEDBACK_ALREADY_RECORDED` 这个原因码。Postgres 的错误带 `constraint`，
+ * SQLite 只在消息里写列名，两种都认。
+ */
+export function feedbackUniqueError(error: unknown): ApiError | undefined {
+  if (!isUniqueConstraintViolation(error)) {
+    return undefined;
+  }
+  let current = error as {
+    constraint?: unknown;
+    constraintName?: unknown;
+    message?: unknown;
+    cause?: unknown;
+    originalError?: unknown;
+  } | null;
+  const visited = new Set<unknown>();
+  while (current !== null && typeof current === 'object' && !visited.has(current)) {
+    visited.add(current);
+    const name = current.constraint ?? current.constraintName;
+    const message = typeof current.message === 'string' ? current.message : '';
+    const matches =
+      name === UNIQUE_CHANNEL_EXTERNAL ||
+      (/UNIQUE/i.test(message) &&
+        /(?:fqcMessages|fqc_messages)\.channel/i.test(message) &&
+        /(?:fqcMessages|fqc_messages)\.(?:externalId|external_id)/i.test(message));
+    if (matches) {
+      return new ApiError({
+        status: 'ALREADY_EXISTS',
+        reason: 'FEEDBACK_ALREADY_RECORDED',
+        domain: 'quality',
+        message:
+          'A feedback with this channel and external id has already been recorded.',
+      });
+    }
+    current = current.cause ?? current.originalError ?? null;
+  }
+  return undefined;
+}
+
+/**
+ * 两个入口共用的录入函数：核附件、挂标识、写原文、写草稿，四件事同成同败。
+ *
+ * 事务由调用方开；投递在这个事务里还多写一张工单，网页入口不写。附件表没有
+ * 登记进授权，但读写都发生在已按业务动作授权过的端点里、并在这个事务内，
+ * 所以这里直接取仓储，没有带策略的版本。
+ */
+export async function ingestFeedback(
+  input: FeedbackIngestInput,
+  transaction: DatabaseConnection,
+  policies: {
+    readonly messages: RepositoryPolicy;
+    readonly screenings: RepositoryPolicy;
+  },
+  attachmentOwnerId: string | null,
+  screen: (text: string) => ScreeningResult = screenByRules,
+): Promise<{
+  message: Record<string, unknown>;
+  screening: Record<string, unknown>;
+}> {
+  const now = new Date();
+  const storedNow = storedDateTime(now);
+  const receivedAt = input.receivedAt ? new Date(input.receivedAt) : now;
+  const result = screen(input.content);
+  const attachmentIds = [...(input.attachmentIds ?? [])];
+  const files = transaction.repository('fqcFeedbackFiles');
+
+  // ① 每个标识都得是调用者自己上传的、而且还没挂在别的单上。
+  for (const id of attachmentIds) {
+    const file = await files.findOne({
+      filter: (filter) =>
+        filter.and([
+          filter.string('id').eq(id),
+          attachmentOwnerId === null
+            ? filter.string('ownerId').empty()
+            : filter.string('ownerId').eq(attachmentOwnerId),
+          filter.string('feedbackId').empty(),
+        ]),
+    });
+    if (!file) {
+      throw new ApiError({
+        status: 'FAILED_PRECONDITION',
+        httpStatus: 422,
+        reason: 'ATTACHMENT_NOT_AVAILABLE',
+        domain: 'quality',
+        message: `Attachment ${id} is not available to this caller.`,
+      });
+    }
+  }
+
+  const message: Record<string, unknown> = {
+    id: randomUUID(),
+    channel: input.channel,
+    externalId: feedbackExternalId(input.externalId),
+    senderName: input.senderName ?? null,
+    senderContact: input.senderContact ?? null,
+    content: input.content,
+    rawContentType: input.contentType,
+    receivedAt: storedDateTime(receivedAt),
+    status: 'open',
+    customerName: input.customerName ?? null,
+    productName: input.productName ?? null,
+    model: input.model ?? null,
+    batchNo: input.batchNo ?? null,
+    attachmentIds,
+    ...(input.ownerId === null ? {} : { ownerId: input.ownerId }),
+    createdAt: storedNow,
+    updatedAt: storedNow,
+  };
+
+  // ② 先挂上标识：带谓词的更新，只认「还没被占用」的行。前面的核验与这里的更新
+  // 不在同一个锁里：真 Postgres 上两个事务同时绑同一个附件时，后到的更新会在
+  // 行锁释放后重算谓词，匹配 0 行。不检查行数就会让同一个附件挂到两张单上。
+  if (attachmentIds.length > 0) {
+    const bound = await files.updateMany({
+      filter: (filter) =>
+        filter.and([
+          filter.or(attachmentIds.map((id) => filter.string('id').eq(id))),
+          filter.string('feedbackId').empty(),
+        ]),
+      values: { feedbackId: message.id, updatedAt: storedNow } as never,
+    });
+    if (bound.updatedCount !== attachmentIds.length) {
+      throw new ApiError({
+        status: 'FAILED_PRECONDITION',
+        httpStatus: 422,
+        reason: 'ATTACHMENT_NOT_AVAILABLE',
+        domain: 'quality',
+        message: 'An attachment was claimed by another feedback while this one was being submitted.',
+      });
+    }
+  }
+
+  // ③ 写原文。不先查再写：撞唯一约束时整笔事务回滚，附件绑定也随之撤销。
+  try {
+    await transaction
+      .repository('fqcMessages')
+      .withPolicy(policies.messages)
+      .createMany({ values: [message] as never });
+  } catch (error) {
+    const mapped = feedbackUniqueError(error);
+    if (mapped) {
+      throw mapped;
+    }
+    throw error;
+  }
+
+  // ④ 写规则版草稿。`reviewId`、`promptVersion` 留空，`engine`、`degraded`、
+  // `redacted` 靠列上的默认值；只有这十五列在「提交反馈」的建列清单里。
+  const screening: Record<string, unknown> = {
+    id: randomUUID(),
+    messageId: message.id,
+    category: result.category,
+    severity: result.severity,
+    suggestedOwner: result.suggestedOwner,
+    summary: result.summary,
+    confidence: confidenceText(result.confidence, transaction.dialect),
+    evidence: result.evidence,
+    modelName: 'rule-baseline',
+    outcome: screeningOutcome(result.confidence),
+    // R-002 的裁决：事务里只出规则版，这时还没跑过模型，不声称任何回落原因。
+    // 真正的原因由提交后的升级按结果写；确认抢先或升级失败就留 null。
+    degradeReason: null,
+    knowledgeRefs: [],
+    ...(input.ownerId === null ? {} : { ownerId: input.ownerId }),
+    createdAt: storedNow,
+    updatedAt: storedNow,
+  };
+  await transaction
+    .repository('fqcScreenings')
+    .withPolicy(policies.screenings)
+    .createMany({ values: [screening] as never });
+
+  return { message, screening };
+}
+
 /**
  * 客户消息接入与 AI 初筛派单。
  *
@@ -213,87 +439,42 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         readonly screenings: RepositoryPolicy;
         readonly tickets: RepositoryPolicy;
       },
+      attachmentOwnerId: string | null,
     ) {
       const now = new Date();
-      const receivedAt = input.receivedAt ? new Date(input.receivedAt) : now;
+      // 四件事与工单那一笔都在调用方给的这一个事务里；工单写失败会回滚四件。
+      const { message, screening: record } = await ingestFeedback(
+        {
+          channel: input.channel,
+          externalId: input.externalId,
+          senderName: input.senderName,
+          senderContact: input.senderContact,
+          content: input.content,
+          contentType: input.contentType,
+          ...(input.receivedAt === undefined ? {} : { receivedAt: input.receivedAt }),
+          customerName: input.customerName ?? null,
+          productName: input.productName ?? null,
+          model: input.model ?? null,
+          batchNo: input.batchNo ?? null,
+          attachmentIds: input.attachmentIds ?? [],
+          ownerId: null,
+        },
+        transaction,
+        { messages: policies.messages, screenings: policies.screenings },
+        attachmentOwnerId,
+        (text) => screening.screen(text),
+      );
       const storedNow = storedDateTime(now);
-      const result = screening.screen(input.content);
-
-      const message = {
-        id: randomUUID(),
-        channel: input.channel,
-        externalId: input.externalId ?? null,
-        senderName: input.senderName ?? null,
-        senderContact: input.senderContact ?? null,
-        content: input.content,
-        rawContentType: input.contentType,
-        receivedAt: storedDateTime(receivedAt),
-        // R-026：反馈单的状态取值是 open（待处理与在办）与 discarded（已丢弃）。
-        // 投递写进来的每一行都是「已经记下来的反馈」，写 open，不再写 R-013 的 screened。
-        status: 'open',
-        createdAt: storedNow,
-        updatedAt: storedNow,
-      };
-      try {
-        await transaction
-          .repository('fqcMessages')
-          .withPolicy(policies.messages)
-          .createMany({ values: [message] });
-      } catch (error) {
-        // R-026 验收10：同一个 (channel, externalId) 再投是 409 FEEDBACK_ALREADY_RECORDED，
-        // 不是不透明的 500。不先查再写：直接写，撞上迁移加的唯一约束时事务已经回滚，
-        // 把驱动错误换成带原因码的 409；响应里不带已有那一行的标识（投递不带读）。
-        if (isUniqueConstraintViolation(error)) {
-          throw new ApiError({
-            status: 'ALREADY_EXISTS',
-            reason: 'FEEDBACK_ALREADY_RECORDED',
-            domain: 'quality',
-            message:
-              'A feedback with this channel and external id has already been recorded.',
-          });
-        }
-        throw error;
-      }
-
-      const record = {
-        id: randomUUID(),
-        messageId: message.id,
-        category: result.category,
-        severity: result.severity,
-        suggestedOwner: result.suggestedOwner,
-        summary: result.summary,
-        confidence: confidenceText(result.confidence, transaction.dialect),
-        evidence: result.evidence,
-        modelName: 'rule-baseline',
-        // R-002 的六个出处列与确认记录指针。这一段只出规则版：开关与模型的结果在
-        // 事务提交之后才知道。`degradeReason` 先留空 —— 没跑过模型就不声称任何
-        // 「已回落」的原因；提交之后的那一笔按真实结果补（开关关着才写 model-disabled）。
-        engine: 'rules',
-        promptVersion: null,
-        degraded: false,
-        degradeReason: null,
-        knowledgeRefs: [],
-        redacted: false,
-        reviewId: null,
-        outcome: screeningOutcome(result.confidence),
-        createdAt: storedNow,
-        updatedAt: storedNow,
-      };
-      await transaction
-        .repository('fqcScreenings')
-        .withPolicy(policies.screenings)
-        .createMany({ values: [record] });
-
       const ticket = {
         id: randomUUID(),
         code: `FQC-${String(now.getTime()).slice(-8)}`,
-        title: `${result.category} / ${result.severity}`,
+        title: `${String(record.category)} / ${String(record.severity)}`,
         description: input.content.slice(0, 2000),
         sourceMessageId: message.id,
         screeningId: record.id,
-        category: result.category,
-        severity: result.severity,
-        ownerDepartment: result.suggestedOwner,
+        category: record.category,
+        severity: record.severity,
+        ownerDepartment: record.suggestedOwner,
         assigneeId: null,
         state: 'open',
         dueAt: null,
@@ -304,9 +485,169 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
       await transaction
         .repository('fqcTickets')
         .withPolicy(policies.tickets)
-        .createMany({ values: [ticket] });
+        .createMany({ values: [ticket] as never });
 
-      return { message, screening: record, ticket };
+      // 录入只写十五列；投递的 201 按列的默认值（或空）把其余列拼回来，
+      // 与随后按「查看」读到的同一条逐字段相等。写库的值不变。
+      const screeningResponse: Record<string, unknown> = {
+        engine: 'rules',
+        promptVersion: null,
+        degraded: false,
+        redacted: false,
+        reviewId: null,
+        // 建行留 null，这里按列形态把「没写」补成 null，与随后读到的一致。
+        degradeReason: record.degradeReason ?? null,
+        ...record,
+      };
+      return { message, screening: screeningResponse, ticket };
+    }
+
+    /**
+     * 事务提交之后、响应回去之前的模型升级位置。范围由调用方传进来：投递给投递
+     * 决策里的，网页表单给「提交反馈」决策里的；这里绝不写死成「投递」。
+     */
+    async function runPostCommitUpgrade(
+      context: Context<AuthEnv & AuthorizationEnv>,
+      options: {
+      readonly screeningId: string;
+      readonly text: string;
+      readonly policy: RepositoryPolicy;
+    }): Promise<Record<string, unknown> | null> {
+      const session = context.get('auth');
+      const reader =
+        session?.user?.id === undefined
+          ? undefined
+          : { userId: String(session.user.id) };
+      try {
+        const cases = await readerCaseSources(context, database.connection());
+        const upgrade = await upgradeScreeningDraft({
+          connection: database.connection(),
+          policy: options.policy,
+          screeningId: options.screeningId,
+          text: options.text,
+          ...(reader === undefined ? {} : { reader }),
+          ...(cases === undefined ? {} : { cases }),
+          drafting,
+        });
+        return upgrade.written ? (upgrade.values ?? null) : null;
+      } catch (error) {
+        // 反馈已经落库了：升级失败既不回滚，也不把 201 变成 500。
+        logger?.warn(
+          { error },
+          'The post-commit model upgrade failed; the feedback stands.',
+        );
+        return null;
+      }
+    }
+
+    const people = app.container.resolve(peopleQueryServiceToken);
+
+    /** 一批单的附件，按 feedbackId 归堆；取内容端点由下一片提供，这里只拼地址。 */
+    async function attachmentsOf(ids: readonly string[]) {
+      const grouped = new Map<string, Record<string, unknown>[]>();
+      if (ids.length === 0) {
+        return grouped;
+      }
+      const rows = (await database
+        .connection()
+        .repository('fqcFeedbackFiles')
+        .findMany({
+          filter: (filter) =>
+            filter.or(ids.map((id) => filter.string('feedbackId').eq(id))),
+        })) as unknown as Record<string, unknown>[];
+      for (const file of rows) {
+        const key = asText(file.feedbackId);
+        const list = grouped.get(key) ?? [];
+        list.push(file);
+        grouped.set(key, list);
+      }
+      return grouped;
+    }
+
+    async function namesOf(ids: readonly string[]) {
+      const unique = [...new Set(ids.filter((id) => id.length > 0))];
+      const rows = unique.length > 0 ? await people.byIds(unique) : [];
+      return new Map(rows.map((row) => [row.id, row.name]));
+    }
+
+    /** 初筛八列与工单五列按 messageId / sourceMessageId 归堆，只给维护端点用。 */
+    async function relatedOf(
+      decision: FqcDecision,
+      ids: readonly string[],
+    ): Promise<{
+      screenings: Map<string, Record<string, unknown>>;
+      tickets: Map<string, Record<string, unknown>>;
+    }> {
+      if (ids.length === 0) {
+        return { screenings: new Map(), tickets: new Map() };
+      }
+      const screeningRows = (await database
+        .connection()
+        .repository('fqcScreenings')
+        .withPolicy(policyOf(decision, 'fqcScreenings'))
+        .findMany({
+          filter: (filter) =>
+            filter.or(ids.map((id) => filter.string('messageId').eq(id))),
+        })) as unknown as Record<string, unknown>[];
+      const ticketRows = (await database
+        .connection()
+        .repository('fqcTickets')
+        .withPolicy(policyOf(decision, 'fqcTickets'))
+        .findMany({
+          filter: (filter) =>
+            filter.or(ids.map((id) => filter.string('sourceMessageId').eq(id))),
+        })) as unknown as Record<string, unknown>[];
+      return {
+        screenings: new Map(
+          screeningRows.map((row) => [asText(row.messageId), row]),
+        ),
+        tickets: new Map(
+          ticketRows.map((row) => [asText(row.sourceMessageId), row]),
+        ),
+      };
+    }
+
+    /** 端点拼出来的行：附件、提交人姓名、两个 can 与按动作裁剪的内部列。 */
+    async function decorate(
+      rows: readonly Record<string, unknown>[],
+      maintain: boolean,
+      decision: FqcDecision,
+    ) {
+      const files = await attachmentsOf(rows.map((row) => String(row.id)));
+      const names = await namesOf(
+        rows.map((row) => (row.ownerId === null ? '' : asText(row.ownerId))),
+      );
+      const related = maintain
+        ? await relatedOf(decision, rows.map((row) => String(row.id)))
+        : { screenings: new Map<string, Record<string, unknown>>(), tickets: new Map<string, Record<string, unknown>>() };
+      return rows.map((row) => {
+        const id = String(row.id);
+        const status = String(row.status);
+        const ticket = related.tickets.get(id) ?? null;
+        const { note: _note, discardedBy: _discardedBy, ...base } = row;
+        return {
+          ...(maintain ? row : base),
+          submitterName:
+            row.ownerId === null || row.ownerId === undefined
+              ? null
+              : names.get(asText(row.ownerId)) ?? null,
+          attachments: (files.get(id) ?? []).map((file) => ({
+            id: String(file.id),
+            filename: String(file.filename),
+            mimeType: String(file.mimeType),
+            size: Number(file.size),
+            url: maintain
+              ? `/api/quality/feedbacks/${id}/attachments/${String(file.id)}`
+              : `/api/quality/feedbacks/mine/${id}/attachments/${String(file.id)}`,
+          })),
+          canEdit: status === 'open',
+          canDiscard: status === 'open' && ticket === null,
+          ...(maintain && related.screenings.has(id)
+            ? { screening: related.screenings.get(id) }
+            : {}),
+          ...(maintain ? { ticket } : {}),
+        };
+      });
     }
 
     // 先登录，再授权。投递的调用方是服务账号的 API 密钥：这类密钥不带范围也按带范围
@@ -322,6 +663,8 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
     router.use('/quality/screenings', auth.required(), authz.middleware());
     router.use('/quality/screenings/*', auth.required(), authz.middleware());
     router.use('/quality/drafting/stats', auth.required(), authz.middleware());
+    router.use('/quality/feedbacks', auth.required(), authz.middleware());
+    router.use('/quality/feedbacks/*', auth.required(), authz.middleware());
 
     // 外部渠道回调：企业微信/微信网关把客户消息推到这里。
     // 授权一次「投递」；三张表的写入在同一个事务里完成，写入的内容与以前一致。
@@ -376,18 +719,22 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
           authorize: () => undefined,
           // 投递的授权不带读，重放不检查「结果还可见」；返回的是第一次落库的结果。
           authorizeReplay: () => undefined,
-          execute: (transaction) =>
-            ingestOnce(body, transaction, {
-              messages: policyOf(decision, 'fqcMessages'),
-              screenings: policyOf(decision, 'fqcScreenings'),
-              tickets: policyOf(decision, 'fqcTickets'),
-            }),
+          execute: (transaction) => {
+            const session = context.get('auth');
+            return ingestOnce(
+              body,
+              transaction,
+              {
+                messages: policyOf(decision, 'fqcMessages'),
+                screenings: policyOf(decision, 'fqcScreenings'),
+                tickets: policyOf(decision, 'fqcTickets'),
+              },
+              session?.user?.id === undefined ? null : String(session.user.id),
+            );
+          },
         });
         context.header('Idempotency-Replayed', String(result.replayed));
-        const ingested = result.data.screening as unknown as Record<
-          string,
-          unknown
-        >;
+        const ingested = result.data.screening;
         let screening = ingested;
         if (result.replayed) {
           // 重放回与库里一致的值，但必须经请求自己的读范围：拿不带策略的仓储按第一次
@@ -779,6 +1126,567 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
           { from: fromDate, to: toDate },
         );
         return context.json({ data: { from, to, ...stats } });
+      },
+    );
+
+
+    const notFound = (id: string) =>
+      new ApiError({
+        status: 'NOT_FOUND',
+        reason: 'FEEDBACK_NOT_FOUND',
+        domain: 'quality',
+        message: `Feedback ${id} was not found.`,
+      });
+    const notOpen = () =>
+      new ApiError({
+        status: 'ABORTED',
+        reason: 'FEEDBACK_NOT_OPEN',
+        domain: 'quality',
+        message: 'This feedback is no longer open.',
+      });
+    const replayUnreadable = () =>
+      new ApiError({
+        status: 'ALREADY_EXISTS',
+        reason: 'OPERATION_CONFLICT',
+        domain: 'app',
+        message: "The replayed feedback is not readable in this caller's range.",
+      });
+    const requiredKey = () =>
+      new ApiError({
+        status: 'INVALID_ARGUMENT',
+        reason: 'OPERATION_KEY_REQUIRED',
+        domain: 'quality',
+        message: 'Feedback creation requires an Idempotency-Key header.',
+      });
+    const principalRequired = () =>
+      new ApiError({
+        status: 'PERMISSION_DENIED',
+        reason: 'PRINCIPAL_REQUIRED',
+        domain: 'quality',
+        message: 'An authenticated principal is required.',
+      });
+
+    /**
+     * 新建（网页表单与人工代录）：只收表单字段，`ownerId` 一律按会话写。
+     * 授权一次「提交反馈」；201 由写入值拼，不回内部备注与谁丢弃的。
+     * 事务提交之后等模型升级那一步做完再回响应；重放经请求自己的读范围读回。
+     */
+    router.post(
+      '/quality/feedbacks',
+      describeRoute({
+        tags: ['Quality'],
+        summary: 'Submit a feedback sheet',
+        operationId: 'submitFeedback',
+        responses: {
+          '201': dataResponse(FeedbackSchema),
+          '400': apiErrorResponse(400),
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '409': apiErrorResponse(409),
+          '500': apiErrorResponse(500),
+        },
+      }),
+      apiValidator('json', CreateFeedbackBody),
+      async (context) => {
+        const body: CreateFeedbackInput = context.req.valid('json');
+        // 先授权，再校验缺键、代录客户与附件个数：没有资格的人一律先 403。
+        const decision = await authorizeFqc(context, 'submit');
+        const session = context.get('auth');
+        if (!session?.user?.id) {
+          throw principalRequired();
+        }
+        const actorId = String(session.user.id);
+        if ((body.attachmentIds?.length ?? 0) > 10) {
+          throw new ApiError({
+            status: 'INVALID_ARGUMENT',
+            reason: 'TOO_MANY_ATTACHMENTS',
+            domain: 'quality',
+            message: 'A feedback may carry at most ten attachments.',
+          });
+        }
+        if (body.channel === 'proxy' && !body.customerName) {
+          throw new ApiError({
+            status: 'INVALID_ARGUMENT',
+            reason: 'CUSTOMER_REQUIRED',
+            domain: 'quality',
+            message: 'A proxy feedback must name the customer.',
+          });
+        }
+        const key = context.req.header('Idempotency-Key');
+        if (!key) {
+          throw requiredKey();
+        }
+        const protection = app.container.resolve(repositoryIdempotencyToken);
+        const principal = await protection.principal(context);
+        if (!principal) {
+          throw principalRequired();
+        }
+        const result = await executeIdempotentMutation({
+          connection: database.connection(),
+          key,
+          principal,
+          operation: `${context.req.method} ${new URL(context.req.url).pathname}`,
+          input: body,
+          authorize: () => undefined,
+          authorizeReplay: () => undefined,
+          execute: (transaction) =>
+            ingestFeedback(
+              {
+                channel: body.channel,
+                content: body.content,
+                contentType: 'text',
+                customerName: body.customerName ?? null,
+                // 网页入口的发件人两列不落库；人工代录才落。
+                senderName: body.channel === 'proxy' ? (body.senderName ?? null) : null,
+                senderContact:
+                  body.channel === 'proxy' ? (body.senderContact ?? null) : null,
+                productName: body.productName ?? null,
+                model: body.model ?? null,
+                batchNo: body.batchNo ?? null,
+                attachmentIds: body.attachmentIds ?? [],
+                ownerId: actorId,
+              },
+              transaction,
+              {
+                messages: policyOf(decision, 'fqcMessages'),
+                screenings: policyOf(decision, 'fqcScreenings'),
+              },
+              actorId,
+              (text) => screening.screen(text),
+            ),
+        });
+        context.header('Idempotency-Replayed', String(result.replayed));
+        const written = result.data.message;
+        // 首回由写入值拼；丢弃两列由服务端决定、建行时不写，但 FeedbackSchema
+        // 把它们声明为必有，所以按列形态补 null，与重放读回来的键集一致。
+        let responseRow: Record<string, unknown> = {
+          discardedAt: null,
+          discardReason: null,
+          ...written,
+        };
+        if (result.replayed) {
+          // 不带范围的仓储按 id 读回，会让重放拿到别人的行；这里必须用本次请求
+          // 「提交反馈」的范围。读不到与重复投递同形，响应只有 error。
+          const policy = policyOf(decision, 'fqcMessages');
+          const current =
+            policy.read === false
+              ? undefined
+              : await database
+                  .connection()
+                  .repository('fqcMessages')
+                  .withPolicy(policy)
+                  .findOne({ filter: { id: String(written.id) } });
+          if (!current) {
+            throw replayUnreadable();
+          }
+          responseRow = current;
+        } else {
+          await runPostCommitUpgrade(context, {
+            screeningId: String(
+              result.data.screening.id,
+            ),
+            text: String(written.content),
+            policy: policyOf(decision, 'fqcScreenings'),
+          });
+        }
+        return context.json({ data: responseRow }, 201);
+      },
+    );
+
+    /** 「我的反馈」：提交反馈、仅本人；行里没有内部备注与谁丢弃的。 */
+    router.get(
+      '/quality/feedbacks/mine',
+      describeRoute({
+        tags: ['Quality'],
+        summary: 'List feedbacks submitted by the current user',
+        operationId: 'listMyFeedbacks',
+        responses: {
+          '200': listResponse(FeedbackSchema),
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '500': apiErrorResponse(500),
+        },
+      }),
+      apiValidator('query', MineFeedbackQuery),
+      async (context) => {
+        const { status, page, pageSize } = context.req.valid('query');
+        const decision = await authorizeFqc(context, 'submit');
+        const repo = database
+          .connection()
+          .repository('fqcMessages')
+          .withPolicy(policyOf(decision, 'fqcMessages'));
+        const filter =
+          status === undefined
+            ? undefined
+            : (filter: FilterBuilder) =>
+                filter.string('status').eq(status);
+        const rows = (await repo.findMany({
+          ...(filter === undefined ? {} : { filter }),
+          limit: pageSize,
+          offset: (page - 1) * pageSize,
+          sort: {
+            kind: 'sort',
+            version: 1,
+            items: [{ kind: 'field', path: ['createdAt'], direction: 'desc' }],
+          },
+        })) as unknown as Record<string, unknown>[];
+        const total =
+          filter === undefined ? await repo.count() : await repo.count({ filter });
+        return context.json({
+          data: await decorate(rows, false, decision),
+          meta: { page, pageSize, total },
+        });
+      },
+    );
+
+    /** 维护反馈单：全部的单，带四个筛选与拼出来的字段。 */
+    router.get(
+      '/quality/feedbacks',
+      describeRoute({
+        tags: ['Quality'],
+        summary: 'List all feedback sheets',
+        operationId: 'listFeedbacks',
+        responses: {
+          '200': listResponse(FeedbackSchema),
+          '400': apiErrorResponse(400),
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '500': apiErrorResponse(500),
+        },
+      }),
+      apiValidator('query', ListFeedbackQuery),
+      async (context) => {
+        const {
+          status,
+          channel,
+          pending,
+          overdue,
+          createdBefore,
+          createdAfter,
+          q,
+          page,
+          pageSize,
+        } = context.req.valid('query');
+        const decision = await authorizeFqc(context, 'maintain');
+        const repo = database
+          .connection()
+          .repository('fqcMessages')
+          .withPolicy(policyOf(decision, 'fqcMessages'));
+
+        // 没处理只认初筛的 outcome：人工确认与派单都把它记成 reviewed。
+        let pendingIds: string[] | undefined;
+        if (pending === true || overdue === true) {
+          const screeningRows = (await database
+            .connection()
+            .repository('fqcScreenings')
+            .withPolicy(policyOf(decision, 'fqcScreenings'))
+            .findMany({ limit: 5000 })) as unknown as {
+            messageId: unknown;
+            outcome: unknown;
+          }[];
+          pendingIds = screeningRows
+            .filter((row) => row.outcome !== 'reviewed')
+            .map((row) => asText(row.messageId));
+        }
+        const overdueBefore = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const filter = (
+          filter: FilterBuilder,
+        ) => {
+          const parts = [
+            ...(status === undefined ? [] : [filter.string('status').eq(status)]),
+            ...(channel === undefined ? [] : [filter.string('channel').eq(channel)]),
+            ...(createdBefore === undefined
+              ? []
+              : [filter.date('createdAt').before(new Date(createdBefore))]),
+            ...(createdAfter === undefined
+              ? []
+              : [filter.date('createdAt').after(new Date(createdAfter))]),
+            ...(overdue === true
+              ? [filter.date('createdAt').before(overdueBefore)]
+              : []),
+            ...(pendingIds === undefined
+              ? []
+              : [
+                  filter.or(
+                    pendingIds.map((id) => filter.string('id').eq(id)),
+                  ),
+                ]),
+            ...(q === undefined
+              ? []
+              : [
+                  filter.or([
+                    filter.string('customerName').includes(q, { mode: 'insensitive' }),
+                    filter.string('productName').includes(q, { mode: 'insensitive' }),
+                    filter.string('model').includes(q, { mode: 'insensitive' }),
+                    filter.string('batchNo').includes(q, { mode: 'insensitive' }),
+                    filter.text('content').includes(q, { mode: 'insensitive' }),
+                  ]),
+                ]),
+          ];
+          return parts.length === 0 ? filter.string('id').notEmpty() : filter.and(parts);
+        };
+        if (pendingIds !== undefined && pendingIds.length === 0) {
+          return context.json({
+            data: [],
+            meta: { page, pageSize, total: 0 },
+          });
+        }
+        const rows = (await repo.findMany({
+          filter,
+          limit: pageSize,
+          offset: (page - 1) * pageSize,
+          sort: {
+            kind: 'sort',
+            version: 1,
+            items: [{ kind: 'field', path: ['createdAt'], direction: 'desc' }],
+          },
+        })) as unknown as Record<string, unknown>[];
+        const total = await repo.count({ filter });
+        return context.json({
+          data: await decorate(rows, true, decision),
+          meta: { page, pageSize, total },
+        });
+      },
+    );
+
+    router.get(
+      '/quality/feedbacks/:feedbackId',
+      describeRoute({
+        tags: ['Quality'],
+        summary: 'Get one feedback sheet',
+        operationId: 'getFeedback',
+        responses: {
+          '200': dataResponse(FeedbackSchema),
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '404': apiErrorResponse(404),
+          '500': apiErrorResponse(500),
+        },
+      }),
+      async (context) => {
+        const id = context.req.param('feedbackId');
+        const decision = await authorizeFqc(context, 'maintain');
+        const row = (await database
+          .connection()
+          .repository('fqcMessages')
+          .withPolicy(policyOf(decision, 'fqcMessages'))
+          .findOne({ filter: { id } })) as unknown as Record<string, unknown> | undefined;
+        if (!row) {
+          throw notFound(id);
+        }
+        const [decorated] = await decorate([row], true, decision);
+        return context.json({ data: decorated });
+      },
+    );
+
+    router.patch(
+      '/quality/feedbacks/:feedbackId',
+      describeRoute({
+        tags: ['Quality'],
+        summary: 'Change the form fields of a feedback sheet',
+        operationId: 'updateFeedback',
+        responses: {
+          '200': dataResponse(FeedbackSchema),
+          '400': apiErrorResponse(400),
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '404': apiErrorResponse(404),
+          '409': apiErrorResponse(409),
+          '500': apiErrorResponse(500),
+        },
+      }),
+      apiValidator('json', UpdateFeedbackBody),
+      async (context) => {
+        const id = context.req.param('feedbackId');
+        const body = context.req.valid('json') as Record<string, unknown>;
+        const decision = await authorizeFqc(context, 'maintain');
+        if (Object.keys(body).length === 0) {
+          throw new ApiError({
+            status: 'INVALID_ARGUMENT',
+            reason: 'EMPTY_UPDATE',
+            domain: 'quality',
+            message: 'At least one field is required.',
+          });
+        }
+        const session = context.get('auth');
+        const actorId = session?.user?.id === undefined ? null : String(session.user.id);
+        const result = await database.connection().transaction(async (transaction) => {
+          const repo = transaction
+            .repository('fqcMessages')
+            .withPolicy(policyOf(decision, 'fqcMessages'));
+          const existing = (await repo.findOne({ filter: { id } })) as unknown as
+            | Record<string, unknown>
+            | undefined;
+          if (!existing) {
+            throw notFound(id);
+          }
+          if (asText(existing.status) !== 'open') {
+            throw notOpen();
+          }
+          const fields: Record<string, unknown> = {};
+          for (const key of ['customerName', 'productName', 'model', 'batchNo', 'note'] as const) {
+            if (key in body) {
+              fields[key] = body[key];
+            }
+          }
+          const desiredIds =
+            body.attachmentIds === undefined
+              ? undefined
+              : [...(body.attachmentIds as string[])];
+          if (desiredIds !== undefined && desiredIds.length > 10) {
+            throw new ApiError({
+              status: 'INVALID_ARGUMENT',
+              reason: 'TOO_MANY_ATTACHMENTS',
+              domain: 'quality',
+              message: 'A feedback may carry at most ten attachments.',
+            });
+          }
+          // 附件三条规则与录入共用一处判断，都在这个事务里。
+          const files = transaction.repository('fqcFeedbackFiles');
+          const previousIds = Array.isArray(existing.attachmentIds)
+            ? (existing.attachmentIds as string[]).map(String)
+            : [];
+          const added = (desiredIds ?? []).filter((fileId) => !previousIds.includes(fileId));
+          for (const fileId of added) {
+            const file = await files.findOne({
+              filter: (filter) =>
+                filter.and([
+                  filter.string('id').eq(fileId),
+                  actorId === null
+                    ? filter.string('ownerId').empty()
+                    : filter.string('ownerId').eq(actorId),
+                  filter.string('feedbackId').empty(),
+                ]),
+            });
+            if (!file) {
+              throw new ApiError({
+                status: 'FAILED_PRECONDITION',
+                httpStatus: 422,
+                reason: 'ATTACHMENT_NOT_AVAILABLE',
+                domain: 'quality',
+                message: `Attachment ${fileId} is not available to this caller.`,
+              });
+            }
+          }
+          fields.updatedAt = storedDateTime(new Date());
+          if (desiredIds !== undefined) {
+            fields.attachmentIds = desiredIds;
+          }
+          const updated = await repo.updateMany({
+            filter: (filter) =>
+              filter.and([
+                filter.string('id').eq(id),
+                filter.string('status').eq('open'),
+              ]),
+            values: fields as never,
+          });
+          if (updated.updatedCount !== 1) {
+            throw notOpen();
+          }
+          if (desiredIds !== undefined) {
+            const removed = previousIds.filter((fileId) => !desiredIds.includes(fileId));
+            const now = storedDateTime(new Date());
+            if (added.length > 0) {
+              await files.updateMany({
+                filter: (filter) =>
+                  filter.and([
+                    filter.or(added.map((fileId) => filter.string('id').eq(fileId))),
+                    filter.string('feedbackId').empty(),
+                  ]),
+                values: { feedbackId: id, updatedAt: now } as never,
+              });
+            }
+            if (removed.length > 0) {
+              await files.updateMany({
+                filter: (filter) =>
+                  filter.and([
+                    filter.or(removed.map((fileId) => filter.string('id').eq(fileId))),
+                    filter.string('feedbackId').eq(id),
+                  ]),
+                values: { feedbackId: null, updatedAt: now } as never,
+              });
+            }
+          }
+          return await repo.findOne({ filter: { id } });
+        });
+        if (!result) {
+          throw notFound(id);
+        }
+        const [decorated] = await decorate([result], true, decision);
+        return context.json({ data: decorated });
+      },
+    );
+
+    router.post(
+      '/quality/feedbacks/:feedbackId/discard',
+      describeRoute({
+        tags: ['Quality'],
+        summary: 'Discard a feedback sheet',
+        operationId: 'discardFeedback',
+        responses: {
+          '200': dataResponse(FeedbackSchema),
+          '400': apiErrorResponse(400),
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '404': apiErrorResponse(404),
+          '409': apiErrorResponse(409),
+          '500': apiErrorResponse(500),
+        },
+      }),
+      apiValidator('json', DiscardFeedbackBody),
+      async (context) => {
+        const id = context.req.param('feedbackId');
+        const { reason } = context.req.valid('json');
+        const decision = await authorizeFqc(context, 'maintain');
+        const session = context.get('auth');
+        const actorId = session?.user?.id === undefined ? null : String(session.user.id);
+        const result = await database.connection().transaction(async (transaction) => {
+          const repo = transaction
+            .repository('fqcMessages')
+            .withPolicy(policyOf(decision, 'fqcMessages'));
+          const existing = await repo.findOne({ filter: { id } });
+          if (!existing) {
+            throw notFound(id);
+          }
+          if (asText(existing.status) !== 'open') {
+            throw notOpen();
+          }
+          const tickets = await transaction
+            .repository('fqcTickets')
+            .withPolicy(policyOf(decision, 'fqcTickets'))
+            .count({ filter: { sourceMessageId: id } });
+          if (tickets > 0) {
+            throw new ApiError({
+              status: 'ABORTED',
+              reason: 'FEEDBACK_DISPATCHED',
+              domain: 'quality',
+              message: 'A feedback with a ticket cannot be discarded.',
+            });
+          }
+          const updated = await repo.updateMany({
+            filter: (filter) =>
+              filter.and([
+                filter.string('id').eq(id),
+                filter.string('status').eq('open'),
+              ]),
+            values: {
+              status: 'discarded',
+              discardedAt: storedDateTime(new Date()),
+              discardedBy: actorId,
+              discardReason: reason,
+              updatedAt: storedDateTime(new Date()),
+            },
+          });
+          if (updated.updatedCount !== 1) {
+            throw notOpen();
+          }
+          return await repo.findOne({ filter: { id } });
+        });
+        if (!result) {
+          throw notFound(id);
+        }
+        const [decorated] = await decorate([result], true, decision);
+        return context.json({ data: decorated });
       },
     );
 

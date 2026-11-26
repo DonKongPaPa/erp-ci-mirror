@@ -3,6 +3,7 @@ import AuthorizationResourcesProvider from './authorization-resources.js';
 import DepartmentMutationsProvider from './department-mutations.js';
 import DepartmentProvider from './departments.js';
 import DevAccountSwitcherProvider from './dev-account-switcher.js';
+import FeedbackReminderProvider from './feedback-reminder.js';
 import KnowledgeAccessProvider from './knowledge-access.js';
 import NotificationManagementProvider from './notification-management.js';
 import QualityDraftingProvider from './quality-drafting.js';
@@ -14,6 +15,8 @@ import type { ApplicationServiceProviderConstructor } from '@nocobase/app-server
 
 const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
   SubmissionProvider,
+  // R-026：七天提醒，进程内每天一次的扫单任务。
+  FeedbackReminderProvider,
   DepartmentProvider,
   DepartmentMutationsProvider,
   AuthorizationResourcesProvider,

@@ -825,7 +825,7 @@ test('R-002 7: 确认抢先时模型结果丢掉，库里与 201 都保持规则
     }
     expect(after.reviewId, '确认记录指针应当还在').toBeTruthy();
     // 开关是开着的、模型没跑到；行里不许声称任何一种「已回落」的原因。
-    expect(after.degradeReason, '没跑到模型时原因必须是空').toBeNull();
+    expect(after.degradeReason).toBeNull();
     // 0 行更新不算成功：201 里也不能出现被丢弃的模型值。
     expect(body.data.screening).toMatchObject({
       engine: 'rules',
