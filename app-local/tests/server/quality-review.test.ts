@@ -16,6 +16,7 @@ import {
 import { describe, expect } from 'vitest';
 
 import { createStandaloneServer } from '../../server/standalone.js';
+import { ScreeningReviewResultSchema } from '../../server/routes/schemas.js';
 
 /**
  * R-002 验收 9、14、15（后半）与 16 的运行期部分：人工确认不再改写草稿、确认记录
@@ -258,7 +259,9 @@ test('R-002 9: 确认不改写草稿，只追加一行确认记录，响应里�
       }),
     ),
     200,
-  )) as { data: ScreeningRow & { review: ReviewRow } };
+  )) as {
+    data: ScreeningRow & { review: ReviewRow & { actorName?: string } };
+  };
 
   // 响应是初筛那一行多出 review。
   expect(response.data.id).toBe(before.id);
@@ -272,11 +275,13 @@ test('R-002 9: 确认不改写草稿，只追加一行确认记录，响应里�
   expect(response.data.review.actorId).toBe(manager.id);
   expect(response.data.reviewId).toBe(response.data.review.id);
 
-  // 确认记录只追加：库里那一行与响应逐字段相同。
+  // 确认记录只追加：库里那几列与响应逐字段相同，姓名是响应多出的解析列。
   const storedReview = await connection
     .repository('fqcScreeningReviews')
     .findOne({ filter: { id: response.data.review.id } });
-  expect(storedReview, '确认记录没有写进库').toEqual(response.data.review);
+  const { actorName, ...storedShape } = response.data.review;
+  expect(actorName, '确认响应的姓名来自会话账号').toBe('r002confirmmanager');
+  expect(storedReview, '确认记录没有写进库').toEqual(storedShape);
 
   // 草稿的列逐字不变，只有 outcome / reviewId / updatedAt 变了。
   const storedAfter = await connection
@@ -311,7 +316,9 @@ test('R-002 9: 确认不改写草稿，只追加一行确认记录，响应里�
   const second = (await expectJson(
     await session.fetch(reviewPath(before.id), json({})),
     200,
-  )) as { data: ScreeningRow & { review: ReviewRow } };
+  )) as {
+    data: ScreeningRow & { review: ReviewRow & { actorName?: string } };
+  };
   expect(second.data.review.id).not.toBe(response.data.review.id);
   expect(second.data.reviewId).toBe(second.data.review.id);
   expect(
@@ -766,9 +773,17 @@ describe.skipIf(process.env.NOCOBASE_TEST_DB_DIALECT !== 'postgres')(
             winnerReviewId,
           );
           expect(rows[0]?.id).toBe(winnerReviewId);
+          const winnerReview = winner?.body.data?.review as
+            | (Record<string, unknown> & { actorName?: string })
+            | undefined;
           expect(
-            winner?.body.data?.review,
-            '先返回的响应里的 review 应当与库里那一行一致',
+            winnerReview?.actorName,
+            '并发确认的响应也带确认人姓名',
+          ).toContain('r002race');
+          const { actorName: _actorName, ...storedShape } = winnerReview ?? {};
+          expect(
+            storedShape,
+            '先返回的响应里的 review 除姓名外应当与库里那一行一致',
           ).toEqual(rows[0]);
         } finally {
           if (!released) {
@@ -863,4 +878,287 @@ test('R-002 15: 统计不扩大暴露面，也不存在返回相似案例正文�
     await unknown.text();
     expect(unknown.status, `${path} 不应当存在`).toBe(404);
   }
+});
+
+/* 列表随行确认记录（刷新之后仍可见）：只随请求自己的范围读，姓名只给姓名。 */
+interface ListBody {
+  data: (ScreeningRow & {
+    canReview: boolean;
+    review: (ReviewRow & { actorName: string }) | null;
+  })[];
+  meta: { page: number; pageSize: number; total: number };
+}
+
+const LIST_PATH = '/quality/screenings';
+const UNKNOWN_ACTOR_NAME = '—';
+const REVIEW_KEYS = [
+  'actorId',
+  'actorName',
+  'category',
+  'createdAt',
+  'departmentId',
+  'id',
+  'kind',
+  'screeningId',
+  'severity',
+];
+
+/** 姓名与登录名不同，钉住「解析出来的是姓名，不是账号」。 */
+const createNamedActor = async (
+  admin: TestSession,
+  name: string,
+  username: string,
+): Promise<{ id: string }> => {
+  const response = await admin.fetch(
+    '/users',
+    json({
+      name,
+      username,
+      email: `${username}@example.test`,
+      password: PASSWORD,
+      roleScopes: { app: [] },
+    }),
+  );
+  const text = await response.text();
+  expect(response.status, `${text}`).toBe(201);
+  return (JSON.parse(text) as { data: { id: string } }).data;
+};
+
+test('R-002 list: 列表随行带最近一次确认记录，多次确认取最近一次', async ({
+  testApp,
+  connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  await createUser(admin, 'r002listmanager', { app: ['quality_manager'] });
+  const earlierActor = await createNamedActor(
+    admin,
+    '早期确认人',
+    'r002listearlylogin',
+  );
+  const latestActor = await createNamedActor(
+    admin,
+    '最近确认人',
+    'r002listlatestlogin',
+  );
+  const earlierId = randomUUID();
+  const latestId = randomUUID();
+  const screening = await insertScreening(connection, {
+    id: 'r002-list-latest',
+    outcome: 'reviewed',
+    reviewId: latestId,
+  });
+  await insertReview(connection, screening, {
+    id: earlierId,
+    actorId: earlierActor.id,
+    category: 'dimension',
+    severity: 'minor',
+    createdAt: new Date('2026-11-20T09:00:00Z'),
+  });
+  await insertReview(connection, screening, {
+    id: latestId,
+    actorId: latestActor.id,
+    category: 'appearance',
+    severity: 'critical',
+    createdAt: new Date('2026-11-21T09:00:00Z'),
+  });
+
+  const session = await signInAs(testApp, 'r002listmanager');
+  const body = (await expectJson(
+    await session.fetch(LIST_PATH),
+    200,
+  )) as ListBody;
+  const row = body.data.find((item) => item.id === screening.id);
+  expect(row, '列表里要有这条初筛').toBeDefined();
+  expect(row?.review, '已确认的行要随行带确认记录').not.toBeNull();
+  const review = row!.review!;
+  expect(review.id, '多次确认只取最近一次').toBe(latestId);
+  expect(review.category).toBe('appearance');
+  expect(review.severity).toBe('critical');
+  expect(review.actorId).toBe(latestActor.id);
+  expect(review.actorName, '确认人显示姓名').toBe('最近确认人');
+  expect(Object.keys(review).sort(), '确认记录只多出一个姓名列').toEqual(
+    REVIEW_KEYS,
+  );
+  expect(JSON.stringify(review)).not.toContain('r002listlatestlogin');
+});
+
+test('R-002 list: 读者读不到确认记录时这一段为空，不报错', async ({
+  testApp,
+  app,
+  connection,
+}) => {
+  const authz = app.container.resolve(authorizationToken);
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const user = await createUser(admin, 'r002listnoread', { app: [] });
+  await authz.permissionSets.create({
+    key: 'r002-list-no-review-read',
+    grants: [
+      {
+        resource: { type: 'composite', id: 'fqc' },
+        actions: [
+          {
+            action: 'view',
+            policy: {
+              type: 'composite',
+              scopes: {
+                fqcMessages: 'allRecords',
+                fqcScreenings: 'allRecords',
+                fqcTickets: 'allRecords',
+                // 空串把确认记录表的读折成 false。
+                fqcScreeningReviews: '',
+              },
+            },
+          },
+        ],
+      },
+    ],
+  });
+  await authz.permissionSets.assign({
+    subject: { type: 'user', id: user.id },
+    permissionSet: 'r002-list-no-review-read',
+  });
+
+  const screening = await insertScreening(connection, {
+    id: 'r002-list-no-read',
+    outcome: 'reviewed',
+    reviewId: 'r002-list-no-read-review',
+  });
+  await insertReview(connection, screening, {
+    id: 'r002-list-no-read-review',
+  });
+
+  const session = await signInAs(testApp, 'r002listnoread');
+  const body = (await expectJson(
+    await session.fetch(LIST_PATH),
+    200,
+  )) as ListBody;
+  const row = body.data.find((item) => item.id === screening.id);
+  expect(row, '范围之内的初筛照常可见').toBeDefined();
+  expect(row?.review, '读不到确认记录时这一段为空，不报错').toBeNull();
+});
+
+test('R-002 list: 姓名解析只给姓名，解析不到时给中性占位', async ({
+  testApp,
+  connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  await createUser(admin, 'r002listnames', { app: ['quality_manager'] });
+  const named = await createNamedActor(
+    admin,
+    '名单上的人',
+    'r002listnamedlogin',
+  );
+  const known = await insertScreening(connection, {
+    id: 'r002-list-named',
+    outcome: 'reviewed',
+    reviewId: 'r002-list-named-review',
+  });
+  await insertReview(connection, known, {
+    id: 'r002-list-named-review',
+    actorId: named.id,
+  });
+  const orphan = await insertScreening(connection, {
+    id: 'r002-list-orphan',
+    outcome: 'reviewed',
+    reviewId: 'r002-list-orphan-review',
+  });
+  await insertReview(connection, orphan, {
+    id: 'r002-list-orphan-review',
+    actorId: 'r002-deleted-actor',
+  });
+  const unconfirmed = await insertScreening(connection, {
+    id: 'r002-list-unconfirmed',
+  });
+
+  const session = await signInAs(testApp, 'r002listnames');
+  const response = await session.fetch(LIST_PATH);
+  const text = await response.text();
+  expect(response.status, `${text}`).toBe(200);
+  const body = JSON.parse(text) as ListBody;
+  const namedRow = body.data.find((item) => item.id === known.id);
+  const orphanRow = body.data.find((item) => item.id === orphan.id);
+  const emptyRow = body.data.find((item) => item.id === unconfirmed.id);
+  expect(namedRow?.review?.actorName).toBe('名单上的人');
+  expect(orphanRow?.review?.actorName, '账号已删时给中性占位').toBe(
+    UNKNOWN_ACTOR_NAME,
+  );
+  expect(emptyRow?.review, '没确认过的行没有确认记录').toBeNull();
+  for (const row of [namedRow, orphanRow]) {
+    expect(Object.keys(row!.review!).sort()).toEqual(REVIEW_KEYS);
+  }
+  for (const leaked of [
+    'r002listnamedlogin',
+    `${named.id}@example.test`,
+    'phone',
+    'email',
+  ]) {
+    expect(text, `列表响应里出现了不该有的字段 ${leaked}`).not.toContain(
+      leaked,
+    );
+  }
+});
+
+test('R-002 9: 确认端点的响应通过 schema 且当场带确认人姓名', async ({
+  testApp,
+  connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  await createUser(admin, 'r002confirmnamed', { app: ['quality_manager'] });
+  const session = await signInAs(testApp, 'r002confirmnamed');
+  const screening = await insertScreening(connection, {
+    id: 'r002-confirm-name',
+    outcome: 'needs-review',
+  });
+
+  const body = (await expectJson(
+    await session.fetch(reviewPath(screening.id), json({})),
+    200,
+  )) as { data: ScreeningRow & { review: ReviewRow & { actorName?: string } } };
+  expect(
+    ScreeningReviewResultSchema.safeParse(body.data).success,
+    '确认响应要满足声明了的响应 schema',
+  ).toBe(true);
+  expect(body.data.review.actorName, '确认当场就带姓名').toBe(
+    'r002confirmnamed',
+  );
+  expect(Object.keys(body.data.review).sort(), '确认响应与列表同形').toEqual(
+    REVIEW_KEYS,
+  );
+});
+
+test('R-002 list: createdAt 相同时取 id 较大的确认记录', async ({
+  testApp,
+  connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  await createUser(admin, 'r002listtie', { app: ['quality_manager'] });
+  const firstId = 'aaaa-first';
+  const lastId = 'zzzz-last';
+  const at = new Date('2026-11-22T10:00:00Z');
+  const screening = await insertScreening(connection, {
+    id: 'r002-list-tie',
+    outcome: 'reviewed',
+    reviewId: lastId,
+  });
+  await insertReview(connection, screening, {
+    id: firstId,
+    createdAt: at,
+    category: 'dimension',
+    severity: 'minor',
+  });
+  await insertReview(connection, screening, {
+    id: lastId,
+    createdAt: at,
+    category: 'appearance',
+    severity: 'critical',
+  });
+
+  const session = await signInAs(testApp, 'r002listtie');
+  const body = (await expectJson(
+    await session.fetch(LIST_PATH),
+    200,
+  )) as ListBody;
+  const review = body.data.find((item) => item.id === screening.id)?.review;
+  expect(review?.id, '同值时按 id 较大者决胜').toBe(lastId);
+  expect(review?.category).toBe('appearance');
 });

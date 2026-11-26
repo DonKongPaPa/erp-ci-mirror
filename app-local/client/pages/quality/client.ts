@@ -15,8 +15,8 @@ export interface QualityMessage {
 }
 
 /**
- * 人工确认记录的一行（R-002）。只随确认端点的响应返回；列表不随行读确认记录，
- * 所以列表响应里没有它，页面上的「谁在何时确认成什么」用确认时拿到的那一行。
+ * 人工确认记录的一行（R-002）。列表已确认的行随行带最近一次记录，确认端点回刚写的那行；
+ * `actorId` 留着排障，页面只显示服务端解析好的 `actorName`。
  */
 export interface QualityScreeningReview {
   id: string;
@@ -26,6 +26,8 @@ export interface QualityScreeningReview {
   severity: string;
   departmentId: string | null;
   actorId: string;
+  /** 姓名（解析不到时是中性占位）；服务端不回邮箱、手机号。 */
+  actorName: string;
   createdAt: string;
 }
 
@@ -51,8 +53,8 @@ export interface QualityScreening {
   outcome: string;
   /** 列表端点为每行算好的「这一行处于可以确认的状态」；列表之外不返回。 */
   canReview?: boolean;
-  /** 只在确认端点的响应里出现：刚写下的那行确认记录。 */
-  review?: QualityScreeningReview;
+  /** 列表已确认的行随行带最近一次确认（或 null）；确认端点回刚写下的那行。 */
+  review?: QualityScreeningReview | null;
   createdAt: string;
   updatedAt: string;
 }

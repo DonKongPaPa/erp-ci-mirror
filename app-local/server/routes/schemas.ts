@@ -144,6 +144,14 @@ export const FeedbackSchema = z.object({
     .optional(),
 });
 
+/** R-026 S4：上传附件成功只回标识与服务端探测出的元数据，不回任何地址。 */
+export const FeedbackFileSchema = z.object({
+  id: z.string(),
+  filename: z.string(),
+  mimeType: z.string(),
+  size: z.number(),
+});
+
 export const MessageSchema = z.object({
   id: z.string(),
   channel: z.string(),
@@ -167,6 +175,8 @@ export const ScreeningReviewSchema = z.object({
   severity: z.string(),
   departmentId: z.string().nullable(),
   actorId: z.string(),
+  /** 经 PeopleQueryService 解析出的姓名；解析不到是中性占位，不回邮箱、手机号。 */
+  actorName: z.string(),
   createdAt: z.string(),
 });
 
@@ -174,8 +184,8 @@ export const ScreeningReviewSchema = z.object({
  * 初筛的一行。R-002 加六个出处列与 `reviewId`；模型版草稿的值也在这张表上
  * （类别、严重度、建议责任方、摘要、置信度、evidence、modelName）。
  *
- * `review` 只在确认端点的响应里出现：列表的每一行没有随行读确认记录，
- * 所以它是可选的，不是空的。
+ * `review` 是可选的：投递响应不带这行；列表已确认的行随行带最近一次确认记录，
+ * 没确认或读不到确认记录时是 `null`。确认端点必带刚写下的那一行。
  */
 export const ScreeningSchema = z.object({
   id: z.string(),
@@ -197,7 +207,7 @@ export const ScreeningSchema = z.object({
   outcome: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
-  review: ScreeningReviewSchema.optional(),
+  review: ScreeningReviewSchema.nullable().optional(),
 });
 
 /**
@@ -205,10 +215,11 @@ export const ScreeningSchema = z.object({
  *
  * `canReview` 只表示这一行的状态：是「待人工复核」就为真。调用的人有没有处理权限
  * 不在这里判 —— 那要在同一个请求里再授权一次。前端把 `canReview` 与 `useCan` 合起来
- * 决定「确认初筛」显不显示。
+ * 决定「确认初筛」显不显示。`review` 随行带最近一次确认（或 null），刷新后仍可见。
  */
 export const ScreeningListItemSchema = ScreeningSchema.extend({
   canReview: z.boolean(),
+  review: ScreeningReviewSchema.nullable(),
 });
 
 /** 确认端点的响应：仍是初筛那一行，多出刚写的确认记录。 */
@@ -375,4 +386,167 @@ export const ServiceAccountRolesSchema = z.object({
 
 export const ReplaceServiceAccountRolesBody = z.object({
   keys: z.array(z.string().min(1).max(128)),
+});
+
+/**
+ * R-011 员工端点的请求与响应形状。
+ *
+ * 邮箱只作为入职的可选输入（不存档案、不回任何读端点）；口令也只在入职输入里出现，
+ * 不进响应。响应 schema 逐列列出，多一列（尤其 email）就是暴露面扩大。
+ */
+const employeeId = z.string().min(1).max(64);
+const employeeDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
+const optionalReference = employeeId.nullable().optional();
+
+export const ListEmployeesQuery = z.object({
+  q: z.string().min(1).max(64).optional(),
+  status: z.enum(['active', 'left']).optional(),
+  departmentId: employeeId.optional(),
+  positionId: employeeId.optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export type ListEmployeesQueryInput = z.infer<typeof ListEmployeesQuery>;
+
+export const EmployeeCandidatesQuery = z.object({
+  q: z.string().min(1).max(64),
+  departmentId: employeeId.optional(),
+  departmentIds: z.string().max(512).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+});
+
+export type EmployeeCandidatesQueryInput = z.infer<typeof EmployeeCandidatesQuery>;
+
+export const HireEmployeeBody = z.object({
+  name: z.string().trim().min(1).max(128),
+  username: z.string().trim().min(1).max(64).optional(),
+  email: z.string().trim().email().max(254).optional(),
+  password: z.string().min(1).max(256).optional(),
+  hiredOn: employeeDate,
+  positionId: optionalReference,
+  gradeId: optionalReference,
+  reportsToUserId: optionalReference,
+  primaryDepartmentId: optionalReference,
+});
+
+export type HireEmployeeInput = z.infer<typeof HireEmployeeBody>;
+
+export const LinkEmployeeBody = z.object({
+  userId: employeeId,
+  hiredOn: employeeDate,
+  positionId: optionalReference,
+  gradeId: optionalReference,
+  reportsToUserId: optionalReference,
+  primaryDepartmentId: optionalReference,
+});
+
+export type LinkEmployeeInput = z.infer<typeof LinkEmployeeBody>;
+
+export const UpdateEmployeeBody = z
+  .object({
+    positionId: optionalReference,
+    gradeId: optionalReference,
+    reportsToUserId: optionalReference,
+  })
+  .refine(
+    (value) =>
+      Object.prototype.hasOwnProperty.call(value, 'positionId') ||
+      Object.prototype.hasOwnProperty.call(value, 'gradeId') ||
+      Object.prototype.hasOwnProperty.call(value, 'reportsToUserId'),
+    'At least one of positionId, gradeId or reportsToUserId is required',
+  );
+
+export type UpdateEmployeeInput = z.infer<typeof UpdateEmployeeBody>;
+
+export const LeaveEmployeeBody = z.object({
+  leftOn: employeeDate,
+  note: z.string().trim().max(500).optional(),
+});
+
+export type LeaveEmployeeInput = z.infer<typeof LeaveEmployeeBody>;
+
+export const RehireEmployeeBody = z.object({
+  hiredOn: employeeDate,
+  primaryDepartmentId: optionalReference,
+  positionId: optionalReference,
+  gradeId: optionalReference,
+  reportsToUserId: optionalReference,
+});
+
+export type RehireEmployeeInput = z.infer<typeof RehireEmployeeBody>;
+
+export const EmployeeListRowSchema = z.object({
+  userId: z.string(),
+  employeeNo: z.string(),
+  name: z.string().nullable(),
+  username: z.string().nullable(),
+  primaryDepartmentName: z.string().nullable(),
+  positionName: z.string().nullable(),
+  gradeName: z.string().nullable(),
+  status: z.enum(['active', 'left']),
+  hiredOn: z.string(),
+});
+
+export const EmployeeDetailSchema = EmployeeListRowSchema.extend({
+  secondaryDepartmentNames: z.array(z.string()),
+  reportsToName: z.string().nullable(),
+  leftOn: z.string().nullable(),
+});
+
+export const EmployeeChangeSchema = z.object({
+  kind: z.enum(['hired', 'left', 'rehired', 'position', 'grade', 'reportsTo']),
+  fromValue: z.string().nullable(),
+  toValue: z.string().nullable(),
+  occurredOn: z.string(),
+  note: z.string().nullable(),
+  actorName: z.string().nullable(),
+  createdAt: z.string(),
+});
+
+export const EmployeeCandidateSchema = z.object({
+  userId: z.string(),
+  name: z.string().nullable(),
+  username: z.string().nullable(),
+  employeeNo: z.string(),
+  primaryDepartmentName: z.string().nullable(),
+});
+
+export const PositionSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  active: z.boolean(),
+  sortOrder: z.number(),
+});
+
+export const JobGradeSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  rank: z.number(),
+  active: z.boolean(),
+});
+
+export const CreatePositionBody = z.object({
+  id: z.string().trim().min(1).max(64),
+  title: z.string().trim().min(1).max(128),
+  sortOrder: z.number().int().min(-2147483648).max(2147483647).optional(),
+});
+
+export const UpdatePositionBody = z.object({
+  title: z.string().trim().min(1).max(128).optional(),
+  sortOrder: z.number().int().min(-2147483648).max(2147483647).optional(),
+  active: z.boolean().optional(),
+});
+
+export const CreateJobGradeBody = z.object({
+  id: z.string().trim().min(1).max(32),
+  title: z.string().trim().min(1).max(128),
+  rank: z.number().int().min(-2147483648).max(2147483647).optional(),
+});
+
+export const UpdateJobGradeBody = z.object({
+  title: z.string().trim().min(1).max(128).optional(),
+  rank: z.number().int().min(-2147483648).max(2147483647).optional(),
+  active: z.boolean().optional(),
 });

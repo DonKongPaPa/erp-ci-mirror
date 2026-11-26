@@ -896,6 +896,10 @@ test('R-013: the intake response matches the stored message, screening and ticke
   expect(storedScreening, '列表里找不到刚投递的那条初筛').toBeDefined();
   const screeningFields: Record<string, unknown> = { ...storedScreening };
   delete screeningFields.canReview;
+  // R-002 续片：列表已确认的行随行带确认记录；刚投递还没确认的行是 null。
+  // 先钉住这一点，再把列表多出的这一列投影掉，逐字段比较仍不放宽。
+  expect(screeningFields.review, '刚投递、还没确认的初筛没有确认记录').toBeNull();
+  delete screeningFields.review;
   expectSameRecord(ingested.data.screening, screeningFields, '初筛');
   expect(
     ingested.data.screening.confidence,

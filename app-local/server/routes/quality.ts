@@ -6,7 +6,9 @@ import {
   authorizationToken,
   type AuthorizationEnv,
 } from '@nocobase/app-plugin-authorization/server';
+import { serverFileRepositoryManagerToken } from '@nocobase/app-plugin-file/server';
 import type { Application } from '@nocobase/app-server/application';
+import { driveManagerToken } from '@nocobase/app-server/drive';
 import { loggingToken } from '@nocobase/app-server/logging';
 import {
   AuthorizationDeniedError,
@@ -22,6 +24,7 @@ import {
 } from '@nocobase/db';
 import {
   ApiError,
+  apiErrorHandler,
   apiErrorResponse,
   apiValidator,
   dataResponse,
@@ -33,7 +36,9 @@ import {
   type AppApiRouteContribution,
 } from '@nocobase/app-server/router';
 import { Hono, type Context } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { randomUUID } from 'node:crypto';
+import { Readable } from 'node:stream';
 
 import {
   ApproveScreeningBody,
@@ -41,6 +46,7 @@ import {
   DiscardFeedbackBody,
   DraftingStatsQuery,
   DraftingStatsSchema,
+  FeedbackFileSchema,
   FeedbackSchema,
   IngestMessageBody,
   IngestResultSchema,
@@ -75,6 +81,59 @@ type FqcAction = 'view' | 'handle' | 'intake' | 'submit' | 'maintain';
 type FqcTable =
   'fqcMessages' | 'fqcScreenings' | 'fqcTickets' | 'fqcScreeningReviews';
 type FqcDecision = AuthorizationDecision<CompositeResourceConditions>;
+
+/** 列表随行带出去的确认记录，只比库里那一行多一个姓名（不回邮箱、手机号）。 */
+interface ScreeningReviewForList {
+  readonly id: string;
+  readonly screeningId: string;
+  readonly kind: string;
+  readonly category: string;
+  readonly severity: string;
+  readonly departmentId: string | null;
+  readonly actorId: string;
+  readonly createdAt: unknown;
+}
+
+/** 账号已删、解析不到姓名时的中性占位；不是账号 id，也不泄露账号是否存在。 */
+const UNKNOWN_ACTOR_NAME = '—';
+
+/**
+ * R-026 S4：附件的上传与取内容。
+ *
+ * 只调插件的服务端文件仓储，不登记它的 HTTP 路由：公开的内容路由根本不存在。
+ * 盘用应用配好的私有 `local`，对象前缀 `fqc-feedback`；单个文件上限比盘级上限小。
+ * 类型收在声明的 MIME 与扩展名对得上的四种，插件不做内容嗅探，所以这里也不声称做过。
+ */
+const FEEDBACK_FILE_MAX_BYTES = 10 * 1024 * 1024;
+// multipart 的边界与头部开销；按请求长度先挡住明显过大的体，精确大小在解析后按文件判。
+const FEEDBACK_FILE_BODY_SLACK = 64 * 1024;
+const FEEDBACK_FILE_DISK = 'local';
+const FEEDBACK_FILE_STORAGE_PREFIX = 'fqc-feedback';
+// 只用于构造仓储（getUrl 的地址形态），本应用从不登记这条路由。
+const FEEDBACK_FILE_ACCESS_PATH = '/quality/feedback-files-private';
+const FEEDBACK_FILE_TYPES: Readonly<Record<string, readonly string[]>> = {
+  'image/jpeg': ['jpg', 'jpeg'],
+  'image/png': ['png'],
+  'image/webp': ['webp'],
+  'application/pdf': ['pdf'],
+};
+
+/** 与插件内容路由同一套类型归一：非法类型落回 application/octet-stream。 */
+function feedbackMime(value: string): string {
+  return /^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$/u.test(value)
+    ? value.toLowerCase()
+    : 'application/octet-stream';
+}
+
+/** 上传仓储的策略：ownerId 由服务端写进默认列，调用方碰不到任何字段。 */
+function feedbackFileUploadPolicy(ownerId: string): RepositoryPolicy {
+  return {
+    read: { scope: true },
+    create: { scope: true, defaults: { ownerId } },
+    update: false,
+    delete: false,
+  };
+}
 
 /**
  * `fqc` 的一次业务动作授权。
@@ -542,6 +601,74 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
 
     const people = app.container.resolve(peopleQueryServiceToken);
 
+    // ---- R-026 S4：附件上传与取内容 ----
+
+    const attachmentNotFound = (id: string) =>
+      new ApiError({
+        status: 'NOT_FOUND',
+        reason: 'ATTACHMENT_NOT_FOUND',
+        domain: 'quality',
+        message: `Attachment ${id} was not found.`,
+      });
+
+    const fileError = (
+      status: 'INVALID_ARGUMENT' | 'PERMISSION_DENIED',
+      reason: string,
+      httpStatus: 400 | 413 | 415 | undefined,
+      message: string,
+    ) =>
+      new ApiError({
+        status,
+        reason,
+        domain: 'quality',
+        message,
+        ...(httpStatus === undefined ? {} : { httpStatus }),
+      });
+
+    /** 上传端点在授权中间件里记下调用者，解析期的 bodyLimit 之前不再重复授权。 */
+    const uploadOwner = new WeakMap<Context<AuthEnv & AuthorizationEnv>, string>();
+
+    /**
+     * 服务端文件仓储：只有上传路径绑策略（插件自己从 `create.defaults` 写 ownerId），
+     * 不建表、不登记路由。普通读写仍走应用自己的仓储，与录入函数同一张表。
+     */
+    const feedbackFileRepository = (ownerId: string) =>
+      app.container
+        .resolve(serverFileRepositoryManagerToken)
+        .repository('fqcFeedbackFiles', {
+          connection: 'main',
+          disk: FEEDBACK_FILE_DISK,
+          storagePrefix: FEEDBACK_FILE_STORAGE_PREFIX,
+          accessPath: FEEDBACK_FILE_ACCESS_PATH,
+          policy: feedbackFileUploadPolicy(ownerId),
+        });
+
+    /**
+     * 照插件内容路由的做法自己拼响应头：类型与扩展名取记录里的值，文件名先 NFC 化、去控制字符
+     * 与路径分隔符（存储层已做一次），再用 RFC 5987 编码；盘上对象不存在与记录不存在同形。
+     */
+    async function sendFeedbackFile(
+      context: Context<AuthEnv & AuthorizationEnv>,
+      record: Record<string, unknown>,
+    ) {
+      const key = String(record.key);
+      const disk = app.container.resolve(driveManagerToken).use(String(record.disk));
+      if (!(await disk.exists(key))) {
+        throw attachmentNotFound(String(record.id));
+      }
+      const filename = Buffer.from(String(record.filename)).toString('utf8');
+      const encoded = encodeURIComponent(filename).replace(/['()*]/gu, (char) =>
+        `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+      );
+      context.header('Cache-Control', 'private, no-store');
+      context.header('Content-Type', feedbackMime(String(record.mimeType)));
+      context.header('Content-Length', String(Number(record.size)));
+      context.header('X-Content-Type-Options', 'nosniff');
+      context.header('Content-Security-Policy', "sandbox; default-src 'none'");
+      context.header('Content-Disposition', `attachment; filename*=UTF-8''${encoded}`);
+      return context.body(Readable.toWeb(await disk.getStream(key)));
+    }
+
     /** 一批单的附件，按 feedbackId 归堆；取内容端点由下一片提供，这里只拼地址。 */
     async function attachmentsOf(ids: readonly string[]) {
       const grouped = new Map<string, Record<string, unknown>[]>();
@@ -568,6 +695,60 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
       const unique = [...new Set(ids.filter((id) => id.length > 0))];
       const rows = unique.length > 0 ? await people.byIds(unique) : [];
       return new Map(rows.map((row) => [row.id, row.name]));
+    }
+
+    /**
+     * 列表随行带的最近一次确认：用查看决策里这张表自己的范围读，按
+     * `createdAt DESC, id DESC` 排序，每个初筛只留第一条。读被折成 false 时整段为空，
+     * 不报错，也不许绕开范围按 id 另查。
+     */
+    async function latestReviewsOf(
+      decision: FqcDecision,
+      screeningIds: readonly string[],
+    ): Promise<Map<string, ScreeningReviewForList>> {
+      const policy = policyOf(decision, 'fqcScreeningReviews');
+      if (screeningIds.length === 0 || policy.read === false) {
+        return new Map();
+      }
+      const rows = (await database
+        .connection()
+        .repository('fqcScreeningReviews')
+        .withPolicy(policy)
+        .findMany({
+          filter: (filter) =>
+            filter.or(
+              screeningIds.map((id) => filter.string('screeningId').eq(id)),
+            ),
+          sort: {
+            kind: 'sort',
+            version: 1,
+            items: [
+              { kind: 'field', path: ['createdAt'], direction: 'desc' },
+              { kind: 'field', path: ['id'], direction: 'desc' },
+            ],
+          },
+        })) as unknown as Record<string, unknown>[];
+      const latest = new Map<string, ScreeningReviewForList>();
+      for (const row of rows) {
+        const screeningId = asText(row.screeningId);
+        if (latest.has(screeningId)) {
+          continue;
+        }
+        latest.set(screeningId, {
+          id: String(row.id),
+          screeningId,
+          kind: String(row.kind),
+          category: String(row.category),
+          severity: String(row.severity),
+          departmentId:
+            row.departmentId === null || row.departmentId === undefined
+              ? null
+              : asText(row.departmentId),
+          actorId: String(row.actorId),
+          createdAt: row.createdAt,
+        });
+      }
+      return latest;
     }
 
     /** 初筛八列与工单五列按 messageId / sourceMessageId 归堆，只给维护端点用。 */
@@ -665,6 +846,8 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
     router.use('/quality/drafting/stats', auth.required(), authz.middleware());
     router.use('/quality/feedbacks', auth.required(), authz.middleware());
     router.use('/quality/feedbacks/*', auth.required(), authz.middleware());
+    router.use('/quality/feedback-files', auth.required(), authz.middleware());
+    router.use('/quality/feedback-files/*', auth.required(), authz.middleware());
 
     // 外部渠道回调：企业微信/微信网关把客户消息推到这里。
     // 授权一次「投递」；三张表的写入在同一个事务里完成，写入的内容与以前一致。
@@ -914,14 +1097,37 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
           },
         });
         const total = await repo.count();
+        // 已确认的行随行带最近一次确认记录：读这张表仍用同一个查看决策的范围，
+        // 读不到就是 null，不报错。姓名只经 PeopleQueryService 解析成姓名一列，
+        // `actorId` 留着给排障，但页面上不再把它显示给用户。
+        const confirmed = rows.filter((row) => asText(row.reviewId).length > 0);
+        const reviews = await latestReviewsOf(
+          decision,
+          confirmed.map((row) => asText(row.id)),
+        );
+        const names = await namesOf(
+          [...reviews.values()].map((review) => review.actorId),
+        );
         // 每行带一个「这一行处于可以确认的状态」。只看这一行的状态：是「待人工复核」
         // 就为真。调用的人有没有处理权限不在这里判 —— 那要在同一个请求里再授权一次。
         // 前端把 canReview 与 useCan 合起来决定按钮显不显示。
         return context.json({
-          data: rows.map((row) => ({
-            ...row,
-            canReview: row.outcome === 'needs-review',
-          })),
+          data: rows.map((row) => {
+            const review = asText(row.reviewId).length > 0
+              ? reviews.get(asText(row.id))
+              : undefined;
+            return {
+              ...row,
+              canReview: row.outcome === 'needs-review',
+              review: review
+                ? {
+                    ...review,
+                    actorName:
+                      names.get(review.actorId) ?? UNKNOWN_ACTOR_NAME,
+                  }
+                : null,
+            };
+          }),
           meta: { page: 1, pageSize: 50, total },
         });
       },
@@ -1053,8 +1259,17 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
             }
             return { screening: updated, review };
           });
+        // 确认当场回的这一行要和列表随行带的同形：schema 把 actorName 钉成必带，
+        // 页面在列表重取回来之前先渲染这一行。只解析确认人一个姓名，解析不到给占位。
+        const reviewNames = await namesOf([actorId]);
         return context.json({
-          data: { ...result.screening, review: result.review },
+          data: {
+            ...result.screening,
+            review: {
+              ...result.review,
+              actorName: reviewNames.get(actorId) ?? UNKNOWN_ACTOR_NAME,
+            },
+          },
         });
       },
     );
@@ -1687,6 +1902,244 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         }
         const [decorated] = await decorate([result], true, decision);
         return context.json({ data: decorated });
+      },
+    );
+
+    /**
+     * 上传一个附件（表单提交之前）。先按「提交反馈」授权，再碰请求体；没有资格的人
+     * 发一个坏掉的请求体也得到 403。类型按上传声明与扩展名判，大小按文件精确判，
+     * 请求长度先把明显过大的体挡在解析之前。失败时既不写盘也不写库。
+     */
+    router.post(
+      '/quality/feedback-files',
+      describeRoute({
+        tags: ['Quality'],
+        summary: 'Upload one feedback attachment',
+        operationId: 'uploadFeedbackFile',
+        requestBody: {
+          required: true,
+          content: {
+            'multipart/form-data': {
+              schema: {
+                type: 'object',
+                required: ['file'],
+                properties: { file: { type: 'string', format: 'binary' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': dataResponse(FeedbackFileSchema),
+          '400': apiErrorResponse(400, 'No single `file` was uploaded.'),
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '413': apiErrorResponse(413),
+          '415': apiErrorResponse(415),
+          '500': apiErrorResponse(500),
+        },
+      }),
+      // 先授权再读请求体：没有 submit 的人一律 403，坏请求体也不会先得到 400。
+      // Hono 的 bodyLimit 信任 content-length；谎报或缺失的客户端会绕过解析前预检，
+      // 所以在挂硬闸之前把该头去掉，让 bodyLimit 走按字节计数的流式分支。
+      async (context, next) => {
+        await authorizeFqc(context, 'submit');
+        const session = context.get('auth');
+        if (!session?.user?.id) {
+          throw principalRequired();
+        }
+        uploadOwner.set(context, String(session.user.id));
+        const length = context.req.header('content-length');
+        if (
+          length !== undefined &&
+          Number(length) > FEEDBACK_FILE_MAX_BYTES + FEEDBACK_FILE_BODY_SLACK
+        ) {
+          throw fileError(
+            'INVALID_ARGUMENT',
+            'FILE_TOO_LARGE',
+            413,
+            `A feedback attachment may be at most ${FEEDBACK_FILE_MAX_BYTES} bytes.`,
+          );
+        }
+        context.req.raw.headers.delete('content-length');
+        await next();
+      },
+      // 解析期硬闸：即使请求头谎报或分块传输，也在读完之前中断并回 413。
+      bodyLimit({
+        maxSize: FEEDBACK_FILE_MAX_BYTES + FEEDBACK_FILE_BODY_SLACK,
+        onError: (c) =>
+          apiErrorHandler(
+            fileError(
+              'INVALID_ARGUMENT',
+              'FILE_TOO_LARGE',
+              413,
+              `A feedback attachment request body may be at most ${
+                FEEDBACK_FILE_MAX_BYTES + FEEDBACK_FILE_BODY_SLACK
+              } bytes.`,
+            ),
+            c,
+          ),
+      }),
+      async (context) => {
+        const actorId = uploadOwner.get(context);
+        if (actorId === undefined) {
+          throw principalRequired();
+        }
+        const media = context.req.header('content-type')?.toLowerCase() ?? '';
+        if (!media.startsWith('multipart/form-data;')) {
+          throw fileError(
+            'INVALID_ARGUMENT',
+            'UNSUPPORTED_MEDIA_TYPE',
+            415,
+            'Expected multipart/form-data.',
+          );
+        }
+        let body: Record<string, unknown>;
+        try {
+          body = await context.req.parseBody({ all: true });
+        } catch {
+          throw fileError(
+            'INVALID_ARGUMENT',
+            'INVALID_MULTIPART',
+            400,
+            'Invalid multipart body.',
+          );
+        }
+        const file = body.file;
+        if (!(file instanceof File) || Array.isArray(file)) {
+          throw fileError(
+            'INVALID_ARGUMENT',
+            'FILE_REQUIRED',
+            undefined,
+            'Exactly one `file` is required.',
+          );
+        }
+        if (file.size > FEEDBACK_FILE_MAX_BYTES) {
+          throw fileError(
+            'INVALID_ARGUMENT',
+            'FILE_TOO_LARGE',
+            413,
+            `A feedback attachment may be at most ${FEEDBACK_FILE_MAX_BYTES} bytes.`,
+          );
+        }
+        // 文件名里的路径与声明的扩展名都要对上；请求体里另塞的字段一概不读。
+        const filename = String(file.name).split(/[\\/]/u).pop() ?? '';
+        const dot = filename.lastIndexOf('.');
+        const ext = dot > 0 ? filename.slice(dot + 1).toLowerCase() : '';
+        const declared = String(file.type).toLowerCase();
+        if (FEEDBACK_FILE_TYPES[declared]?.includes(ext) !== true) {
+          throw fileError(
+            'INVALID_ARGUMENT',
+            'FILE_TYPE_NOT_ALLOWED',
+            415,
+            `Attachment type ${declared} with extension "${ext}" is not allowed.`,
+          );
+        }
+        const { record } = await feedbackFileRepository(actorId).uploadOne({
+          file,
+        });
+        return context.json(
+          {
+            data: {
+              id: record.id,
+              filename: record.filename,
+              mimeType: record.mimeType,
+              size: Number(record.size),
+            },
+          },
+          201,
+        );
+      },
+    );
+
+    /** 「我的反馈」下的附件：先按本人范围确认这张单，再确认文件挂在这张单上。 */
+    router.get(
+      '/quality/feedbacks/mine/:feedbackId/attachments/:fileId',
+      describeRoute({
+        tags: ['Quality'],
+        summary: 'Get one attachment of one of my feedbacks',
+        operationId: 'getMyFeedbackAttachment',
+        responses: {
+          '200': { description: 'The attachment bytes.' },
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '404': apiErrorResponse(404),
+          '500': apiErrorResponse(500),
+        },
+      }),
+      async (context) => {
+        const decision = await authorizeFqc(context, 'submit');
+        const id = String(context.req.param('feedbackId'));
+        const fileId = String(context.req.param('fileId'));
+        const policy = policyOf(decision, 'fqcMessages');
+        const feedback =
+          policy.read === false
+            ? undefined
+            : await database
+                .connection()
+                .repository('fqcMessages')
+                .withPolicy(policy)
+                .findOne({ filter: { id } });
+        if (!feedback) {
+          throw attachmentNotFound(fileId);
+        }
+        const file = (await database
+          .connection()
+          .repository('fqcFeedbackFiles')
+          .findOne({
+            filter: (filter) =>
+              filter.and([
+                filter.string('id').eq(fileId),
+                filter.string('feedbackId').eq(id),
+              ]),
+          })) as unknown as Record<string, unknown> | undefined;
+        if (!file) {
+          throw attachmentNotFound(fileId);
+        }
+        return await sendFeedbackFile(context, file);
+      },
+    );
+
+    /** 维护反馈单下的附件：先按全部范围确认这张单，再确认文件挂在这张单上。 */
+    router.get(
+      '/quality/feedbacks/:feedbackId/attachments/:fileId',
+      describeRoute({
+        tags: ['Quality'],
+        summary: 'Get one attachment of a feedback sheet',
+        operationId: 'getFeedbackAttachment',
+        responses: {
+          '200': { description: 'The attachment bytes.' },
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '404': apiErrorResponse(404),
+          '500': apiErrorResponse(500),
+        },
+      }),
+      async (context) => {
+        const decision = await authorizeFqc(context, 'maintain');
+        const id = String(context.req.param('feedbackId'));
+        const fileId = String(context.req.param('fileId'));
+        const feedback = await database
+          .connection()
+          .repository('fqcMessages')
+          .withPolicy(policyOf(decision, 'fqcMessages'))
+          .findOne({ filter: { id } });
+        if (!feedback) {
+          throw notFound(id);
+        }
+        const file = (await database
+          .connection()
+          .repository('fqcFeedbackFiles')
+          .findOne({
+            filter: (filter) =>
+              filter.and([
+                filter.string('id').eq(fileId),
+                filter.string('feedbackId').eq(id),
+              ]),
+          })) as unknown as Record<string, unknown> | undefined;
+        if (!file) {
+          throw attachmentNotFound(fileId);
+        }
+        return await sendFeedbackFile(context, file);
       },
     );
 

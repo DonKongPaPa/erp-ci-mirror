@@ -448,6 +448,55 @@ export class DatabaseDepartmentMutations {
   }
 
   /**
+   * R-011 离职用：一次调用把这个人从全部部门移出，共用一个批次号。
+   *
+   * 不循环调 `removeMember`：那是每次一个部门、每次各起一个批次号，一次离职会在
+   * R-012 的记录里散成好几批。这里一个事务里删全部成员行、一次写全部变动记录。
+   * 检测负责人时**不看部门是否停用**：停用的部门也可能留着负责人字段（改组历史），
+   * 这种人同样不能直接移出。不在任何部门时是空操作，不写记录、批次号为空。
+   */
+  public async removeFromAllDepartments(
+    userId: string,
+    actorId: string,
+    transaction?: DatabaseConnection,
+  ): Promise<{
+    readonly batchId: string | null;
+    readonly departmentIds: readonly string[];
+  }> {
+    return await this.inTransaction(transaction, async (tx) => {
+      const { departments, memberships } = await this.snapshot(tx);
+      if (departments.some((department) => department.managerId === userId)) {
+        return ruleFail('manager-cannot-be-removed');
+      }
+      const mine = memberships.filter((membership) => membership.userId === userId);
+      if (mine.length === 0) {
+        return { batchId: null, departmentIds: [] };
+      }
+      const batchId = randomUUID();
+      for (const membership of mine) {
+        await tx
+          .repository<DepartmentMembershipRecord>('departmentMembers')
+          .deleteOne({ filter: { id: membership.id } });
+      }
+      await this.appendHistory(
+        tx,
+        batchId,
+        actorId,
+        mine.map((membership) => ({
+          userId,
+          fromDepartmentId: membership.departmentId,
+          toDepartmentId: null,
+          isPrimary: false,
+        })),
+      );
+      return {
+        batchId,
+        departmentIds: mine.map((membership) => membership.departmentId).sort(),
+      };
+    });
+  }
+
+  /**
    * 设为这个用户的主部门。事务里先清旧的主部门、再设这一个；提交时撞上部分唯一
    * 索引说明另一个会话同时设了主部门 —— 让错误上抛，端点回滚并映射 409。
    * 本来就是主部门时不写变动记录。

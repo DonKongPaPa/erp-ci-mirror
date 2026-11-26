@@ -3,6 +3,8 @@ import AuthorizationResourcesProvider from './authorization-resources.js';
 import DepartmentMutationsProvider from './department-mutations.js';
 import DepartmentProvider from './departments.js';
 import DevAccountSwitcherProvider from './dev-account-switcher.js';
+import EmployeesProvider from './employee-service.js';
+import EmployeeMutationsProvider from './employees.js';
 import FeedbackReminderProvider from './feedback-reminder.js';
 import KnowledgeAccessProvider from './knowledge-access.js';
 import NotificationManagementProvider from './notification-management.js';
@@ -19,6 +21,9 @@ const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
   FeedbackReminderProvider,
   DepartmentProvider,
   DepartmentMutationsProvider,
+  // R-011：读服务、内部服务与写服务。放在用户管理服务之后由容器按需解析，顺序无关。
+  EmployeesProvider,
+  EmployeeMutationsProvider,
   AuthorizationResourcesProvider,
   NotificationManagementProvider,
   QualityScreeningProvider,

@@ -110,8 +110,8 @@ export default function QualityPage(): ReactElement {
   const [tickets, setTickets] = useState<QualityTicket[]>([]);
   const [messages, setMessages] = useState<QualityMessage[]>([]);
   const [screenings, setScreenings] = useState<QualityScreening[]>([]);
-  // R-002 的「代填效果」与确认记录：统计是只读的汇总数字；确认记录用确认端点
-  // 响应里的那一行，按初筛 id 收着（列表响应不随行带确认记录）。
+  // R-002 的「代填效果」与确认记录：统计是只读的汇总数字；列表已确认的行随行带
+  // 最近一次确认。本地这份只用来让「确认之后当场显示」不等重取，重取后以列表为准。
   const [draftStats, setDraftStats] = useState<QualityDraftingStats>();
   const [statsError, setStatsError] = useState<string>();
   const [statsReloadToken, setStatsReloadToken] = useState(0);
@@ -155,6 +155,9 @@ export default function QualityPage(): ReactElement {
         setTickets(data.tickets);
         setMessages(data.messages);
         setScreenings(data.screenings);
+        // 列表带回的确认记录是新的；本会话刚确认时暂存的那一列到此让位，
+        // 免得别人后来再确认时页面一直显示旧的那一行。
+        setReviews({});
         setError(undefined);
         setLoading(false);
       },
@@ -201,7 +204,7 @@ export default function QualityPage(): ReactElement {
 
   /** 确认成功：把响应里的确认记录按初筛 id 收好，再刷新列表。 */
   const handleReviewed = useCallback(
-    (screeningId: string, review?: QualityScreeningReview) => {
+    (screeningId: string, review?: QualityScreeningReview | null) => {
       if (review) {
         setReviews((previous) => ({ ...previous, [screeningId]: review }));
       }
@@ -586,7 +589,7 @@ export default function QualityPage(): ReactElement {
                 <ScreeningItem
                   key={item.id}
                   item={item}
-                  review={reviews[item.id]}
+                  review={reviews[item.id] ?? item.review}
                   canHandle={handleAccess.can}
                   handlePending={handleAccess.isPending}
                   handleError={Boolean(handleAccess.error)}
@@ -625,14 +628,14 @@ function ScreeningItem({
   onReviewed,
 }: {
   readonly item: QualityScreening;
-  /** 这一行最近一次确认的记录（本会话里确认过的才有）。 */
-  readonly review?: QualityScreeningReview;
+  /** 这一行最近一次确认的记录：列表随行带来的，或本会话刚确认的。 */
+  readonly review?: QualityScreeningReview | null;
   readonly canHandle: boolean;
   readonly handlePending: boolean;
   readonly handleError: boolean;
   readonly onReviewed: (
     screeningId: string,
-    review?: QualityScreeningReview,
+    review?: QualityScreeningReview | null,
   ) => void;
 }): ReactElement {
   const { t } = useTranslation();
@@ -738,7 +741,7 @@ function ScreeningItem({
       {review ? (
         <p data-testid='review-record' className='text-xs text-muted-foreground'>
           {t('quality.review.record', {
-            actor: review.actorId,
+            actor: review.actorName,
             time: formatTime(review.createdAt, locale),
             category: t(`quality.categories.${review.category}`, {
               defaultValue: review.category,

@@ -908,7 +908,8 @@ it('shows knowledge references as identifiers and similar cases only as a count 
 it('keeps the draft untouched and records who confirmed what when (R-002 9, 17)', async () => {
   const user = userEvent.setup();
   const { beforeRequest, requests } = recordRequests();
-  let userId = '';
+  let actorName = '';
+  let actorId = '';
   await renderAuthenticatedClient(<QualityPage />, {
     route: '/quality',
     locale: 'en-US',
@@ -916,7 +917,8 @@ it('keeps the draft untouched and records who confirmed what when (R-002 9, 17)'
     grants: [fqcGrant('view', 'handle')],
     beforeRequest,
     prepare: async (server, session) => {
-      userId = session.user.id;
+      actorName = session.user.name;
+      actorId = session.user.id;
       await insertScreening(server, 'needs-review', 'Draft that stays as it is', {
         degradeReason: 'model-disabled',
       });
@@ -960,7 +962,10 @@ it('keeps the draft untouched and records who confirmed what when (R-002 9, 17)'
   expect(within(rowAfter).getByText('Minor')).toBeVisible();
   // 下方追加「谁在何时确认成什么」：确认人、时间、确认成的类别与严重度。
   const record = within(rowAfter).getByTestId('review-record');
-  expect(record, '确认行要带着确认人').toHaveTextContent(userId);
+  expect(record, '确认行要带着确认人姓名').toHaveTextContent(actorName);
+  expect(record, '页面上不再把账号 id 显示给用户').not.toHaveTextContent(
+    actorId,
+  );
   expect(record).toHaveTextContent('Dimension');
   expect(record).toHaveTextContent('Minor');
   expect(record).toHaveTextContent(
@@ -968,6 +973,134 @@ it('keeps the draft untouched and records who confirmed what when (R-002 9, 17)'
     '确认行要带着时间',
   );
 });
+
+it('shows the confirmed name immediately, before the list refetch (R-002 17)', async () => {
+  const user = userEvent.setup();
+  const summary = 'Name is present as soon as it is confirmed';
+  let confirmSent = false;
+  let releaseList: () => void = () => {};
+  const listGate = new Promise<void>((resolve) => {
+    releaseList = resolve;
+  });
+  const { beforeRequest } = recordRequests();
+  const view = await renderAuthenticatedClient(<QualityPage />, {
+    route: '/quality',
+    locale: 'en-US',
+    member: true,
+    grants: [fqcGrant('view', 'handle')],
+    beforeRequest: async (request) => {
+      const path = new URL(request.url).pathname;
+      if (path.endsWith('/review') && request.method === 'POST') {
+        confirmSent = true;
+      }
+      // 确认之后的列表重取先扣住：这段时间里显示的姓名只能来自确认端点响应。
+      if (
+        confirmSent &&
+        path.endsWith('/api/quality/screenings') &&
+        request.method === 'GET'
+      ) {
+        await listGate;
+      }
+      await beforeRequest(request);
+    },
+    prepare: async (server) => {
+      await insertScreening(server, 'needs-review', summary);
+    },
+  });
+  try {
+    const confirm = await screen.findByRole('button', {
+      name: enUS.quality.screenings.review,
+    });
+    await user.click(confirm);
+    const row = await screen
+      .findByText(summary)
+      .then((text) => text.closest('li') as HTMLElement);
+    const record = await within(row).findByTestId(
+      'review-record',
+      {},
+      { timeout: 15_000 },
+    );
+    expect(record, '确认当场的姓名不是空的').toHaveTextContent('Test member');
+    expect(record, '确认当场不能出现空姓名').not.toHaveTextContent(
+      /Confirmed by\s+·/u,
+    );
+  } finally {
+    releaseList();
+    view.unmount();
+  }
+}, 60_000);
+
+it('shows the review record from the list response after remounting (R-002 17)', async () => {
+  const user = userEvent.setup();
+  const summary = 'Confirmed before the page was remounted';
+  const first = await renderAuthenticatedClient(<QualityPage />, {
+    route: '/quality',
+    locale: 'en-US',
+    member: true,
+    grants: [fqcGrant('view', 'handle')],
+    prepare: async (server) => {
+      await insertScreening(server, 'needs-review', summary);
+    },
+  });
+  const actorId = first.session.user.id;
+  try {
+    const confirm = await screen.findByRole('button', {
+      name: enUS.quality.screenings.review,
+    });
+    await user.click(confirm);
+    // 先等到第一次挂载里确认记录真的出现，再进行刷新：否则可能还没写完就卸载。
+    await waitFor(
+      () => {
+        const row = screen.getByText(summary).closest('li') as HTMLElement;
+        expect(within(row).getByTestId('review-record')).toBeVisible();
+      },
+      { timeout: 15_000 },
+    );
+  } finally {
+    first.unmount();
+  }
+
+  // 全新的一次挂载：本会话的记忆是空的，页面上的确认记录只能来自列表响应。
+  let listReview: { actorName?: string } | undefined;
+  const second = await renderAuthenticatedClient(
+    <QualityPage />,
+    {
+      route: '/quality',
+      locale: 'en-US',
+      member: true,
+      grants: [fqcGrant('view', 'handle')],
+      afterResponse: async (request, response) => {
+        if (
+          new URL(request.url).pathname.endsWith('/api/quality/screenings')
+        ) {
+          const body = (await response.clone().json()) as {
+            data?: { summary?: string; review?: { actorName?: string } }[];
+          };
+          listReview = body.data?.find((item) => item.summary === summary)
+            ?.review;
+        }
+      },
+    },
+    first.server,
+  );
+  try {
+    const row = await screen.findByText(summary).then(
+      (text) => text.closest('li') as HTMLElement,
+    );
+    const record = await within(row).findByTestId(
+      'review-record',
+      {},
+      { timeout: 15_000 },
+    );
+    expect(listReview?.actorName, '列表响应随行带确认人姓名').toBe(
+      'Test member',
+    );
+    expect(record, '刷新后仍显示那行确认记录').toHaveTextContent('Test member');
+    expect(record, '页面上不显示账号 id').not.toHaveTextContent(actorId);
+  } finally {
+    second.unmount();
+  }
+}, 60_000);
 
 it('matches the drafting outcomes card to the stats response (R-002 14, 17)', async () => {
   let statsResponse:
