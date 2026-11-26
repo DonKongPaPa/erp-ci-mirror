@@ -185,6 +185,25 @@ acquire_heavy_lock() {
 RESULTS=()
 FAILED=0
 
+# R-058 第二片：beta 档可凭上游单测线的判据跳过重复的 vitest。
+# 三个输入都由 gate.yml 在下载判据产物后注入；缺任何一个就不启用。
+# 核对规则只在 verdict.mjs 一处（readUpstreamUnit），这里只调用、不另算一遍。
+# 证据缺失或对不上时 UPSTREAM_UNIT_READY 保持 0，下面照旧全跑 —— 宁可慢，不许假绿。
+UPSTREAM_UNIT_READY=0
+if [ "$STAGE" = "beta" ] && [ -n "${GATE_BETA_UPSTREAM_UNIT:-}" ]; then
+  upstream_check="$(node "$ROOT/scripts/ci/verdict.mjs" \
+    --check-upstream \
+    --expect-commit "${GATE_EXPECTED_COMMIT:-}" \
+    --upstream-unit "$GATE_BETA_UPSTREAM_UNIT" 9>&- 2>&1)"
+  if [ $? -eq 0 ]; then
+    UPSTREAM_UNIT_READY=1
+    step upstream-unit-evidence
+    printf '上游单测证据可用，跳过单测阶段：%s\n' "$upstream_check"
+  else
+    printf '\n\033[33m[gate] 上游单测证据不可用，beta 照旧全跑：%s\033[0m\n' "$upstream_check" >&2
+  fi
+fi
+
 # 端到端里的稳定性测试要开浏览器。浏览器二进制不在依赖里，要单独装 —— `pnpm install` 不会带上它。
 # 2026-11-25 第一次在 CI 上跑稳定性测试就缺了它：每条要开浏览器的测试各报一次「Executable doesn't exist」，
 # 看不出是环境问题。所以在这里先查一次，缺了就明确失败。用法：require_e2e_browser <app-local 的路径>
@@ -297,6 +316,20 @@ write_verdict() {
   for name in "${SKIPPED_STAGES[@]+"${SKIPPED_STAGES[@]}"}"; do
     skip_args+=(--skip "$name")
   done
+  # 继承上游单测证据时把路径、产物名、期望提交交给 verdict.mjs，由它写出 provenance。
+  local -a upstream_args=()
+  if [ "$UPSTREAM_UNIT_READY" -eq 1 ]; then
+    upstream_args=(
+      --upstream-unit "$GATE_BETA_UPSTREAM_UNIT"
+      --expect-commit "${GATE_EXPECTED_COMMIT:-}"
+      --upstream-artifact "${GATE_UPSTREAM_ARTIFACT:-}"
+    )
+  fi
+  # 单测线上传的紧凑摘要：仅 CI 打开，本地不开开关时行为逐字节不变。
+  local -a summary_args=()
+  if [ "$STAGE" = "unit" ] && [ "${GATE_UNIT_SUMMARY:-0}" = "1" ]; then
+    summary_args=(--summary-out "$CI_DIR/verdict-summary.json")
+  fi
   # R-059：测试阶段结束后再读一次测试库启动时刻。只提示，不改退出码、不把红判成绿。
   # CI 上不做容器核对（TEST_DB_CHECKED=0），这条分支保持原样。
   if [ "$TEST_DB_CHECKED" -eq 1 ]; then
@@ -308,6 +341,8 @@ write_verdict() {
     --vitest-max-workers "$GATE_VITEST_WORKERS" \
     --cores "$GATE_RUNNER_CORES" \
     "${skip_args[@]+"${skip_args[@]}"}" \
+    "${upstream_args[@]+"${upstream_args[@]}"}" \
+    "${summary_args[@]+"${summary_args[@]}"}" \
     "${RESULTS[@]+"${RESULTS[@]}"}" \
     9>&-
 }
@@ -579,16 +614,22 @@ run_stage typecheck pnpm typecheck
 run_stage component-check run_component_check all
 
 # 单测：同时产出 JSON 报告，供 verdict.mjs 统计通过/失败数。
-step test
-started="$(date +%s%3N 9>&-)"
-if pnpm exec vitest run --maxWorkers="$GATE_VITEST_WORKERS" --reporter=default --reporter=json --outputFile.json="$CI_DIR/vitest.json" 9>&-; then
-  RESULTS+=("--result" "test=passed:$(( $(date +%s%3N 9>&-) - started ))")
+# R-058 第二片：证据齐全时跳过这一段 —— 它和上游单测线是同一套测试、同一个提交。
+# test 阶段的状态与 provenance 由 verdict.mjs 从上游证据写入，gate.sh 不自己算判据。
+if [ "$UPSTREAM_UNIT_READY" -eq 1 ]; then
+  skip_notice "test" "继承上游单测线判据 ${GATE_UPSTREAM_ARTIFACT:-上游产物}（verdict.mjs 写明 provenance）"
 else
-  RESULTS+=("--result" "test=failed:$(( $(date +%s%3N 9>&-) - started ))")
-  FAILED=1
-  if [ "$STAGE" = "unit" ]; then
-    write_verdict
-    exit 1
+  step test
+  started="$(date +%s%3N 9>&-)"
+  if pnpm exec vitest run --maxWorkers="$GATE_VITEST_WORKERS" --reporter=default --reporter=json --outputFile.json="$CI_DIR/vitest.json" 9>&-; then
+    RESULTS+=("--result" "test=passed:$(( $(date +%s%3N 9>&-) - started ))")
+  else
+    RESULTS+=("--result" "test=failed:$(( $(date +%s%3N 9>&-) - started ))")
+    FAILED=1
+    if [ "$STAGE" = "unit" ]; then
+      write_verdict
+      exit 1
+    fi
   fi
 fi
 

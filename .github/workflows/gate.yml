@@ -188,13 +188,20 @@ jobs:
         working-directory: app-local
         run: pnpm install --frozen-lockfile
       - name: 跑单测线闸门
+        env:
+          # 让 verdict.mjs 额外写一份紧凑摘要，和 verdict.json 一起作为判据产物上传。
+          GATE_UNIT_SUMMARY: '1'
         run: ./scripts/ci/gate.sh unit
+      # R-058 第二片：产物名带提交号，beta 只认同一次触发的那一份。
+      # verdict.json 是机器可读判据，verdict-summary.json 是只含核对所需字段的摘要。
       - name: 上传判据
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: verdict-unit-${{ github.sha }}
-          path: .ci/
+          path: |
+            .ci/verdict.json
+            .ci/verdict-summary.json
           if-no-files-found: warn
 
   beta:
@@ -251,7 +258,31 @@ jobs:
       - name: 安装端到端要用的浏览器
         working-directory: app-local
         run: pnpm exec playwright install --with-deps chromium
+      # R-058 第二片：beta 与单测线是同一个提交（needs: unit、同一 github.sha），
+      # 重跑那套 vitest 没有增量信息。下载单测线的判据，交给闸门核对后决定是否跳过单测阶段。
+      # 拿不到产物、或证据对不上（提交号/判据/失败数/档位），gate.sh 照旧全跑 —— 宁可慢，不许假绿。
+      - name: 下载单测线判据（拿不到就照旧全跑）
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: verdict-unit-${{ github.sha }}
+          path: .ci/upstream
+      - name: 准备单测证据开关
+        run: |
+          # 注入绝对路径：闸门在 cd 进 app-local 之后还会把同一个路径传给 verdict.mjs，
+          # 相对路径会在那儿按 app-local 解析而读不到（PR #210 查错 #1）。
+          # 消费的是单测线上传的紧凑摘要 —— 核对所需的字段全在里面。
+          if [ -f "$GITHUB_WORKSPACE/.ci/upstream/verdict-summary.json" ]; then
+            echo "GATE_BETA_UPSTREAM_UNIT=$GITHUB_WORKSPACE/.ci/upstream/verdict-summary.json" >> "$GITHUB_ENV"
+            echo "GATE_UPSTREAM_ARTIFACT=verdict-unit-${{ github.sha }}" >> "$GITHUB_ENV"
+            echo "拿到单测线判据摘要：交给闸门核对后再决定是否跳过单测阶段"
+          else
+            echo "未拿到单测线判据摘要：beta 照旧全跑（宁可慢，不许假绿）"
+          fi
       - name: 跑 beta 闸门（含 build）
+        env:
+          # 入口核对的基准：证据里的提交号必须等于本次触发的提交。
+          GATE_EXPECTED_COMMIT: ${{ github.sha }}
         run: ./scripts/ci/gate.sh beta
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
