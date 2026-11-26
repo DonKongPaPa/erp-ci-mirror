@@ -229,6 +229,19 @@ test('R-012 验收7/8: the department resource is registered and business roles 
     .list()
     .find((collection) => collection.name === 'departmentMemberHistory');
   expect(history?.actions).toEqual(['read', 'create']);
+  // 部门表不登记删除（设计没有删除端点，业务记录上的 departmentId 要一直指着它）：
+  // 登记的动作精确是读、建、改。少写 delete 不够 —— 漏了 create 或 update 同样是声明与设计不符。
+  const departmentsTable = authz.database.collections
+    .list()
+    .find((collection) => collection.name === 'departments');
+  expect(departmentsTable?.actions).toEqual(['read', 'create', 'update']);
+  // 业务资源只有设计里的两个动作，顺序也钉住。
+  expect(
+    authz.compositeResources
+      .list()
+      .find((resource) => resource.name === 'departments')?.actions
+      .map((action) => action.name),
+  ).toEqual(['view', 'manage']);
 
   const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
   for (const role of [

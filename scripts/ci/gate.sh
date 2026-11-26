@@ -78,22 +78,43 @@ if [ ! -d "$APP/node_modules" ]; then
   fail "app-local/node_modules 不存在，先在 app-local 下跑 pnpm install"
 fi
 
-# vitest worker 上限（R-055）：默认取「核数减 4」与 8 中较小者，至少 2。
-# 16 核机器上是 8 —— 给用户的桌面留 4 核（浏览器、IDE、13000 端口的开发服务器），
-# 8 这个绝对上限则防止核数多的机器上 worker 又失控。CI 可用 VITEST_MAX_WORKERS 覆盖。
-GATE_VITEST_WORKERS="${VITEST_MAX_WORKERS:-}"
-if [ -z "$GATE_VITEST_WORKERS" ]; then
-  cpu_count="$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc)"
-  GATE_VITEST_WORKERS=$((cpu_count - 4))
-  [ "$GATE_VITEST_WORKERS" -lt 2 ] && GATE_VITEST_WORKERS=2
-  [ "$GATE_VITEST_WORKERS" -gt 8 ] && GATE_VITEST_WORKERS=8
-else
-  case "$GATE_VITEST_WORKERS" in
-    ''|*[!0-9]*) fail "VITEST_MAX_WORKERS 必须是正整数，收到：$GATE_VITEST_WORKERS" ;;
-  esac
-  [ "$GATE_VITEST_WORKERS" -ge 1 ] || fail "VITEST_MAX_WORKERS 必须至少为 1"
-fi
-printf '\n\033[36m[gate] vitest worker 上限：%s（默认 min(核数-4, 8)，至少 2；VITEST_MAX_WORKERS 可覆盖）\033[0m\n' "$GATE_VITEST_WORKERS"
+# vitest worker 上限（R-055 / R-058）：本机留 4 核给桌面、至多 8，至少 2；
+# CI 上不留核 —— 上限直接取核数（4 核 runner 就是 4），下限仍为 2。
+# VITEST_MAX_WORKERS 仍可覆盖。生效值与核数都写进闸门输出与 verdict.json，
+# 以后看一眼判据就知道有没有被钳位。
+compute_vitest_workers() {
+  GATE_RUNNER_CORES="$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc)"
+  GATE_VITEST_WORKERS="${VITEST_MAX_WORKERS:-}"
+  gate_on_ci=0
+  if [ "${CI:-0}" = "true" ] || [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+    gate_on_ci=1
+  fi
+  if [ "$gate_on_ci" -eq 1 ]; then
+    GATE_WORKER_MODE="CI 上不留核"
+  else
+    GATE_WORKER_MODE="本机留 4 核给桌面、至多 8"
+  fi
+  if [ -z "$GATE_VITEST_WORKERS" ]; then
+    if [ "$gate_on_ci" -eq 1 ]; then
+      GATE_VITEST_WORKERS="$GATE_RUNNER_CORES"
+    else
+      # 本机留 4 核给桌面（浏览器、IDE、13000 端口的开发服务器）。
+      GATE_VITEST_WORKERS=$((GATE_RUNNER_CORES - 4))
+    fi
+    [ "$GATE_VITEST_WORKERS" -lt 2 ] && GATE_VITEST_WORKERS=2
+    if [ "$gate_on_ci" -eq 0 ]; then
+      [ "$GATE_VITEST_WORKERS" -gt 8 ] && GATE_VITEST_WORKERS=8
+    fi
+  else
+    case "$GATE_VITEST_WORKERS" in
+      ''|*[!0-9]*) fail "VITEST_MAX_WORKERS 必须是正整数，收到：$GATE_VITEST_WORKERS" ;;
+    esac
+    [ "$GATE_VITEST_WORKERS" -ge 1 ] || fail "VITEST_MAX_WORKERS 必须至少为 1"
+  fi
+}
+compute_vitest_workers
+printf '\n\033[36m[gate] vitest worker 上限：%s（runner %s 核；%s；至少 2；VITEST_MAX_WORKERS 可覆盖）\033[0m\n' \
+  "$GATE_VITEST_WORKERS" "$GATE_RUNNER_CORES" "$GATE_WORKER_MODE"
 
 run_stage() {
   local name="$1"
@@ -252,6 +273,8 @@ write_verdict() {
   node "$ROOT/scripts/ci/verdict.mjs" \
     --stage "$STAGE" \
     --out "$CI_DIR/verdict.json" \
+    --vitest-max-workers "$GATE_VITEST_WORKERS" \
+    --cores "$GATE_RUNNER_CORES" \
     "${skip_args[@]+"${skip_args[@]}"}" \
     "${RESULTS[@]+"${RESULTS[@]}"}" \
     9>&-

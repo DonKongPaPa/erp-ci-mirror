@@ -29,6 +29,11 @@ import {
 import { Button } from '#components/ui/button';
 import { cn } from 'cn';
 
+import {
+  cachedClientRouteModule,
+  primeClientRouteModule,
+} from './route-module-cache.js';
+
 export interface ClientRouteProps {
   readonly route: AppClientRegisteredRoute;
 }
@@ -53,8 +58,12 @@ export function ClientRoute({ route }: ClientRouteProps): ReactElement {
     error: accessError,
     retry: retryAccess,
   } = useCan(authz === 'skip' ? undefined : authz);
+  // 已在内存里的模块（入口包静态引入，或之前加载过）在首次 render 就注入：
+  // 否则对话框先画宿主占位，模块在 useEffect 里到达时再换页，顶边会跳。
   const [componentModule, setComponentModule] =
-    useState<AppClientRouteComponentModule>();
+    useState<AppClientRouteComponentModule | undefined>(() =>
+      componentLoader ? cachedClientRouteModule(componentLoader) : undefined,
+    );
   const [loadError, setLoadError] = useState<unknown>();
   const [attempt, setAttempt] = useState(0);
   const [renderFailed, setRenderFailed] = useState(false);
@@ -76,6 +85,16 @@ export function ClientRoute({ route }: ClientRouteProps): ReactElement {
       loadedRef.current.attempt === attempt
     )
       return;
+    // 已就绪的模块不再走异步 loader：state 初值已经取到它，这里只把 loadedRef 对齐，
+    // 让重新连接的 Effect 不会重复调用 loader。
+    const cached = componentLoader
+      ? cachedClientRouteModule(componentLoader)
+      : undefined;
+    if (cached) {
+      // state 初值已经取到同一份模块，不必在这里再 setState。
+      loadedRef.current = { loader: componentLoader, attempt };
+      return;
+    }
     loadedRef.current = undefined;
     let active = true;
 
@@ -83,6 +102,7 @@ export function ClientRoute({ route }: ClientRouteProps): ReactElement {
       (module) => {
         if (active) {
           loadedRef.current = { loader: componentLoader, attempt };
+          primeClientRouteModule(componentLoader!, module);
           setComponentModule(module);
           setLoadError(undefined);
         }

@@ -340,6 +340,26 @@ describe('R-011 详情与变动记录', () => {
   });
 });
 
+describe('R-011 详情里的兼职部门', () => {
+  it('多个兼职部门按界面语言连接，英文界面不出现顿号', async () => {
+    const departments = ['Quality', 'Assembly'];
+    answer = (call) => {
+      if (call.path === 'authorization/permissions') return { data: permissions };
+      if (call.path === 'employees' && call.method === 'GET')
+        return { data: [employeeRow({ secondaryDepartmentNames: departments })], meta: { total: 1 } };
+      if (call.path === 'employees/u-1' && call.method === 'GET')
+        return { data: employeeRow({ secondaryDepartmentNames: departments }) };
+      if (call.path === 'employees/u-1/changes') return { data: [] };
+      return new Response(null, { status: 404 });
+    };
+    await renderAt();
+    await screen.findByText('E000001');
+    const dialog = await openDetails();
+    expect(await within(dialog).findByText('Quality and Assembly')).toBeVisible();
+    expect(dialog).not.toHaveTextContent('、');
+  });
+});
+
 describe('R-011 入职与被拒', () => {
   it('入职成功发出 POST 并刷新列表', async () => {
     let post: ApiCall | undefined;

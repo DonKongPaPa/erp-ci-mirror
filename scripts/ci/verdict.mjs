@@ -31,11 +31,17 @@ const STAGE_PLANS = {
 };
 
 function parseArgs(argv) {
-  const options = { stage: 'unit', out: '.ci/verdict.json', skip: [], results: {} };
+  const options = {
+    stage: 'unit', out: '.ci/verdict.json', skip: [], results: {},
+    vitestMaxWorkers: null, cores: null,
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     if (flag === '--stage') options.stage = argv[++index];
     else if (flag === '--out') options.out = argv[++index];
+    // 闸门把生效的 worker 上限与核数传进来，判据里能看出有没有被钳位（R-058）。
+    else if (flag === '--vitest-max-workers') options.vitestMaxWorkers = Number(argv[++index]) || null;
+    else if (flag === '--cores') options.cores = Number(argv[++index]) || null;
     else if (flag === '--skip') options.skip.push(argv[++index]);
     else if (flag === '--result') {
       // --result lint=passed:1200  或  --result test=failed:8400
@@ -107,6 +113,8 @@ const verdict = {
     runId: process.env.GITHUB_RUN_ID ?? null,
     job: process.env.GITHUB_JOB ?? null,
     node: process.version,
+    vitestMaxWorkers: options.vitestMaxWorkers,
+    cores: options.cores,
   },
   stages,
   tests,

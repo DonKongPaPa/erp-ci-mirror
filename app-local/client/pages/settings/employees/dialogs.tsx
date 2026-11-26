@@ -1,5 +1,5 @@
 import { useToaster } from '@nocobase/app-client';
-import { useTranslation } from '@nocobase/i18n/client';
+import { useLocale, useTranslation } from '@nocobase/i18n/client';
 import { useEffect, useId, useState, type ReactElement } from 'react';
 
 import { Alert, AlertDescription } from '#components/ui/alert';
@@ -34,6 +34,12 @@ import { employeeMessage, rejectionReasons } from './messages.js';
 import { changeDisplayValue, employeeLabel } from './model.js';
 
 type Option = { readonly value: string; readonly label: string };
+
+/** 兼职部门按界面语言自带的写法连接（英文是逗号，中文是顿号），一个都没有时留一道横线。 */
+function listNames(names: readonly string[], locale: string): string {
+  // 没有 i18n 运行时时 `locale` 是空串，`Intl` 不收；交给它按默认语言排。
+  return names.length ? new Intl.ListFormat(locale || undefined).format(names) : '—';
+}
 
 interface DepartmentNode {
   readonly id: string;
@@ -197,7 +203,7 @@ export function HireDialog({
         </div>
         <DialogFooter>
           <Button variant='outline' onClick={onClose} disabled={busy}>
-            {t('employees.cancel')}
+            {t('actions.cancel')}
           </Button>
           <Button onClick={() => void submit()} disabled={busy || !name.trim() || !hiredOn}>
             {busy ? t('employees.saving') : t('employees.form.submit')}
@@ -254,7 +260,7 @@ export function LinkDialog({
           <ErrorNotice error={error} />
         </div>
         <DialogFooter>
-          <Button variant='outline' onClick={onClose} disabled={busy}>{t('employees.cancel')}</Button>
+          <Button variant='outline' onClick={onClose} disabled={busy}>{t('actions.cancel')}</Button>
           <Button onClick={() => void submit()} disabled={busy || !userId.trim() || !hiredOn}>
             {busy ? t('employees.saving') : t('employees.form.submit')}
           </Button>
@@ -322,7 +328,7 @@ export function TransferDialog({
           <ErrorNotice error={error} />
         </div>
         <DialogFooter>
-          <Button variant='outline' onClick={onClose} disabled={busy}>{t('employees.cancel')}</Button>
+          <Button variant='outline' onClick={onClose} disabled={busy}>{t('actions.cancel')}</Button>
           <Button onClick={() => void submit()} disabled={busy || !positionId}>
             {busy ? t('employees.saving') : t('employees.form.save')}
           </Button>
@@ -381,7 +387,7 @@ export function LeaveDialog({
           <ErrorNotice error={error} />
         </div>
         <DialogFooter>
-          <Button variant='outline' onClick={onClose} disabled={busy}>{t('employees.cancel')}</Button>
+          <Button variant='outline' onClick={onClose} disabled={busy}>{t('actions.cancel')}</Button>
           <Button variant='destructive' onClick={() => void submit()} disabled={busy || !leftOn}>
             {busy ? t('employees.saving') : t('employees.form.confirm')}
           </Button>
@@ -446,7 +452,7 @@ export function RehireDialog({
           <ErrorNotice error={error} />
         </div>
         <DialogFooter>
-          <Button variant='outline' onClick={onClose} disabled={busy}>{t('employees.cancel')}</Button>
+          <Button variant='outline' onClick={onClose} disabled={busy}>{t('actions.cancel')}</Button>
           <Button onClick={() => void submit()} disabled={busy || !hiredOn}>
             {busy ? t('employees.saving') : t('employees.form.confirm')}
           </Button>
@@ -467,6 +473,7 @@ export function DetailDialog({
   readonly onClose: () => void;
 }): ReactElement {
   const { t } = useTranslation();
+  const { locale } = useLocale();
   const [detail, setDetail] = useState<EmployeeDetail | undefined>();
   const [changes, setChanges] = useState<readonly EmployeeChange[]>([]);
   const [positionTitles, setPositionTitles] = useState<ReadonlyMap<string, string>>(() => new Map());
@@ -515,7 +522,7 @@ export function DetailDialog({
               <Detail label={t('employees.columns.name')} value={detail.name ?? '—'} />
               <Detail label={t('employees.columns.username')} value={detail.username ?? '—'} />
               <Detail label={t('employees.columns.primaryDepartment')} value={detail.primaryDepartmentName ?? '—'} />
-              <Detail label={t('employees.secondaryDepartments')} value={detail.secondaryDepartmentNames.join('、') || '—'} />
+              <Detail label={t('employees.secondaryDepartments')} value={listNames(detail.secondaryDepartmentNames, locale)} />
               <Detail label={t('employees.reportsTo')} value={detail.reportsToName ?? '—'} />
               <Detail label={t('employees.columns.position')} value={detail.positionName ?? '—'} />
               <Detail label={t('employees.columns.grade')} value={detail.gradeName ?? '—'} />

@@ -146,7 +146,7 @@ test.describe('反馈单三个页面的稳定性', () => {
       .getByRole('button', { name: /Submit feedback|提交反馈/ })
       .click();
 
-    const toast = page.getByText(/Feedback submitted|反馈已提交/);
+    const toast = page.getByText(/Feedback sheet submitted|反馈单已提交/);
     await toast.waitFor({ state: 'visible' });
     await page.waitForURL(new RegExp(`${basePath}/feedbacks$`));
     const firstRow = rows(page).first();

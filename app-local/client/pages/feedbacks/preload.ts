@@ -3,6 +3,8 @@ import type {
   AppClientRouteComponentModule,
 } from '@nocobase/app-client/plugins';
 
+import { primeClientRouteModule } from '../../routing/route-module-cache.js';
+
 import FeedbackDetailPage from './detail.js';
 import FeedbackNewPage from './new.js';
 
@@ -23,3 +25,8 @@ const detailReady: Promise<AppClientRouteComponentModule> = Promise.resolve(deta
 
 export const loadFeedbackNewModule: AppClientRouteComponentLoader = () => newReady;
 export const loadFeedbackDetailModule: AppClientRouteComponentLoader = () => detailReady;
+
+// 同步填缓存：路由表一求值，两个对话框的模块就已经按 loader 身份就绪。
+// 首次 render 的 ClientRoute 能直接取到页面，不必等 useEffect 里的 Promise。
+primeClientRouteModule(loadFeedbackNewModule, newModule);
+primeClientRouteModule(loadFeedbackDetailModule, detailModule);

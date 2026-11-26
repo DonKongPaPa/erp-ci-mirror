@@ -26,6 +26,9 @@ import {
   useFeedbackColumns,
 } from '../../client/pages/feedbacks/columns.js';
 import enUS from '../../client/locales/en-US.js';
+import zhCN from '../../client/locales/zh-CN.js';
+
+import { feedbackErrorText } from '../../client/pages/feedbacks/reasons.js';
 
 import packageMetadata from '../../package.json' with { type: 'json' };
 
@@ -410,6 +413,89 @@ describe('R-026 提交', () => {
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(enUS.feedbacks.errors.generic.replace('{{reason}}', 'SOMETHING_NEW'));
     expect(alert).toHaveTextContent('SOMETHING_NEW');
+  });
+
+  it('401 说会话已过期，不带原因码', async () => {
+    answer = (call) => {
+      if (call.path === 'authorization/permissions') return { data: permissions };
+      if (call.path === 'quality/feedbacks' && call.method === 'POST')
+        return errorResponse(401, 'AUTHENTICATION_REQUIRED');
+      return new Response(null, { status: 404 });
+    };
+    await renderAt('/feedbacks/new');
+    const dialog = await screen.findByRole('dialog', { name: enUS.feedbacks.form.titleNew });
+    await userEvent.type(within(dialog).getByRole('textbox', { name: enUS.feedbacks.form.content }), '尺寸超差');
+    await userEvent.click(within(dialog).getByRole('button', { name: enUS.feedbacks.form.submit }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(enUS.feedbacks.errors.session);
+    expect(alert).not.toHaveTextContent('AUTHENTICATION_REQUIRED');
+    expect(alert).not.toHaveTextContent('401');
+  });
+
+  it('400 校验没过时说请检查填写的内容，并带上服务端给的具体原因', async () => {
+    const detail = 'String must contain at most 8000 character(s)';
+    answer = (call) => {
+      if (call.path === 'authorization/permissions') return { data: permissions };
+      if (call.path === 'quality/feedbacks' && call.method === 'POST')
+        return Response.json(
+          {
+            error: {
+              message: 'The request contains invalid fields.',
+              reason: 'INVALID_INPUT',
+              domain: 'app',
+              fieldViolations: [{ field: 'content', description: detail }],
+            },
+          },
+          { status: 400 },
+        );
+      return new Response(null, { status: 404 });
+    };
+    await renderAt('/feedbacks/new');
+    const dialog = await screen.findByRole('dialog', { name: enUS.feedbacks.form.titleNew });
+    await userEvent.type(within(dialog).getByRole('textbox', { name: enUS.feedbacks.form.content }), '尺寸超差');
+    await userEvent.click(within(dialog).getByRole('button', { name: enUS.feedbacks.form.submit }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(
+      enUS.feedbacks.errors.invalidInputWith.replace('{{detail}}', detail),
+    );
+    expect(alert).not.toHaveTextContent('INVALID_INPUT');
+  });
+
+  it('400 校验没过且服务端没给具体原因时，只说请检查填写的内容', async () => {
+    answer = (call) => {
+      if (call.path === 'authorization/permissions') return { data: permissions };
+      if (call.path === 'quality/feedbacks' && call.method === 'POST')
+        return errorResponse(400, 'INVALID_INPUT');
+      return new Response(null, { status: 404 });
+    };
+    await renderAt('/feedbacks/new');
+    const dialog = await screen.findByRole('dialog', { name: enUS.feedbacks.form.titleNew });
+    await userEvent.type(within(dialog).getByRole('textbox', { name: enUS.feedbacks.form.content }), '尺寸超差');
+    await userEvent.click(within(dialog).getByRole('button', { name: enUS.feedbacks.form.submit }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(enUS.feedbacks.errors.invalidInput);
+    expect(alert).not.toHaveTextContent('INVALID_INPUT');
+    expect(alert).not.toHaveTextContent('(');
+  });
+
+  it('PRINCIPAL_REQUIRED 有自己的一句话，不带原因码', async () => {
+    answer = (call) => {
+      if (call.path === 'authorization/permissions') return { data: permissions };
+      if (call.path === 'quality/feedbacks' && call.method === 'POST')
+        return errorResponse(403, 'PRINCIPAL_REQUIRED');
+      return new Response(null, { status: 404 });
+    };
+    await renderAt('/feedbacks/new');
+    const dialog = await screen.findByRole('dialog', { name: enUS.feedbacks.form.titleNew });
+    await userEvent.type(within(dialog).getByRole('textbox', { name: enUS.feedbacks.form.content }), '尺寸超差');
+    await userEvent.click(within(dialog).getByRole('button', { name: enUS.feedbacks.form.submit }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(enUS.feedbacks.errors.principalRequired);
+    expect(alert).not.toHaveTextContent('PRINCIPAL_REQUIRED');
   });
 });
 
@@ -915,6 +1001,50 @@ describe('R-026 对话框路由的页面模块在打开前就绪', () => {
     );
     expect((await detailLoader()).default, 'loader 给出的是真正的详情页').toBe(
       FeedbackDetailPage,
+    );
+  });
+});
+
+describe('R-026 反馈单的说法', () => {
+  it('两种语言里页面名、计数与提交成功都叫反馈单（feedback sheet）', () => {
+    expect(zhCN.feedbacks.mine.title).toBe('我的反馈单');
+    expect(zhCN.feedbacks.all.title).toBe('全部反馈单');
+    expect(zhCN.feedbacks.form.created).toBe('反馈单已提交');
+    expect(zhCN.feedbacks.total).toBe('共 {{count}} 张反馈单');
+    expect(enUS.feedbacks.mine.title).toBe('My feedback sheets');
+    expect(enUS.feedbacks.all.title).toBe('All feedback sheets');
+    expect(enUS.feedbacks.form.created).toBe('Feedback sheet submitted');
+    expect(enUS.feedbacks.total).toBe('{{count}} feedback sheets');
+  });
+});
+
+describe('R-026 失败提示按状态码给话', () => {
+  /** 把词条按 en-US 念出来，插值照 t 的做法替换。 */
+  function translate(key: string, values?: Record<string, unknown>): string {
+    const text = key.split('.').reduce<unknown>(
+      (node, part) => (node as Record<string, unknown>)[part],
+      enUS,
+    ) as string;
+    return Object.entries(values ?? {}).reduce(
+      (line, [name, value]) => line.replaceAll(`{{${name}}}`, String(value)),
+      text,
+    );
+  }
+
+  it('不是接口返回的错误（例如网络断开）说网络连接不上，不带英文原话', () => {
+    const text = feedbackErrorText(new TypeError('Failed to fetch'), translate);
+    expect(text).toBe(enUS.feedbacks.errors.network);
+    expect(text).not.toContain('Failed to fetch');
+  });
+
+  it('其余没认出的失败仍保留原因码，用户能据此报错', () => {
+    const error = new ApiClientError('Something broke on the server.', {
+      status: 500,
+      payload: { error: { message: 'Something broke on the server.', reason: 'INTERNAL' } },
+      reason: 'INTERNAL',
+    });
+    expect(feedbackErrorText(error, translate)).toBe(
+      enUS.feedbacks.errors.generic.replace('{{reason}}', 'INTERNAL'),
     );
   });
 });

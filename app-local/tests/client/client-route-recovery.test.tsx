@@ -7,6 +7,16 @@ import { Activity, useState } from 'react';
 import { describe, expect, it } from 'vitest';
 
 import { ClientRoute } from '../../client/routing/client-route.tsx';
+import {
+  cachedClientRouteModule,
+  primeClientRouteModule,
+} from '../../client/routing/route-module-cache.ts';
+import FeedbackDetailPage from '../../client/pages/feedbacks/detail.js';
+import FeedbackNewPage from '../../client/pages/feedbacks/new.js';
+import {
+  loadFeedbackDetailModule,
+  loadFeedbackNewModule,
+} from '../../client/pages/feedbacks/preload.js';
 
 import { renderWithApp } from '@nocobase/app-testing/client';
 import { apiClientToken } from '@nocobase/app-client';
@@ -188,5 +198,78 @@ describe('client route loading recovery', () => {
     });
     expect(screen.getByText('Recovered page')).toBeVisible();
     expect(screen.queryByText('Unable to load page')).not.toBeInTheDocument();
+  });
+});
+
+/** 首帧是否出页面，取决于模块能否在 state 初值里拿到 —— 与 loader 何时 resolve 无关。 */
+describe('client route first render from a ready module', () => {
+  it('预填缓存的 loader 第一次渲染就是页面，没有占位文案', async () => {
+    const loader = () =>
+      new Promise<AppClientRouteComponentModule>(() => undefined);
+    primeClientRouteModule(loader, {
+      default: () => <h2>Primed page</h2>,
+    });
+
+    await renderWithApp(
+      <ClientRoute route={{ ...route, componentLoader: loader }} />,
+      options,
+    );
+
+    expect(screen.getByText('Primed page'), '首帧就是页面').toBeVisible();
+    expect(
+      screen.queryByText('Loading page'),
+      '没有占位文案',
+    ).not.toBeInTheDocument();
+  });
+
+  it('未预填的 loader 先占位，模块到达后才渲染页面', async () => {
+    const pending = Promise.withResolvers<AppClientRouteComponentModule>();
+    const loader = () => pending.promise;
+
+    await renderWithApp(
+      <ClientRoute route={{ ...route, componentLoader: loader }} />,
+      options,
+    );
+
+    expect(screen.getByText('Loading page'), '模块未到时先占位').toBeVisible();
+    expect(screen.queryByText('Later page')).not.toBeInTheDocument();
+
+    await act(async () =>
+      pending.resolve({ default: () => <h2>Later page</h2> }),
+    );
+    expect(
+      await screen.findByText('Later page', {}, ROUTE_LOAD_TIMEOUT),
+    ).toBeVisible();
+    expect(screen.queryByText('Loading page')).not.toBeInTheDocument();
+  });
+
+  it('原路径加载成功后写缓存，再挂载时首帧就是页面且不重复调用 loader', async () => {
+    let loads = 0;
+    const page = { default: () => <h2>Cached after load</h2> };
+    const loader = async () => {
+      loads += 1;
+      return page;
+    };
+    const definition = { ...route, componentLoader: loader };
+
+    const first = await renderWithApp(<ClientRoute route={definition} />, options);
+    expect(
+      await screen.findByText('Cached after load', {}, ROUTE_LOAD_TIMEOUT),
+    ).toBeVisible();
+    first.unmount();
+
+    await renderWithApp(<ClientRoute route={definition} />, options);
+    expect(screen.getByText('Cached after load'), '第二挂载首帧就是页面').toBeVisible();
+    expect(screen.queryByText('Loading page')).not.toBeInTheDocument();
+    expect(loads, '缓存命中不再调用 loader').toBe(1);
+  });
+
+  it('反馈单两个 loader 在模块求值时就把真页面同步填进缓存', () => {
+    expect(cachedClientRouteModule(loadFeedbackNewModule)?.default).toBe(
+      FeedbackNewPage,
+    );
+    expect(cachedClientRouteModule(loadFeedbackDetailModule)?.default).toBe(
+      FeedbackDetailPage,
+    );
   });
 });

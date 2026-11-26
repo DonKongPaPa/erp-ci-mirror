@@ -41,10 +41,12 @@ describe('R-012 验收18：第二条迁移的字段类型、长度与默认值',
         'title',
         'updatedAt',
       ]);
-      // enum 列在 SQLite 上报长度 255，Postgres 侧形态等 CI 核对：只钉类型与可空性。
+      // enum 是定长 255 的字符串列，不是原生枚举类型：类型、可空性与长度一起钉，
+      // 标签清单在下面的 Collection 元数据里。
       await expectCollection('departments').toHaveField('kind', {
         type: 'enum',
         nullable: false,
+        length: 255,
       });
       await expectCollection('departments').toHaveField('code', {
         type: 'string',
@@ -99,7 +101,14 @@ describe('R-012 验收18：第二条迁移的字段类型、长度与默认值',
       expect(column('kind')?.default?.value, 'kind 的默认值应当是 department').toBe(
         'department',
       );
+      // enum 在 Postgres 上不是原生枚举类型，是定长的字符串列：钉住物理长度。
+      expect(column('kind')?.length, 'kind 的物理长度应当是 255').toBe(255);
       expect(column('code')?.default?.value, 'code 的默认值应当是空串').toBe('');
+      // 标签清单只在 Collection 元数据里（物理列是不带枚举的字符串列）：顺序也钉住。
+      const definition = await connection.collections.get('departments');
+      expect(
+        definition?.fields.find((field) => field.name === 'kind')?.values,
+      ).toEqual(['company', 'center', 'department', 'team']);
       expect(column('successor_id')?.nullable).toBe(true);
       expect(column('succeeded_at')?.nullable).toBe(true);
 
