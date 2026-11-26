@@ -396,6 +396,7 @@ const zhCN: AppResource = {
       offboardRejected: '离职前检查拦住了这次办理，请处理下面各项后重试。',
       noConflict: '工号分配出现冲突，请重试。',
       noExhausted: '工号已用到 E999999，无法继续发号。',
+      syntheticEmailReserved: '这个邮箱是留给没有邮箱的员工自动生成的地址，请换一个。',
     },
   },
   departments: {

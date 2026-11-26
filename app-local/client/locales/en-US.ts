@@ -415,6 +415,7 @@ const enUS = {
       offboardRejected: 'A pre-departure check stopped this departure. Resolve the items below and try again.',
       noConflict: 'Employee numbers were contested; retry the request.',
       noExhausted: 'All employee numbers up to E999999 are used; no more can be issued.',
+      syntheticEmailReserved: 'That address is reserved for employees without an email; choose another one.',
     },
   },
   // R-012: the department maintenance page. Rejections say what to do next, not just what failed.

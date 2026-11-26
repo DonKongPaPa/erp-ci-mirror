@@ -95,6 +95,7 @@ const RULE_STATUS: Readonly<
   'account-protected': { status: 'PERMISSION_DENIED' },
   'employee-no-conflict': { status: 'ABORTED' },
   'employee-no-exhausted': { status: 'ABORTED' },
+  'synthetic-email-reserved': { status: 'INVALID_ARGUMENT' },
 };
 
 const unprocessableResponse = {
@@ -413,12 +414,18 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
           '200': listResponse(EmployeeChangeSchema),
           '401': apiErrorResponse(401),
           '403': apiErrorResponse(403),
+          '404': apiErrorResponse(404),
           '500': apiErrorResponse(500),
         },
       }),
       async (context) => {
         await authorizeEmployees(context, 'view');
-        const changes = await reader.changes(context.req.param('userId'));
+        const userId = context.req.param('userId');
+        // 与详情端点同一个标识、同一个 404：没有档案就不回一个空的变动列表。
+        if ((await reader.getByUserId(userId)) === undefined) {
+          throw missingProfile();
+        }
+        const changes = await reader.changes(userId);
         return context.json({ data: changes });
       },
     );

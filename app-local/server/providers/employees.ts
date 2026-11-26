@@ -35,10 +35,31 @@ import {
  * 工号发号在事务开头取固定键咨询锁，读最大号加一；唯一约束再兜一层，撞上就整批重试
  * （线程内并发由咨询锁排队，SQLite 单写者靠唯一约束与重试）。账号只走用户管理服务的
  * `withConnection`：建、停、启与档案写在同一个事务里，回滚时账号行与会话行都不留。
+ * 调岗、离职、复聘与字典停用共用一把固定键咨询锁，先取锁再校验，跨行不变量才有意义。
  */
 
 /** 工号发号的咨询锁键，与部门结构锁分开。 */
 const NUMBER_LOCK_KEY = 'hs-erp:employees:numbers';
+
+/**
+ * 员工结构变更的咨询锁键。为什么不按员工/字典 id 分键：不变量 3、4、6 都是跨行的 —— 两个
+ * 事务各锁一方（A→B 与 B→A、离职者与新下属、岗位字典与用它的人），按单一实体 id 分键
+ * 两边拿到的是不同的锁，校验仍会同时读到提交前快照。这里照部门结构锁与工号发号的先例，
+ * 所有结构变更共用一把固定键的 `pg_advisory_xact_lock`，让校验与写入串行；事务结束自动释放。
+ */
+const STRUCTURE_LOCK_KEY = 'hs-erp:employees:structure';
+
+/** 业务的「今天」按 Asia/Shanghai 取：UTC 的日期在 UTC+8 的 00:00–08:00 会落在前一天。 */
+function businessToday(now: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const part = (type: string): string => parts.find((item) => item.type === type)?.value ?? '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
 
 export type EmployeeRuleCode =
   | 'target-user-not-found'
@@ -65,7 +86,8 @@ export type EmployeeRuleCode =
   | 'offboard-rejected'
   | 'account-protected'
   | 'employee-no-conflict'
-  | 'employee-no-exhausted';
+  | 'employee-no-exhausted'
+  | 'synthetic-email-reserved';
 
 export class EmployeeRuleError extends Error {
   public constructor(
@@ -164,7 +186,12 @@ export class DatabaseEmployeeMutations {
   /** 入职：号、账号、档案、入部门、hired 记录在同一个事务里。 */
   public async hire(input: HireInput, actorId: string): Promise<EmployeeRecord> {
     return await this.withNumberRetry(async (tx) => {
+      await this.lockStructure(tx);
       await this.assertAssignment(input, tx);
+      // 合成地址的域不能被显式邮箱占住，否则下一次不带邮箱的入职会永远撞同一个地址。
+      if (input.email !== undefined && /^E\d{6}@staff\.invalid$/i.test(input.email)) {
+        return fail('synthetic-email-reserved');
+      }
       const employeeNo = await this.nextEmployeeNo(tx);
       // 没有邮箱用保留域名，没有口令用一段丢掉的随机串：在管理员重置前谁也登不进来。
       const email = input.email ?? `${employeeNo}@staff.invalid`;
@@ -205,6 +232,7 @@ export class DatabaseEmployeeMutations {
   /** 补档：账号必须已经存在；不新建账号，也不给服务账号建档。 */
   public async link(input: LinkInput, actorId: string): Promise<EmployeeRecord> {
     return await this.withNumberRetry(async (tx) => {
+      await this.lockStructure(tx);
       await this.requirePerson(input.userId);
       const existing = await this.profile(tx, input.userId);
       if (existing !== undefined) {
@@ -237,6 +265,7 @@ export class DatabaseEmployeeMutations {
     actorId: string,
   ): Promise<EmployeeRecord> {
     return await this.database.transaction(async (tx) => {
+      await this.lockStructure(tx);
       const current = await this.requireActiveProfile(tx, userId);
       const fields = (['positionId', 'gradeId', 'reportsToUserId'] as const).filter(
         (key) => key in input,
@@ -270,7 +299,7 @@ export class DatabaseEmployeeMutations {
           kind: key === 'positionId' ? 'position' : key === 'gradeId' ? 'grade' : 'reportsTo',
           fromValue: before,
           toValue: after,
-          occurredOn: new Date().toISOString().slice(0, 10),
+          occurredOn: businessToday(),
           note: null,
           actorId,
         });
@@ -292,6 +321,7 @@ export class DatabaseEmployeeMutations {
     actorId: string,
   ): Promise<EmployeeRecord> {
     return await this.database.transaction(async (tx) => {
+      await this.lockStructure(tx);
       const current = await this.requireActiveProfile(tx, userId);
       if (userId === actorId) {
         return fail('self-leave');
@@ -344,6 +374,7 @@ export class DatabaseEmployeeMutations {
     actorId: string,
   ): Promise<EmployeeRecord> {
     return await this.database.transaction(async (tx) => {
+      await this.lockStructure(tx);
       const current = await this.profile(tx, userId);
       if (current === undefined) {
         return fail('profile-not-found');
@@ -448,6 +479,7 @@ export class DatabaseEmployeeMutations {
 
   public async updatePosition(id: string, input: DictionaryUpdateInput): Promise<PositionRecord> {
     return await this.database.transaction(async (tx) => {
+      await this.lockStructure(tx);
       const row = await tx.repository<PositionRecord>('positions').findOne({ filter: { id } });
       if (row === undefined) {
         return fail('dictionary-not-found');
@@ -498,6 +530,7 @@ export class DatabaseEmployeeMutations {
 
   public async updateGrade(id: string, input: DictionaryUpdateInput): Promise<JobGradeRecord> {
     return await this.database.transaction(async (tx) => {
+      await this.lockStructure(tx);
       const row = await tx.repository<JobGradeRecord>('jobGrades').findOne({ filter: { id } });
       if (row === undefined) {
         return fail('dictionary-not-found');
@@ -570,6 +603,15 @@ export class DatabaseEmployeeMutations {
     }
     const knex = await tx.client<Knex>();
     await knex.raw('SELECT pg_advisory_xact_lock(hashtext(?))', [NUMBER_LOCK_KEY]);
+  }
+
+  /** 结构变更串行化：取锁在事务开头、任何校验读之前，第二个事务要等第一个提交后重新校。 */
+  private async lockStructure(tx: DatabaseConnection): Promise<void> {
+    if (tx.dialect !== 'postgres') {
+      return;
+    }
+    const knex = await tx.client<Knex>();
+    await knex.raw('SELECT pg_advisory_xact_lock(hashtext(?))', [STRUCTURE_LOCK_KEY]);
   }
 
   private async profile(
