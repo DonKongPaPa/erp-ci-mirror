@@ -24,13 +24,20 @@ import {
   type AppScope,
 } from '@nocobase/app-server/runtime';
 import type { TestApp } from '@nocobase/app-testing/server';
-import type { DatabaseConnection } from '@nocobase/db';
+import type {
+  DatabaseConnection,
+  RepositoryOperations,
+  RepositoryRecord,
+} from '@nocobase/db';
 import { expect, vi } from 'vitest';
 
 import { createAppTest, createTestApp } from '../helpers/test-app.js';
 import { createApp } from '../../server/app.js';
 import {
+  DRAFT_TIMEOUT_MS,
   qualityDraftingToken,
+  type DraftResult,
+  type DraftSimilarCaseSources,
   type QualityDraftingService,
 } from '../../server/providers/quality-drafting.js';
 import {
@@ -551,6 +558,55 @@ test(
       expect(JSON.stringify(warn.mock.calls)).not.toContain('尺寸超差');
     } finally {
       warn.mockRestore();
+    }
+  },
+);
+
+test(
+  'R-002 4: 十五秒预算盖住取上下文——慢仓储卡过预算时按 timeout 回落，网关没被调用',
+  { timeout: 40_000 },
+  async ({ app }) => {
+    const drafting: QualityDraftingService = app.container.resolve(
+      qualityDraftingToken,
+    );
+    resetFake();
+    // 把「取上下文」做成可控的慢函数：假仓储的 findMany 卡在 gate 上，
+    // 只有测试放开才完成。先推进假时钟到预算到点，看实现有没有先回落。
+    const gate = Promise.withResolvers<unknown[]>();
+    const slowRepo = {
+      findMany: () => gate.promise,
+    } as unknown as RepositoryOperations<RepositoryRecord>;
+    const cases: DraftSimilarCaseSources = {
+      screenings: slowRepo,
+      messages: slowRepo,
+      reviews: slowRepo,
+    };
+    vi.useFakeTimers();
+    let settled: DraftResult | undefined;
+    const tracked = drafting
+      .draft({ text: '尺寸超差 装配不上' }, { cases })
+      .then((result) => {
+        settled = result;
+        return result;
+      });
+    try {
+      // 推进到预算到点：正确的实现在这里 abort 并按 timeout 回落，上下文还卡着。
+      await vi.advanceTimersByTimeAsync(DRAFT_TIMEOUT_MS);
+      expect(settled, '预算到点就该回落，不用等取上下文').toBeDefined();
+      expect(settled).toMatchObject({
+        engine: 'rules',
+        degraded: true,
+        degradeReason: 'timeout',
+      });
+      expect(
+        fakeGateway.calls,
+        '取上下文超预算时网关不该被调用',
+      ).toHaveLength(0);
+    } finally {
+      gate.resolve([]);
+      vi.useRealTimers();
+      // 被放弃的那一支之后 settle，吞掉它的结果，不留未处理的拒绝。
+      await tracked.catch(() => undefined);
     }
   },
 );

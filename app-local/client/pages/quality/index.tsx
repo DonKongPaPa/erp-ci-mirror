@@ -37,8 +37,10 @@ import { Textarea } from '#components/ui/textarea';
 
 import {
   QualityClient,
+  type QualityDraftingStats,
   type QualityMessage,
   type QualityScreening,
+  type QualityScreeningReview,
   type QualityTicket,
 } from './client.js';
 
@@ -75,6 +77,16 @@ function formatTime(value: string, locale: string): string {
   }).format(date);
 }
 
+/**
+ * 客户端解析不出知识文档的标题，显示引用里能拿到的标识（`kb:` 后面的部分）；
+ * 解析不出（引用不带前缀或前缀后为空）就原样显示。
+ */
+function knowledgeRefLabel(ref: string): string {
+  return ref.startsWith('kb:') && ref.length > 'kb:'.length
+    ? ref.slice('kb:'.length)
+    : ref;
+}
+
 const FQC_RESOURCE = { type: 'composite', id: 'fqc' } as const;
 
 /** 质量工单看板：左侧统计与投递，右侧工单列表与初筛明细。 */
@@ -98,6 +110,14 @@ export default function QualityPage(): ReactElement {
   const [tickets, setTickets] = useState<QualityTicket[]>([]);
   const [messages, setMessages] = useState<QualityMessage[]>([]);
   const [screenings, setScreenings] = useState<QualityScreening[]>([]);
+  // R-002 的「代填效果」与确认记录：统计是只读的汇总数字；确认记录用确认端点
+  // 响应里的那一行，按初筛 id 收着（列表响应不随行带确认记录）。
+  const [draftStats, setDraftStats] = useState<QualityDraftingStats>();
+  const [statsError, setStatsError] = useState<string>();
+  const [statsReloadToken, setStatsReloadToken] = useState(0);
+  const [reviews, setReviews] = useState<Record<string, QualityScreeningReview>>(
+    {},
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const [draft, setDraft] = useState('');
@@ -115,6 +135,16 @@ export default function QualityPage(): ReactElement {
       messages: messageResult.items,
       screenings: screeningResult.items,
     };
+  }, [client]);
+
+  const fetchStats = useCallback(async () => {
+    const to = new Date();
+    // 端点允许的最大跨度是 365 天：页面固定取最近一年，存量数据也进得了对照。
+    const from = new Date(to.getTime() - 365 * 24 * 60 * 60 * 1000);
+    return client.draftingStats({
+      from: from.toISOString(),
+      to: to.toISOString(),
+    });
   }, [client]);
 
   useEffect(() => {
@@ -139,10 +169,46 @@ export default function QualityPage(): ReactElement {
     };
   }, [fetchAll, reloadToken]);
 
+  useEffect(() => {
+    let active = true;
+    fetchStats().then(
+      (next) => {
+        if (!active) return;
+        setDraftStats(next);
+        setStatsError(undefined);
+      },
+      (next: unknown) => {
+        if (!active) return;
+        // 有上一轮的数字就继续显示它们，但失败要亮在卡片上（stale 提示），
+        // 不能让旧数字悄悄装成当前值；一个数字都没有才显示整卡的读取失败。
+        setStatsError(next instanceof Error ? next.message : String(next));
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [fetchStats, reloadToken, statsReloadToken]);
+
   const refresh = useCallback(() => {
     setLoading(true);
     setReloadToken((value) => value + 1);
   }, []);
+
+  /** 只重取统计：卡片上「重试」的入口，不牵动整页的刷新。 */
+  const retryStats = useCallback(() => {
+    setStatsReloadToken((value) => value + 1);
+  }, []);
+
+  /** 确认成功：把响应里的确认记录按初筛 id 收好，再刷新列表。 */
+  const handleReviewed = useCallback(
+    (screeningId: string, review?: QualityScreeningReview) => {
+      if (review) {
+        setReviews((previous) => ({ ...previous, [screeningId]: review }));
+      }
+      refresh();
+    },
+    [refresh],
+  );
 
   const submit = async () => {
     const content = draft.trim();
@@ -258,7 +324,10 @@ export default function QualityPage(): ReactElement {
 
       <div className='grid gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]'>
         <div className='flex flex-col gap-4'>
-          {/* 四个业务角色都不持有「投递」，业务用户默认看不到这个表单。 */}
+          {/* 四个业务角色都不持有「投递」，业务用户默认看不到这个表单。权限没回来
+              之前不占位：给大多数人（无投递）先占一块再塌掉，会把「部门分流」
+              「代填效果」顶得上下跳（界面点验 2026-11-26，首屏上移 302px）。持有
+              「投递」的人在权限回来时看到表单插入到这一格。 */}
           {intakeAccess.can ? (
             <Card data-testid='intake-form' className='min-h-80'>
               <CardHeader>
@@ -326,9 +395,7 @@ export default function QualityPage(): ReactElement {
                 </Button>
               </CardContent>
             </Card>
-          ) : intakeAccess.isPending ? (
-            <IntakeFormPlaceholder />
-          ) : intakeAccess.error ? (
+          ) : intakeAccess.isPending ? null : intakeAccess.error ? (
             <Alert variant='destructive' data-testid='intake-permission-error'>
               <AlertTriangle className='size-4' />
               <AlertDescription>
@@ -363,6 +430,12 @@ export default function QualityPage(): ReactElement {
               )}
             </CardContent>
           </Card>
+
+          <DraftingOutcomesCard
+            stats={draftStats}
+            error={statsError}
+            onRetry={retryStats}
+          />
         </div>
 
         <Card>
@@ -513,10 +586,11 @@ export default function QualityPage(): ReactElement {
                 <ScreeningItem
                   key={item.id}
                   item={item}
+                  review={reviews[item.id]}
                   canHandle={handleAccess.can}
                   handlePending={handleAccess.isPending}
                   handleError={Boolean(handleAccess.error)}
-                  onReviewed={refresh}
+                  onReviewed={handleReviewed}
                 />
               ))}
               {screenings.length === 0 ? (
@@ -537,21 +611,32 @@ export default function QualityPage(): ReactElement {
  * 与「调用的人有处理权限」（页面的 useCan）都为真；只做「确认」，不做改判。
  *
  * 每行一份提交状态：scope 带初筛 id，幂等键由 useSubmission 管。
+ * 出处（R-002）：这一行是「规则」还是「模型」出的，没跑模型或回落过的带着原因；
+ * `knowledgeRefs` 里 `kb:` 的知识引用显示标识、`case:` 的相似案例只显示条数，
+ * 不把案例的初筛标识渲染成能点开的链接（范围外的读者点了是 404）。
+ * 确认之后草稿的这些值原样不动，下方追加「谁在何时确认成什么」。
  */
 function ScreeningItem({
   item,
+  review,
   canHandle,
   handlePending,
   handleError,
   onReviewed,
 }: {
   readonly item: QualityScreening;
+  /** 这一行最近一次确认的记录（本会话里确认过的才有）。 */
+  readonly review?: QualityScreeningReview;
   readonly canHandle: boolean;
   readonly handlePending: boolean;
   readonly handleError: boolean;
-  readonly onReviewed: () => void;
+  readonly onReviewed: (
+    screeningId: string,
+    review?: QualityScreeningReview,
+  ) => void;
 }): ReactElement {
   const { t } = useTranslation();
+  const { locale } = useLocale();
   const api = useApiClient();
   const toaster = useToaster();
   const { session } = useAuthentication();
@@ -560,7 +645,19 @@ function ScreeningItem({
     scope: `${session?.user.id}:quality:review:${item.id}`,
   });
 
-  const review = async () => {
+  const knowledgeRefs = (item.knowledgeRefs ?? []).filter((ref) =>
+    ref.startsWith('kb:'),
+  );
+  const similarCaseCount = (item.knowledgeRefs ?? []).filter((ref) =>
+    ref.startsWith('case:'),
+  ).length;
+  const degradeLabel = item.degradeReason
+    ? t(`quality.screenings.degrade.${item.degradeReason}`, {
+        defaultValue: item.degradeReason,
+      })
+    : null;
+
+  const confirm = async () => {
     if (submission.submitting) return;
     try {
       const updated = await submission.run({ screeningId: item.id }, () =>
@@ -568,7 +665,7 @@ function ScreeningItem({
       );
       if (!updated) return;
       toaster.show({ type: 'success', title: t('quality.review.saved') });
-      onReviewed();
+      onReviewed(item.id, updated.review);
     } catch (next) {
       toaster.show({
         type: 'error',
@@ -600,6 +697,21 @@ function ScreeningItem({
             defaultValue: item.outcome,
           })}
         </StatusBadge>
+        <StatusBadge
+          tone={item.engine === 'model' ? 'info' : 'neutral'}
+          size='sm'
+        >
+          {item.engine === 'model'
+            ? t('quality.screenings.engines.model')
+            : t('quality.screenings.engines.rules')}
+        </StatusBadge>
+        {degradeLabel ? (
+          <StatusBadge tone={item.degraded ? 'warning' : 'neutral'} size='sm'>
+            {item.degraded
+              ? t('quality.screenings.degraded', { reason: degradeLabel })
+              : degradeLabel}
+          </StatusBadge>
+        ) : null}
         <span className='ml-auto text-xs tabular-nums text-muted-foreground'>
           {t('quality.screenings.confidence', {
             value: Number(item.confidence ?? 0).toFixed(2),
@@ -607,6 +719,36 @@ function ScreeningItem({
         </span>
       </div>
       <p className='text-xs text-muted-foreground'>{item.summary}</p>
+      {knowledgeRefs.length > 0 || similarCaseCount > 0 ? (
+        <div className='flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground'>
+          {knowledgeRefs.length > 0 ? (
+            <p>
+              {t('quality.screenings.knowledge', {
+                refs: knowledgeRefs.map(knowledgeRefLabel).join(' · '),
+              })}
+            </p>
+          ) : null}
+          {similarCaseCount > 0 ? (
+            <p>
+              {t('quality.screenings.similarCases', { count: similarCaseCount })}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {review ? (
+        <p data-testid='review-record' className='text-xs text-muted-foreground'>
+          {t('quality.review.record', {
+            actor: review.actorId,
+            time: formatTime(review.createdAt, locale),
+            category: t(`quality.categories.${review.category}`, {
+              defaultValue: review.category,
+            }),
+            severity: t(`quality.severities.${review.severity}`, {
+              defaultValue: review.severity,
+            }),
+          })}
+        </p>
+      ) : null}
       <div className='flex flex-wrap items-center gap-2'>
         <p className='text-xs text-muted-foreground'>
           {t('quality.screenings.ownerAndModel', {
@@ -624,7 +766,7 @@ function ScreeningItem({
             variant='outline'
             size='sm'
             className='ml-auto'
-            onClick={() => void review()}
+            onClick={() => void confirm()}
             disabled={submission.submitting}
           >
             {submission.submitting ? (
@@ -644,33 +786,6 @@ function ScreeningItem({
         ) : null}
       </div>
     </li>
-  );
-}
-
-/**
- * 权限读回来之前顶住投递表单的位置与高度。
- *
- * 与真实表单用同一个 `min-h-80` 下限，并照表单的段落铺骨架；权限回来、表单换上
- * 时下面的卡片不会被顶下去。权限被拒时不渲染任何东西（业务用户看不到表单）。
- */
-function IntakeFormPlaceholder(): ReactElement {
-  return (
-    <Card
-      data-testid='intake-placeholder'
-      aria-busy='true'
-      className='min-h-80'
-    >
-      <CardHeader>
-        <Skeleton className='h-5 w-32' />
-        <Skeleton className='h-4 w-full' />
-        <Skeleton className='h-4 w-4/5' />
-      </CardHeader>
-      <CardContent className='flex flex-col gap-3'>
-        <Skeleton className='h-9 w-full' />
-        <Skeleton className='h-24 w-full' />
-        <Skeleton className='h-9 w-full' />
-      </CardContent>
-    </Card>
   );
 }
 
@@ -694,6 +809,125 @@ function StatCard({
           ) : null}
         </CardTitle>
       </CardHeader>
+    </Card>
+  );
+}
+
+/**
+ * 「代填效果」（R-002）：草稿与人工确认的对照，数据来自统计端点，页面只看不存。
+ *
+ * 数字是「近一年」（端点允许的最大跨度）内出的草稿，全是规则版、没有模型版数据时
+ * 也如实显示：模型草稿是 0、各回落原因各一行，不空白也不报错。行数固定，读取期间
+ * 铺同样行数的骨架，数据到了不挪布局。
+ *
+ * 刷新失败时保留上一轮的数字，但把失败亮出来（stale 提示加重试），不把旧数字
+ * 悄悄当成当前值；第一次就没读到时整卡显示读取失败，同样给重试。
+ */
+function DraftingOutcomesCard({
+  stats,
+  error,
+  onRetry,
+}: {
+  readonly stats?: QualityDraftingStats;
+  readonly error?: string;
+  readonly onRetry: () => void;
+}): ReactElement {
+  const { t } = useTranslation();
+  const rows: readonly (readonly [string, number])[] = stats
+    ? [
+        [t('quality.drafting.total'), stats.total],
+        [t('quality.drafting.rules'), stats.engines.rules],
+        [t('quality.drafting.model'), stats.engines.model],
+        [t('quality.drafting.confirmed'), stats.confirmed],
+        [
+          t('quality.drafting.categoryMatched'),
+          stats.agreement.category.matched,
+        ],
+        [
+          t('quality.drafting.categoryMismatched'),
+          stats.agreement.category.mismatched,
+        ],
+        [
+          t('quality.drafting.severityMatched'),
+          stats.agreement.severity.matched,
+        ],
+        [
+          t('quality.drafting.severityMismatched'),
+          stats.agreement.severity.mismatched,
+        ],
+        [t('quality.drafting.redacted'), stats.redacted],
+        [
+          t('quality.screenings.degrade.model-disabled'),
+          stats.degradeReasons['model-disabled'],
+        ],
+        [
+          t('quality.screenings.degrade.model-not-configured'),
+          stats.degradeReasons['model-not-configured'],
+        ],
+        [
+          t('quality.screenings.degrade.model-error'),
+          stats.degradeReasons['model-error'],
+        ],
+        [t('quality.screenings.degrade.timeout'), stats.degradeReasons.timeout],
+        [
+          t('quality.screenings.degrade.invalid-output'),
+          stats.degradeReasons['invalid-output'],
+        ],
+      ]
+    : [];
+
+  return (
+    <Card data-testid='drafting-stats'>
+      <CardHeader>
+        <CardTitle className='text-sm'>{t('quality.drafting.title')}</CardTitle>
+        <CardDescription>
+          {t('quality.drafting.description')}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className='flex flex-col gap-2'>
+        {stats && error ? (
+          <div className='flex items-center gap-2 text-xs text-(--status-warning)'>
+            <AlertTriangle className='size-4 shrink-0' />
+            <p className='flex-1'>{t('quality.drafting.stale')}</p>
+            <Button variant='outline' size='sm' onClick={onRetry}>
+              {t('quality.drafting.retry')}
+            </Button>
+          </div>
+        ) : null}
+        {stats ? (
+          rows.map(([label, value]) => (
+            <div
+              key={label}
+              className='flex items-center justify-between text-sm'
+            >
+              <span className='text-muted-foreground'>{label}</span>
+              <span className='tabular-nums'>{value}</span>
+            </div>
+          ))
+        ) : error ? (
+          <div className='flex items-center gap-2 text-sm text-muted-foreground'>
+            <p className='flex-1'>{t('quality.page.loadFailed')}</p>
+            <Button variant='outline' size='sm' onClick={onRetry}>
+              {t('quality.drafting.retry')}
+            </Button>
+          </div>
+        ) : (
+          // 骨架行与数字行同一个行盒：同一个行类（含 `text-sm`），骨架块的高度用
+          // `h-5` —— 它与 `text-sm` 的行高是同一个令牌（`--spacing(5)`）。行数一致、
+          // 行高一致，数据到达时卡片一像素也不长（界面点验 2026-11-26：骨架
+          // 380.05px → 数字 447.20px 的差就是骨架行矮了 5px）。
+          Array.from({ length: 14 }, (_, index) => (
+            <div
+              key={index}
+              aria-hidden='true'
+              className='flex items-center justify-between text-sm'
+            >
+              <Skeleton className='h-5 w-28' />
+              <Skeleton className='h-5 w-8' />
+            </div>
+          ))
+        )}
+      </CardContent>
     </Card>
   );
 }

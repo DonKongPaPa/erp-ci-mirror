@@ -401,7 +401,7 @@ describe('R-026 验收34：反馈单加的列、存量迁移与两张新表', ()
         '同一张单写进了第二行提醒记录',
       ).rejects.toThrow();
     },
-    down: async ({ expectCollection }) => {
+    down: async ({ connection, expectCollection }) => {
       await expectCollection('fqcFeedbackFiles').not.toExist();
       await expectCollection('fqcFeedbackReminders').not.toExist();
       for (const field of [
@@ -423,6 +423,32 @@ describe('R-026 验收34：反馈单加的列、存量迁移与两张新表', ()
         'externalId',
       ]);
       await expectCollection('fqcScreenings').not.toHaveField('ownerId');
+
+      // down 不回写 status：up 把 screened 改成 open 的存量行，回滚后仍是 open。
+      // 中间可能已经丢弃过，写回 screened 会丢掉「已经记下来」这个事实。
+      const afterDown = await connection.query
+        .selectFrom('fqcMessages')
+        .select(['id', 'status'])
+        .where('id', 'in', [
+          'r026-dup-a',
+          'r026-dup-b',
+          'r026-dup-c',
+          'r026-dup-d',
+          'r026-tie-a',
+          'r026-tie-b',
+          'r026-null-a',
+          'r026-null-b',
+          'r026-open',
+        ])
+        .orderBy('id', 'asc')
+        .execute();
+      expect(afterDown, '回滚后存量消息应当都还在').toHaveLength(9);
+      for (const row of afterDown) {
+        expect(
+          row.status,
+          `${row.id} 回滚后不该被写回 screened`,
+        ).toBe('open');
+      }
     },
   });
 });

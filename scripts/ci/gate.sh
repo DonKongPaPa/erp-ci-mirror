@@ -76,19 +76,36 @@ if [ ! -d "$APP/node_modules" ]; then
   fail "app-local/node_modules 不存在，先在 app-local 下跑 pnpm install"
 fi
 
+# vitest worker 上限（R-055）：默认取「核数减 4」与 8 中较小者，至少 2。
+# 16 核机器上是 8 —— 给用户的桌面留 4 核（浏览器、IDE、13000 端口的开发服务器），
+# 8 这个绝对上限则防止核数多的机器上 worker 又失控。CI 可用 VITEST_MAX_WORKERS 覆盖。
+GATE_VITEST_WORKERS="${VITEST_MAX_WORKERS:-}"
+if [ -z "$GATE_VITEST_WORKERS" ]; then
+  cpu_count="$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc)"
+  GATE_VITEST_WORKERS=$((cpu_count - 4))
+  [ "$GATE_VITEST_WORKERS" -lt 2 ] && GATE_VITEST_WORKERS=2
+  [ "$GATE_VITEST_WORKERS" -gt 8 ] && GATE_VITEST_WORKERS=8
+else
+  case "$GATE_VITEST_WORKERS" in
+    ''|*[!0-9]*) fail "VITEST_MAX_WORKERS 必须是正整数，收到：$GATE_VITEST_WORKERS" ;;
+  esac
+  [ "$GATE_VITEST_WORKERS" -ge 1 ] || fail "VITEST_MAX_WORKERS 必须至少为 1"
+fi
+printf '\n\033[36m[gate] vitest worker 上限：%s（默认 min(核数-4, 8)，至少 2；VITEST_MAX_WORKERS 可覆盖）\033[0m\n' "$GATE_VITEST_WORKERS"
+
 run_stage() {
   local name="$1"
   shift
   step "$name"
   local started
-  started="$(date +%s%3N)"
-  if "$@"; then
+  started="$(date +%s%3N 9>&-)"
+  if "$@" 9>&-; then
     local ended
-    ended="$(date +%s%3N)"
+    ended="$(date +%s%3N 9>&-)"
     RESULTS+=("--result" "$name=passed:$((ended - started))")
   else
     local ended
-    ended="$(date +%s%3N)"
+    ended="$(date +%s%3N 9>&-)"
     RESULTS+=("--result" "$name=failed:$((ended - started))")
     FAILED=1
     printf '\n\033[31m[gate] 阶段失败：%s\033[0m\n' "$name" >&2
@@ -98,6 +115,21 @@ run_stage() {
       exit 1
     fi
   fi
+}
+
+# 重阶段跨副本串行化（R-055）：锁绑在文件描述符上，进程退出（含 kill -9）时内核自动释放。
+# 不用自建锁目录 —— 被杀的进程会留下死锁，要人工清理。等锁时每 30 秒报一次进度。
+GATE_HEAVY_LOCK="${GATE_HEAVY_LOCK:-/tmp/hs-gate-heavy.lock}"
+acquire_heavy_lock() {
+  exec 9>"$GATE_HEAVY_LOCK" || fail "打不开重阶段锁：$GATE_HEAVY_LOCK"
+  local waited=0
+  while ! flock -n 9; do
+    if [ $((waited % 30)) -eq 0 ]; then
+      printf '\n\033[36m[gate] 在等另一个副本的闸门：已等 %d 秒\033[0m\n' "$waited"
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
 }
 
 RESULTS=()
@@ -219,7 +251,8 @@ write_verdict() {
     --stage "$STAGE" \
     --out "$CI_DIR/verdict.json" \
     "${skip_args[@]+"${skip_args[@]}"}" \
-    "${RESULTS[@]+"${RESULTS[@]}"}"
+    "${RESULTS[@]+"${RESULTS[@]}"}" \
+    9>&-
 }
 
 # 组件复用检查（R-039 第三道门）：框架自带的 check-ui-components.mjs。
@@ -267,13 +300,13 @@ run_component_check() {
   fi
 
   local started ended status
-  started="$(date +%s%3N)"
+  started="$(date +%s%3N 9>&-)"
   if [ "$mode" = "all" ]; then
     node "$checker" --root . || status=$?
   else
     node "$checker" --root . "${sources[@]}" || status=$?
   fi
-  ended="$(date +%s%3N)"
+  ended="$(date +%s%3N 9>&-)"
   case "${status:-0}" in
     0)
       printf '组件复用检查通过（%s，%d 毫秒）。\n' "$mode" "$((ended - started))"
@@ -386,7 +419,7 @@ if [ "$STAGE" = "fast" ]; then
   run_stage lint pnpm lint
   run_stage component-check run_component_check changed
   step test
-  started="$(date +%s%3N)"
+  started="$(date +%s%3N 9>&-)"
   rm -f "$CI_DIR/vitest.json"
   # 两个集合都要跑：
   #   1. 受 git 改动影响的测试（--changed）
@@ -395,8 +428,8 @@ if [ "$STAGE" = "fast" ]; then
   #      扫 client/ 与改动文件无关）。
   # 用 --changed 与显式文件混跑会让 vitest 只按 changed 过滤，所以分两次：
   fast_ok=1
-  pnpm exec vitest run --changed --reporter=default \
-    --reporter=json --outputFile.json="$CI_DIR/vitest-fast-changed.json" \
+  pnpm exec vitest run --maxWorkers="$GATE_VITEST_WORKERS" --changed --reporter=default \
+    --reporter=json --outputFile.json="$CI_DIR/vitest-fast-changed.json" 9>&- \
     || fast_ok=0
   # 镜像里没有仓库级文档，四个文档守门不在导出树里，跳过；样式守门扫的是
   # app-local/client 的代码，两仓都照跑。
@@ -411,19 +444,19 @@ if [ "$STAGE" = "fast" ]; then
       tests/project/mermaid-only.test.ts
     )
   fi
-  pnpm exec vitest run --reporter=default --reporter=json \
+  pnpm exec vitest run --maxWorkers="$GATE_VITEST_WORKERS" --reporter=default --reporter=json \
     --outputFile.json="$CI_DIR/vitest-fast-guards.json" \
     tests/project/frontend-style-guard.test.ts \
-    "${guards[@]+"${guards[@]}"}" \
+    "${guards[@]+"${guards[@]}"}" 9>&- \
     || fast_ok=0
   # 合并两份计数，避免 verdict 从旧文件读到假的 811。
   node "$ROOT/scripts/ci/merge-test-reports.mjs" \
     "$CI_DIR/vitest-fast-changed.json" "$CI_DIR/vitest-fast-guards.json" \
     "$CI_DIR/vitest.json" || fast_ok=0
   if [ "$fast_ok" -eq 1 ]; then
-    RESULTS+=("--result" "test=passed:$(( $(date +%s%3N) - started ))")
+    RESULTS+=("--result" "test=passed:$(( $(date +%s%3N 9>&-) - started ))")
   else
-    RESULTS+=("--result" "test=failed:$(( $(date +%s%3N) - started ))")
+    RESULTS+=("--result" "test=failed:$(( $(date +%s%3N 9>&-) - started ))")
     FAILED=1
   fi
   write_verdict || exit 1
@@ -445,13 +478,13 @@ if [ "$STAGE" = "docs" ]; then
     exit 0
   fi
   step test
-  started="$(date +%s%3N)"
+  started="$(date +%s%3N 9>&-)"
   rm -f "$CI_DIR/vitest.json"
-  if pnpm exec vitest run --reporter=default --reporter=json \
-    --outputFile.json="$CI_DIR/vitest.json" tests/project; then
-    RESULTS+=("--result" "test=passed:$(( $(date +%s%3N) - started ))")
+  if pnpm exec vitest run --maxWorkers="$GATE_VITEST_WORKERS" --reporter=default --reporter=json \
+    --outputFile.json="$CI_DIR/vitest.json" tests/project 9>&-; then
+    RESULTS+=("--result" "test=passed:$(( $(date +%s%3N 9>&-) - started ))")
   else
-    RESULTS+=("--result" "test=failed:$(( $(date +%s%3N) - started ))")
+    RESULTS+=("--result" "test=failed:$(( $(date +%s%3N 9>&-) - started ))")
     FAILED=1
   fi
   run_stage evidence check_evidence
@@ -461,6 +494,9 @@ if [ "$STAGE" = "docs" ]; then
   exit 0
 fi
 
+# 重阶段从这里开始排队：fast / docs 在前面已经 exit
+acquire_heavy_lock
+
 run_stage lint pnpm lint
 run_stage typecheck pnpm typecheck
 # 全量组件复用检查：实测约 2 秒，放得进 unit（设计上限 10 秒）。
@@ -468,11 +504,11 @@ run_stage component-check run_component_check all
 
 # 单测：同时产出 JSON 报告，供 verdict.mjs 统计通过/失败数。
 step test
-started="$(date +%s%3N)"
-if pnpm exec vitest run --reporter=default --reporter=json --outputFile.json="$CI_DIR/vitest.json"; then
-  RESULTS+=("--result" "test=passed:$(( $(date +%s%3N) - started ))")
+started="$(date +%s%3N 9>&-)"
+if pnpm exec vitest run --maxWorkers="$GATE_VITEST_WORKERS" --reporter=default --reporter=json --outputFile.json="$CI_DIR/vitest.json" 9>&-; then
+  RESULTS+=("--result" "test=passed:$(( $(date +%s%3N 9>&-) - started ))")
 else
-  RESULTS+=("--result" "test=failed:$(( $(date +%s%3N) - started ))")
+  RESULTS+=("--result" "test=failed:$(( $(date +%s%3N 9>&-) - started ))")
   FAILED=1
   if [ "$STAGE" = "unit" ]; then
     write_verdict

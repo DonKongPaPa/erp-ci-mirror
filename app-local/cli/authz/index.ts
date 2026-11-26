@@ -3,6 +3,7 @@ import { defineCliPlugin } from '@nocobase/app-cli';
 import AuthzExport from './export.js';
 import AuthzImport from './import.js';
 import AuthzUpgradeR002 from './upgrade-r002.js';
+import AuthzUpgradeR026 from './upgrade-r026.js';
 
 /**
  * `authz export` / `authz import`（R-013 验收第 8 条）。
@@ -20,6 +21,8 @@ const authzCli = defineCliPlugin({
     import: AuthzImport,
     // R-002：给两个质量角色补上确认记录表的全量范围、知识库页面与 kb.knowledge 档位。可单独跑、可重跑。
     'upgrade-r002': AuthzUpgradeR002,
+    // R-026：给三个角色补反馈单页与两个新动作，给存量的人补 staff。可单独跑、可重跑。
+    'upgrade-r026': AuthzUpgradeR026,
   },
 });
 

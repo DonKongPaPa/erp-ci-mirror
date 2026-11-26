@@ -21,6 +21,8 @@ import { createStandaloneServer } from '../../server/standalone.js';
  */
 
 const PASSWORD = 'Staff-failure-test-123!';
+// 注入的假令牌：与口令一样，只允许出现在请求里，不许出现在任何失败日志里。
+const FAKE_TOKEN = 'r026-staff-failure-token-9f3c21';
 
 const test = createAppTest({
   createServer: createStandaloneServer,
@@ -68,23 +70,25 @@ test('R-026: the account is created even when the staff assignment fails, and on
     app.container.resolve(loggingToken).getLogger('app'),
     'error',
   );
-  const response = await admin.fetch(
-    '/users',
-    json({
-      name: 'r026stafffailed',
-      username: 'r026stafffailed',
-      email: 'r026stafffailed@example.test',
-      password: PASSWORD,
-      roleScopes: { app: ['member'] },
-    }),
-  );
+  const request = json({
+    name: 'r026stafffailed',
+    username: 'r026stafffailed',
+    email: 'r026stafffailed@example.test',
+    password: PASSWORD,
+    roleScopes: { app: ['member'] },
+  });
+  // 把令牌放进这次请求的上下文：日志即便去读请求头，也不该把它带出来。
+  const response = await admin.fetch('/users', {
+    ...request,
+    headers: { ...request.headers, 'x-injected-token': FAKE_TOKEN },
+  });
 
   // 账号建成了：201，框架的 member 仍在，基线没有留下半条脏指派。
   expect(response.status).toBe(201);
   const created = (await response.json()).data as { id: string };
   expect(await permissionSetsOf(connection, created.id)).toEqual(['member']);
 
-  // 恰好一条 error，带用户标识；不记口令。
+  // 恰好一条 error，带用户标识；口令与令牌都不记。
   const calls = logError.mock.calls.filter(
     ([bindings]) =>
       (bindings as { userId?: unknown } | undefined)?.userId === created.id,
@@ -92,6 +96,13 @@ test('R-026: the account is created even when the staff assignment fails, and on
   expect(calls).toHaveLength(1);
   const [bindings, message] = calls[0]!;
   expect(String(message)).toContain('staff');
-  expect(JSON.stringify(bindings)).not.toContain(PASSWORD);
-  expect(JSON.stringify(bindings)).not.toContain('password');
+  const logText = JSON.stringify([bindings, message]);
+  expect(logText).not.toContain(PASSWORD);
+  expect(logText, '失败日志不该记令牌').not.toContain(FAKE_TOKEN);
+  expect(logText).not.toContain('password');
+  expect(logText).not.toContain('token');
+  expect(
+    Object.keys(bindings as Record<string, unknown>).sort(),
+    '失败日志只记这三列',
+  ).toEqual(['permissionSet', 'reason', 'userId']);
 });

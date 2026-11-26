@@ -98,10 +98,43 @@ const enUS = {
       ownerAndModel: 'Suggested owner: {{owner}} · Model: {{model}}',
       empty: 'No screenings',
       review: 'Confirm',
+      // R-002: where each draft came from — which engine, and why the model did not run.
+      engines: {
+        rules: 'Rules',
+        model: 'Model',
+      },
+      degraded: 'Fell back: {{reason}}',
+      degrade: {
+        'model-disabled': 'Model not enabled',
+        'model-not-configured': 'No chat model configured',
+        'model-error': 'Model call failed',
+        timeout: 'Model timed out',
+        'invalid-output': 'Unusable model output',
+      },
+      knowledge: 'Quality standards: {{refs}}',
+      similarCases: 'Similar cases referenced: {{count}}',
     },
     review: {
       saved: 'Screening confirmed',
       failed: 'Review failed',
+      record:
+        'Confirmed by {{actor}} · {{time}} · {{category}} / {{severity}}',
+    },
+    // R-002: the drafting outcomes card, fed by GET /quality/drafting/stats.
+    drafting: {
+      title: 'Drafting outcomes',
+      description: 'Drafts against human confirmations over the last year.',
+      total: 'Screenings',
+      rules: 'Rule drafts',
+      model: 'Model drafts',
+      confirmed: 'Confirmed',
+      categoryMatched: 'Category agreed',
+      categoryMismatched: 'Category differed',
+      severityMatched: 'Severity agreed',
+      severityMismatched: 'Severity differed',
+      redacted: 'Redacted before model',
+      stale: 'Refresh failed — showing the numbers from the last successful read.',
+      retry: 'Retry',
     },
     empty: 'No data',
     loading: 'Loading',

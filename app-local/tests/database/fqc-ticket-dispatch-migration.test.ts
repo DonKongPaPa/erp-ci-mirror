@@ -1,6 +1,11 @@
 import path from 'node:path';
-import { describeMigration } from '@nocobase/app-testing/server';
+import {
+  createDatabaseTest,
+  describeMigration,
+} from '@nocobase/app-testing/server';
 import { describe, expect } from 'vitest';
+
+import ticketDispatchMigration from '../../database/main/migrations/202611260003_fqc_ticket_dispatch.js';
 
 /**
  * R-003 S1 验收16 与验收3（库约束部分）：工单加七列、派单规则表、存量回填与唯一约束。
@@ -307,3 +312,72 @@ describe('R-003 验收16/3：工单七列、派单规则表、存量回填与唯
     },
   });
 });
+
+/**
+ * 回填的 `where lifecycleDefinition is null` 只有在「列已存在、且已有非空值」时才与
+ * 无条件更新有区别。正常迁移里这一列是同一次 `up` 刚加的，所有存量行都为空，
+ * 从这个夹具出发看不出谓词有没有被去掉。所以这里在一张最小库上先把列建好、
+ * 预置一行非空值与一行空值，再直接跑迁移的 `up`：结构变更用桩 builder 替掉，
+ * 数据回填那段 `query` 是真的，跑在真库上。
+ */
+const test = createDatabaseTest();
+
+test(
+  'R-003 验收3：存量回填只填空值，不覆盖已有的非空值',
+  async ({ connection }) => {
+    await connection.builder.createCollection('fqcScreenings', (collection) => {
+      collection.string('id', { length: 64 }).notNull();
+      collection.string('outcome', { length: 64 }).nullable();
+      collection.primary('id');
+    });
+    await connection.builder.createCollection('fqcTickets', (collection) => {
+      collection.string('id', { length: 64 }).notNull();
+      collection.string('lifecycleDefinition', { length: 64 }).nullable();
+      collection.primary('id');
+    });
+    await connection.query
+      .insertInto('fqcScreenings')
+      .values({ id: 'r003-backfill-screening', outcome: 'auto' })
+      .execute();
+    await connection.query
+      .insertInto('fqcTickets')
+      .values([
+        {
+          id: 'r003-custom-definition',
+          lifecycleDefinition: 'customDefinition',
+        },
+        { id: 'r003-empty-definition', lifecycleDefinition: null },
+      ])
+      .execute();
+
+    // 只让回填那一段跑真 query：结构变更交给桩，不重复加已存在的列。
+    const noopBuilder = new Proxy(
+      {},
+      { get: () => async () => undefined },
+    );
+    await ticketDispatchMigration.up({
+      builder: noopBuilder,
+      query: connection.query,
+    } as never);
+
+    const rows = await connection.query
+      .selectFrom('fqcTickets')
+      .select(['id', 'lifecycleDefinition'])
+      .where('id', 'in', [
+        'r003-custom-definition',
+        'r003-empty-definition',
+      ])
+      .orderBy('id', 'asc')
+      .execute();
+    const byId = new Map(rows.map((row) => [String(row.id), row]));
+    expect(byId.size, '两行存量工单都还在').toBe(2);
+    expect(
+      byId.get('r003-custom-definition')?.lifecycleDefinition,
+      '已有的非空值不该被回填覆盖',
+    ).toBe('customDefinition');
+    expect(
+      byId.get('r003-empty-definition')?.lifecycleDefinition,
+      '空值应当回填成生命周期定义的 name',
+    ).toBe(DEFINITION_NAME);
+  },
+);
