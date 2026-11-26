@@ -44,9 +44,11 @@ export function loadTestDatabaseEnv(
   env.NOCOBASE_TEST_DB_DIALECT = 'postgres';
   if (env.POSTGRES_HOST) return;
 
-  // CI 的连接由工作流变量注入；docs 快道没有变量也不读本机文件。
+  // CI 的连接由工作流变量注入；docs 快道与「只起配置」档不连库，缺参数不算错。
+  // 这个信号只放开「缺连接参数」，方言仍钉死在 postgres，连库档位照旧报错不回落。
   const ci = ['1', 'true'].includes(String(env.CI ?? '').toLowerCase()) ||
-    ['1', 'true'].includes(String(env.GITHUB_ACTIONS ?? '').toLowerCase());
+    ['1', 'true'].includes(String(env.GITHUB_ACTIONS ?? '').toLowerCase()) ||
+    ['1', 'true'].includes(String(env.NOCOBASE_DOCS_ONLY ?? '').toLowerCase());
   const file = testDatabaseEnvFile(cwd);
   if (!file || !existsSync(file)) {
     if (ci) return;

@@ -13,7 +13,7 @@ import {
 /**
  * R-011 S2b：`removeFromAllDepartments` 的验收（D:223、验收 15 后半）。
  * 一次调用、一个批次号、每个部门一行变动记录；负责人（含停用部门）一行不写；
- * 不在任何部门时返回空。只在真 Postgres 上跑：本机 SQLite 会显示 skipped。
+ * 不在任何部门时返回空。测试只连 Postgres，真跑。
  */
 const test = createDatabaseTest({
   migrations: [
@@ -24,7 +24,6 @@ const test = createDatabaseTest({
   ],
 });
 
-const pgOnly = process.env.NOCOBASE_TEST_DB_DIALECT === 'postgres';
 const now = new Date('2026-11-26T00:00:00.000Z');
 const ACTOR = 'r011-actor';
 const USER = 'r011-leaver';
@@ -116,7 +115,7 @@ function historyRows(connection: DatabaseConnection, userId: string) {
   });
 }
 
-test('R-011: one call removes every department and shares one batch id', { skip: !pgOnly }, async ({
+test('R-011: one call removes every department and shares one batch id', async ({
   database,
   connection,
 }) => {
@@ -140,7 +139,7 @@ test('R-011: one call removes every department and shares one batch id', { skip:
   expect(rows.every((row) => row.actorId === ACTOR)).toBe(true);
 });
 
-test('R-011: a manager of an active department is refused and nothing is written', { skip: !pgOnly }, async ({
+test('R-011: a manager of an active department is refused and nothing is written', async ({
   database,
   connection,
 }) => {
@@ -158,7 +157,7 @@ test('R-011: a manager of an active department is refused and nothing is written
   expect(await historyRows(connection, USER)).toHaveLength(0);
 });
 
-test('R-011: a manager of a deactivated department is refused too', { skip: !pgOnly }, async ({
+test('R-011: a manager of a deactivated department is refused too', async ({
   database,
   connection,
 }) => {
@@ -175,7 +174,7 @@ test('R-011: a manager of a deactivated department is refused too', { skip: !pgO
   expect(await historyRows(connection, USER)).toHaveLength(0);
 });
 
-test('R-011: a user outside every department returns an empty batch and writes nothing', { skip: !pgOnly }, async ({
+test('R-011: a user outside every department returns an empty batch and writes nothing', async ({
   database,
   connection,
 }) => {
@@ -188,7 +187,7 @@ test('R-011: a user outside every department returns an empty batch and writes n
   expect(await historyRows(connection, USER)).toHaveLength(0);
 });
 
-test('R-011: removal joined to a caller transaction rolls back as one', { skip: !pgOnly }, async ({
+test('R-011: removal joined to a caller transaction rolls back as one', async ({
   database,
   connection,
 }) => {

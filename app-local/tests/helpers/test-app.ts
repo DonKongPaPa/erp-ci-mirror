@@ -73,7 +73,10 @@ const sleep = (ms: number) =>
  * schemas with a bounded retry, ending only the sessions that hold locks inside
  * those schemas.
  */
-export function stabilizeTestApp(app: TestApp): TestApp {
+export function stabilizeTestApp(
+  app: TestApp,
+  options: { readonly drop?: () => Promise<void> } = {},
+): TestApp {
   const pending = new Set<Promise<unknown>>();
   let inFlight = 0;
 
@@ -103,7 +106,13 @@ export function stabilizeTestApp(app: TestApp): TestApp {
     try {
       await app.server.close();
     } finally {
-      await disposeTestDatabases(app.config);
+      if (options.drop) {
+        // 假应用夹具没有数据库：用它自带的 drop 记录收尾顺序，不连库。
+        await options.drop();
+        await rm(app.config.directory, { recursive: true, force: true });
+      } else {
+        await disposeTestDatabases(app.config);
+      }
     }
   };
 
@@ -213,11 +222,8 @@ async function settleInFlight(
 
 async function disposeTestDatabases(config: TestAppConfig): Promise<void> {
   try {
-    if (config.testDatabases.dialect === 'postgres') {
-      await dropPostgresSchemas(config);
-    } else {
-      await config.testDatabases.drop();
-    }
+    // 测试只连 Postgres：没有 SQLite else 分支，真实应用一律走带重试的 schema drop。
+    await dropPostgresSchemas(config);
   } finally {
     await rm(config.directory, { recursive: true, force: true });
   }

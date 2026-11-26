@@ -19,10 +19,9 @@ import { employeeMutationsToken } from '../../server/providers/employees.js';
 /**
  * R-011 S4/S5/S6 的端点验收，只在真 Postgres 上跑。
  *
- * 本机 SQLite 上显示为 skipped，不是通过：工号发号、整批回滚、会话删除都依赖
+ * 工号发号、整批回滚、会话删除都依赖
  * Postgres 的事务行为。授权矩阵用真实登录会话打真实端点，不用替身。
  */
-const pgOnly = process.env.NOCOBASE_TEST_DB_DIALECT === 'postgres';
 const test = createAppTest({
   createServer: createStandaloneServer,
   config: {
@@ -188,7 +187,7 @@ const userOf = async (
 ): Promise<{ id: string; email: string; disabledAt: Date | null; kind: string; roleScopes: Record<string, string[]> }> =>
   await app.container.resolve(userManagementServiceToken).get(userId) as never;
 
-test('R-011 验收1: hire without a department creates one account, one profile and one change', { skip: !pgOnly }, async ({
+test('R-011 验收1: hire without a department creates one account, one profile and one change', async ({
   testApp,
   app,
   connection,
@@ -208,7 +207,7 @@ test('R-011 验收1: hire without a department creates one account, one profile 
   expect(await membershipsOf(connection, userId)).toHaveLength(0);
 });
 
-test('R-011 验收4: no-email accounts use staff.invalid and cannot sign in', { skip: !pgOnly }, async ({
+test('R-011 验收4: no-email accounts use staff.invalid and cannot sign in', async ({
   testApp,
   app,
 }) => {
@@ -242,7 +241,7 @@ test('R-011 验收4: no-email accounts use staff.invalid and cannot sign in', { 
   expect(error.reason).toBe('USER_EMAIL_CONFLICT');
 });
 
-test('R-011 验收2: a primary department needs departments.manage before any write', { skip: !pgOnly }, async ({
+test('R-011 验收2: a primary department needs departments.manage before any write', async ({
   testApp,
   app,
   connection,
@@ -280,7 +279,7 @@ test('R-011 验收2: a primary department needs departments.manage before any wr
   expect(history).toHaveLength(2); // addMembers + setPrimaryDepartment
 });
 
-test('R-011 验收5: link refuses an existing profile and service accounts', { skip: !pgOnly }, async ({
+test('R-011 验收5: link refuses an existing profile and service accounts', async ({
   testApp,
   app,
   connection,
@@ -312,7 +311,7 @@ test('R-011 验收5: link refuses an existing profile and service accounts', { s
   expect(await connection.repository<Row>('user').count()).toBe(before);
 });
 
-test('R-011 验收6: position, grade and supervisor changes append one row each', { skip: !pgOnly }, async ({
+test('R-011 验收6: position, grade and supervisor changes append one row each', async ({
   testApp,
   app,
   connection,
@@ -354,7 +353,7 @@ test('R-011 验收6: position, grade and supervisor changes append one row each'
   void app;
 });
 
-test('R-011 验收7: leaving revokes sessions, removes memberships and rolls back as one', { skip: !pgOnly }, async ({
+test('R-011 验收7: leaving revokes sessions, removes memberships and rolls back as one', async ({
   testApp,
   app,
   connection,
@@ -415,7 +414,7 @@ test('R-011 验收7: leaving revokes sessions, removes memberships and rolls bac
   expect(session.cookie).toBeTruthy();
 });
 
-test('R-011 验收9: every departure guard gives its own reason', { skip: !pgOnly }, async ({
+test('R-011 验收9: every departure guard gives its own reason', async ({
   testApp,
   app,
   connection,
@@ -485,7 +484,7 @@ test('R-011 验收9: every departure guard gives its own reason', { skip: !pgOnl
   void connection;
 });
 
-test('R-011 验收10: rehire keeps the number, accepts a new position and can join a department', { skip: !pgOnly }, async ({
+test('R-011 验收10: rehire keeps the number, accepts a new position and can join a department', async ({
   testApp,
   app,
   connection,
@@ -529,7 +528,7 @@ test('R-011 验收10: rehire keeps the number, accepts a new position and can jo
   expect(new Set(kinds)).toEqual(new Set(['hired', 'left', 'rehired', 'position']));
 });
 
-test('R-011 验收11/12/13: authorization matrix and per-entry columns', { skip: !pgOnly }, async ({
+test('R-011 验收11/12/13: authorization matrix and per-entry columns', async ({
   testApp,
   app,
 }) => {
@@ -604,7 +603,7 @@ test('R-011 验收11/12/13: authorization matrix and per-entry columns', { skip:
   await expectError(await viewer.session.fetch('/employees/candidates'), 400);
 });
 
-test('R-011 验收12: search never matches an email-only keyword', { skip: !pgOnly }, async ({
+test('R-011 验收12: search never matches an email-only keyword', async ({
   testApp,
 }) => {
   const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
@@ -624,7 +623,7 @@ test('R-011 验收12: search never matches an email-only keyword', { skip: !pgOn
   expect(result).toEqual([]);
 });
 
-test('R-011 验收14: dictionaries deactivate but never delete', { skip: !pgOnly }, async ({
+test('R-011 验收14: dictionaries deactivate but never delete', async ({
   testApp,
   connection,
 }) => {
@@ -660,7 +659,7 @@ test('R-011 验收14: dictionaries deactivate but never delete', { skip: !pgOnly
   expect(await connection.repository<Row>('jobGrades').count({ filter: { id: String(freeGrade.id) } })).toBe(1);
 });
 
-test('R-011 验收16: internal service omits unknown ids and non-active supervisors', { skip: !pgOnly }, async ({
+test('R-011 验收16: internal service omits unknown ids and non-active supervisors', async ({
   testApp,
   app,
 }) => {
@@ -682,7 +681,7 @@ test('R-011 验收16: internal service omits unknown ids and non-active supervis
   void app;
 });
 
-test('R-011 验收8: disabling the account is the last write of the leave transaction', { skip: !pgOnly }, async ({
+test('R-011 验收8: disabling the account is the last write of the leave transaction', async ({
   testApp,
   app,
 }) => {
@@ -729,7 +728,7 @@ test('R-011 验收8: disabling the account is the last write of the leave transa
   expect(order.at(-1)).toBe('disable');
 });
 
-test('R-011 验收11: rehire needs the users.enable action', { skip: !pgOnly }, async ({
+test('R-011 验收11: rehire needs the users.enable action', async ({
   testApp,
   app,
 }) => {
@@ -744,7 +743,7 @@ test('R-011 验收11: rehire needs the users.enable action', { skip: !pgOnly }, 
   );
 });
 
-test('R-011 验收6: update refuses an inactive position and an inactive supervisor', { skip: !pgOnly }, async ({
+test('R-011 验收6: update refuses an inactive position and an inactive supervisor', async ({
   testApp,
 }) => {
   const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);

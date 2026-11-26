@@ -14,13 +14,12 @@ import { DepartmentRuleError } from '../../server/providers/departments.js';
 /**
  * R-012 第二部分的并发与回滚。
  *
- * 两条验收只在 Postgres 上成立（第 16 条的并发一半、第 17 条）：SQLite 是单写者，
- * 复现不出「两个事务各改各的」。用 `NOCOBASE_TEST_DB_DIALECT` 静态判定，本机
- * （sqlite）显示为 skipped 而不是假绿；CI 的 Postgres 线真跑。跳过的原因写在
- * 测试名与注释里。
+ * 测试只连 Postgres：第 16 条的并发一半与第 17 条都要靠两连接竞争与咨询锁，
+ * SQLite 单写者复现不出来。R-056 之后本机与 CI 同方言，这些用例一律真跑，
+ * 不再按方言跳过。原因写在测试名与注释里。
  *
- * 第 15 条（整批回滚）在任何方言上都成立：往事务里注入一次写失败，断言成员关系、
- * 变动记录与部门的停用状态都和操作前一样。
+ * 第 15 条（整批回滚）往事务里注入一次写失败，断言成员关系、变动记录与部门的
+ * 停用状态都和操作前一样。
  */
 const test = createDatabaseTest({
   migrations: [
@@ -33,9 +32,6 @@ const test = createDatabaseTest({
     },
   ],
 });
-
-/** 只有 Postgres 才能复现竞争；其它方言上这些测试是 skipped，不是通过。 */
-const pgOnly = process.env.NOCOBASE_TEST_DB_DIALECT === 'postgres';
 
 const now = new Date('2026-11-25T00:00:00.000Z');
 
@@ -220,7 +216,7 @@ test('R-012 验收16: a second primary row for one user is refused by the databa
   expect(rows.filter((row) => row.isPrimary)).toHaveLength(1);
 });
 
-test('R-012 验收16（仅 Postgres）：two sessions setting a primary at once leave one row and the loser gets a unique conflict', { skip: !pgOnly }, async ({
+test('R-012 验收16（仅 Postgres）：two sessions setting a primary at once leave one row and the loser gets a unique conflict', async ({
   database,
   connection,
 }) => {
@@ -297,7 +293,7 @@ test('R-012 验收16: the primary department conflict is answered as 409', () =>
   expect(mapped?.reason).toBe('PRIMARY_DEPARTMENT_CONFLICT');
 });
 
-test('R-012 验收17（仅 Postgres）：two opposite moves do not both succeed and the tree has no cycle', { skip: !pgOnly }, async ({
+test('R-012 验收17（仅 Postgres）：two opposite moves do not both succeed and the tree has no cycle', async ({
   database,
   connection,
 }) => {
@@ -337,7 +333,7 @@ test('R-012 验收17（仅 Postgres）：two opposite moves do not both succeed 
   expect(rows.find((row) => row.id === 'node-b')?.parentId).toBeNull();
 });
 
-test('R-012 并发：两个会话建同名同码的部门只有一个成功（仅 Postgres）', { skip: !pgOnly }, async ({
+test('R-012 并发：两个会话建同名同码的部门只有一个成功（仅 Postgres）', async ({
   database,
   connection,
 }) => {

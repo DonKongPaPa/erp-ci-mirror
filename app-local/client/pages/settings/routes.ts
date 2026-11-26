@@ -1,5 +1,6 @@
 import {
   Building2,
+  ContactRound,
   Users,
   ShieldCheck,
   KeyRound,
@@ -9,6 +10,8 @@ import {
   defineAppRoutes,
   type AppClientRouteContribution,
 } from '@nocobase/app-client/plugins';
+
+import { EMPLOYEES_PAGE_ID } from './employees/page-id.js';
 
 /**
  * Users and Permission management, in the Accounts and permissions category of the System settings shell
@@ -69,6 +72,22 @@ const systemSettingsRoutes: AppClientRouteContribution = defineAppRoutes([
     },
     breadcrumb: { title: 'settings.departments' },
     componentLoader: () => import('./departments/index.js'),
+  },
+  {
+    // R-011 员工管理页：页面授权 `employees` 不写进任何业务角色的 seed，默认只有 root 能进。
+    // 页面里的读、写再分别要 `employees` 的 view / manage 两个动作。
+    parent: 'settingsAccount',
+    name: 'settingsEmployees',
+    path: '/employees',
+    auth: 'required',
+    authz: { resource: { type: 'page', id: EMPLOYEES_PAGE_ID }, action: 'access' },
+    navigation: {
+      title: 'settings.employees',
+      description: 'settings.employeesDescription',
+      icon: ContactRound,
+    },
+    breadcrumb: { title: 'settings.employees' },
+    componentLoader: () => import('./employees/index.js'),
   },
   {
     parent: 'settingsAccount',

@@ -71,6 +71,7 @@ describe('default Foundation integration', () => {
         [
           ['settingsUsers', '/settings/users'],
           ['settingsDepartments', '/settings/departments'],
+          ['settingsEmployees', '/settings/employees'],
           ['permissionManagement', '/settings/roles'],
           ['applicationApiKeysManagement', '/settings/api-keys'],
         ],

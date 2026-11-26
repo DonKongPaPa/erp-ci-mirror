@@ -4,6 +4,10 @@ import { fileURLToPath } from 'node:url';
 import { PAGES as KNOWLEDGE_PAGES } from '@nocobase/app-plugin-knowledge/shared/access';
 import { describe, expect, it } from 'vitest';
 
+import { businessPermissionSets } from '../../database/main/seeds/202611240001_seed_business_permission_sets.js';
+
+import { EMPLOYEES_PAGE_ID } from '../../client/pages/settings/employees/page-id.js';
+
 const appRoot = path.resolve(
   fileURLToPath(new URL('.', import.meta.url)),
   '../..',
@@ -63,5 +67,29 @@ describe('R-013 质量页的授权 id', () => {
       KNOWLEDGE_PAGES,
       '知识库插件登记的页面 id 与 seed 写的不一致',
     ).toContain('knowledge');
+  });
+});
+
+
+describe('R-011 员工页的授权 id', () => {
+  it('uses the shared page id in the route and grants it to no business role by default', () => {
+    const routes = read('client', 'pages', 'settings', 'routes.ts');
+    expect(routes).toContain(`id: EMPLOYEES_PAGE_ID`);
+    expect(EMPLOYEES_PAGE_ID).toBe('employees');
+
+    // 读 seed 导出的授权结构，不对源码做字面串匹配 —— 换个引号或引用常量都不影响这里。
+    const pageGrants = businessPermissionSets.flatMap((set) =>
+      set.grants
+        .filter((grant) => grant.resource.type === 'page')
+        .map((grant) => ({ role: set.key, id: grant.resource.id })),
+    );
+    // 先钉住解析本身：其它三个页面授权必须被解析出来，否则下面的反向断言是空的。
+    expect(new Set(pageGrants.map(({ id }) => id))).toEqual(
+      new Set(['quality', 'feedback', 'knowledge']),
+    );
+    expect(
+      pageGrants.map(({ id }) => id),
+      '员工页默认只有 root 能进：业务角色的 seed 不能给它授权',
+    ).not.toContain(EMPLOYEES_PAGE_ID);
   });
 });

@@ -19,7 +19,6 @@ import { createStandaloneServer } from '../../server/standalone.js';
  * 用非 root 的授权用户而不是 root：root 绕过逐端点检查，删掉某一行的授权也照样绿。
  * 只在真 Postgres 上跑；每个端点的变异结果见交付。
  */
-const pgOnly = process.env.NOCOBASE_TEST_DB_DIALECT === 'postgres';
 const test = createAppTest({
   createServer: createStandaloneServer,
   config: {
@@ -248,7 +247,7 @@ const CASES: readonly Case[] = [
 ];
 
 for (const item of CASES) {
-  test(item.name, { skip: !pgOnly }, async ({ testApp, app }) => {
+  test(item.name, async ({ testApp, app }) => {
     const f = await fixtures(testApp, app);
     const request = await item.request(f);
     const denied = await f.outsider.fetch(request.path, request.init);

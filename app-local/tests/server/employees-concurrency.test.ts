@@ -14,9 +14,8 @@ import { employeeMutationsToken } from '../../server/providers/employees.js';
 
 /**
  * R-011 验收 3/8 的 Postgres 部分：并发发号、离职后不复用、建账号中途回滚。
- * SQLite 是单写者，复现不出并发，所以在非 Postgres 上明确跳过而不是假绿。
+ * SQLite 单写者复现不出并发；R-056 后测试只连 Postgres，这些竞争一律真跑。
  */
-const pgOnly = process.env.NOCOBASE_TEST_DB_DIALECT === 'postgres';
 const test = createAppTest({
   createServer: createStandaloneServer,
   config: {
@@ -52,7 +51,7 @@ const unique = (prefix: string): string =>
 const hire = async (session: TestSession): Promise<Row> =>
   await dataOf(await session.fetch('/employees', json(unique('Hire'))));
 
-test('R-011 验收3: concurrent hires on Postgres get distinct employee numbers', { skip: !pgOnly }, async ({
+test('R-011 验收3: concurrent hires on Postgres get distinct employee numbers', async ({
   testApp,
   connection,
 }) => {
@@ -84,7 +83,7 @@ test('R-011 验收3: concurrent hires on Postgres get distinct employee numbers'
   ).rejects.toThrow();
 });
 
-test('R-011 验收3: a departure never recycles an employee number', { skip: !pgOnly }, async ({
+test('R-011 验收3: a departure never recycles an employee number', async ({
   testApp,
 }) => {
   const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
@@ -105,7 +104,7 @@ test('R-011 验收3: a departure never recycles an employee number', { skip: !pg
   expect(b).toBeGreaterThan(a);
 });
 
-test('R-011 验收8: a failure while creating the account leaves no account or profile behind', { skip: !pgOnly }, async ({
+test('R-011 验收8: a failure while creating the account leaves no account or profile behind', async ({
   testApp,
   app,
   connection,
@@ -138,7 +137,7 @@ test('R-011 验收8: a failure while creating the account leaves no account or p
 });
 
 
-test('R-011 验收1: account and profile commit or fail together', { skip: !pgOnly }, async ({
+test('R-011 验收1: account and profile commit or fail together', async ({
   testApp,
   app,
   connection,
@@ -165,7 +164,7 @@ test('R-011 验收1: account and profile commit or fail together', { skip: !pgOn
   expect(await connection.repository<Row>('user').findMany({ filter: { username: name.toLowerCase() } })).toEqual([]);
 });
 
-test('R-011 验收3: the employee number sequence stops at E999999', { skip: !pgOnly }, async ({
+test('R-011 验收3: the employee number sequence stops at E999999', async ({
   testApp,
   app,
   connection,

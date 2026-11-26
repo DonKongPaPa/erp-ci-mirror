@@ -62,16 +62,18 @@ it('groups the modules an administrator may open into categories of cards that o
   expect(cards.map((card) => card.textContent)).toEqual([
     'UsersManage accounts, access and active sessions.',
     'DepartmentsMaintain the department tree, its members, the manager and the reporting line.',
+    'EmployeesMaintain employee profiles, positions, job grades and reporting lines.',
     'Permission managementSet what each role can open and do, and the data it can see.',
     'Application API keysIssue keys for service accounts used by external systems; a key acts as its service account, not as the person who issued it.',
   ]);
   expect(cards[0]).toHaveAttribute('href', '/main/settings/users');
   expect(cards[1]).toHaveAttribute('href', '/main/settings/departments');
-  expect(cards[2]).toHaveAttribute('href', '/main/settings/roles');
-  expect(cards[3]).toHaveAttribute('href', '/main/settings/api-keys');
+  expect(cards[2]).toHaveAttribute('href', '/main/settings/employees');
+  expect(cards[3]).toHaveAttribute('href', '/main/settings/roles');
+  expect(cards[4]).toHaveAttribute('href', '/main/settings/api-keys');
   // Categories without a module this viewer may open are not shown.
   expect(screen.getAllByRole('region')).toHaveLength(1);
-  cards[2].focus();
+  cards[3].focus();
   await user.keyboard('{Enter}');
   await waitFor(() =>
     expect(screen.getByRole('status', { name: 'Route' })).toHaveTextContent(

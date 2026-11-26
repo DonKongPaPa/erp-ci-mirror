@@ -117,6 +117,7 @@ describe('System settings navigation', () => {
         [
           ['settingsUsers', '/settings/users'],
           ['settingsDepartments', '/settings/departments'],
+          ['settingsEmployees', '/settings/employees'],
           ['permissionManagement', '/settings/roles'],
           ['applicationApiKeysManagement', '/settings/api-keys'],
         ],
@@ -129,6 +130,7 @@ describe('System settings navigation', () => {
         [
           ['settingsUsers', '/settings/users'],
           ['settingsDepartments', '/settings/departments'],
+          ['settingsEmployees', '/settings/employees'],
           ['permissionManagement', '/settings/default-access'],
           ['applicationApiKeysManagement', '/settings/api-keys'],
         ],
@@ -145,7 +147,10 @@ describe('System settings navigation', () => {
     expect(catalog(routes, denied)).toEqual([
       [
         'settingsAccount',
-        [['applicationApiKeysManagement', '/settings/api-keys']],
+        [
+          ['settingsEmployees', '/settings/employees'],
+          ['applicationApiKeysManagement', '/settings/api-keys'],
+        ],
       ],
     ]);
     // The settings entry stays while the viewer may open one module in it.
@@ -235,6 +240,7 @@ describe('System settings navigation', () => {
         [
           ['settingsUsers', '/settings/users'],
           ['settingsDepartments', '/settings/departments'],
+          ['settingsEmployees', '/settings/employees'],
           ['permissionManagement', '/settings/roles'],
           ['applicationApiKeysManagement', '/settings/api-keys'],
         ],
@@ -274,6 +280,7 @@ it('hides the notification module and the application API keys card when their p
       [
         ['settingsUsers', '/settings/users'],
         ['settingsDepartments', '/settings/departments'],
+        ['settingsEmployees', '/settings/employees'],
         ['permissionManagement', '/settings/roles'],
         ['applicationApiKeysManagement', '/settings/api-keys'],
       ],
@@ -297,6 +304,7 @@ it('hides the notification module and the application API keys card when their p
       [
         ['settingsUsers', '/settings/users'],
         ['settingsDepartments', '/settings/departments'],
+        ['settingsEmployees', '/settings/employees'],
         ['permissionManagement', '/settings/roles'],
         ['applicationApiKeysManagement', '/settings/api-keys'],
       ],
@@ -337,6 +345,7 @@ it('places database browsing in System and hides its card when access is denied'
       [
         ['settingsUsers', '/settings/users'],
         ['settingsDepartments', '/settings/departments'],
+        ['settingsEmployees', '/settings/employees'],
         ['permissionManagement', '/settings/roles'],
         ['applicationApiKeysManagement', '/settings/api-keys'],
       ],
@@ -355,6 +364,7 @@ it('places database browsing in System and hides its card when access is denied'
       [
         ['settingsUsers', '/settings/users'],
         ['settingsDepartments', '/settings/departments'],
+        ['settingsEmployees', '/settings/employees'],
         ['permissionManagement', '/settings/roles'],
         ['applicationApiKeysManagement', '/settings/api-keys'],
       ],

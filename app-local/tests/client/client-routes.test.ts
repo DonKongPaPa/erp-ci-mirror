@@ -206,6 +206,7 @@ describe('app client routes', () => {
       { name: 'settingsUser', authorizedAs: 'user:*' },
       { name: 'settingsUserEdit', authorizedAs: 'user:*' },
       { name: 'settingsDepartments', authorizedAs: 'departments' },
+      { name: 'settingsEmployees', authorizedAs: 'employees' },
       {
         name: 'settingsRoles',
         authorizedAs: 'settings:authorization.permission-sets',
@@ -251,6 +252,7 @@ describe('app client routes', () => {
       '/settings/users/:userId',
       '/settings/users/:userId/edit',
       '/settings/departments',
+      '/settings/employees',
       '/settings/roles',
       '/settings/roles/create',
       '/settings/roles/:key/edit',
@@ -289,6 +291,7 @@ describe('app client routes', () => {
       { name: 'settingsUser', authorizedAs: 'user:*' },
       { name: 'settingsUserEdit', authorizedAs: 'user:*' },
       { name: 'settingsDepartments', authorizedAs: 'departments' },
+      { name: 'settingsEmployees', authorizedAs: 'employees' },
       {
         name: 'settingsRoles',
         authorizedAs: 'settings:authorization.permission-sets',

@@ -31,9 +31,12 @@ label="$(podman inspect --format "{{index .Config.Labels \"$TEST_PG_LABEL\"}}" "
   fail_check "容器 $TEST_PG_CONTAINER 没有 $TEST_PG_LABEL=1 标签，不是测试库（开发库不会被当成测试库）；$REBUILD。"
 
 # env 文件位置从 git common-dir 回推，副本里也能找到主检出那一份。
-common_dir="$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
-[ -n "$common_dir" ] || fail_check "找不到测试库的连接参数；$REBUILD，或由 CI 注入变量。"
-env_file="$(dirname "$common_dir")/.local/test-pg.env"
+env_file="${TEST_PG_ENV_FILE:-}"
+if [ -z "$env_file" ]; then
+  common_dir="$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  [ -n "$common_dir" ] || fail_check "找不到测试库的连接参数；$REBUILD，或由 CI 注入变量。"
+  env_file="$(dirname "$common_dir")/.local/test-pg.env"
+fi
 [ -f "$env_file" ] || fail_check "找不到测试库的连接参数；$REBUILD，或由 CI 注入变量。"
 
 POSTGRES_HOST=''; POSTGRES_PORT=''; POSTGRES_USER=''
@@ -42,13 +45,14 @@ while IFS='=' read -r key value; do
   case "$key" in
     POSTGRES_HOST|POSTGRES_PORT|POSTGRES_USER|POSTGRES_PASSWORD|POSTGRES_DATABASE)
       printf -v "$key" '%s' "$value"
+      export "$key"
       ;;
   esac
 done < "$env_file"
 
 # 真连一次：容器在但凭据写岔也必须停下，不能让闸门假绿。
-podman exec -e "PGPASSWORD=$POSTGRES_PASSWORD" "$TEST_PG_CONTAINER" \
-  psql -U "$POSTGRES_USER" -d "$POSTGRES_DATABASE" -tAc 'select 1' >/dev/null 2>&1 ||
-  fail_check "测试库连不上（凭据或容器状态不对）；$REBUILD 重建。"
+# 必须从宿主侧走 TCP —— 容器内 loopback 是 trust 认证，错口令也返回 1。
+node "$ROOT/scripts/ci/pg-probe.mjs" ||
+  fail_check "测试库连不上（宿主侧 TCP 探测失败）；$REBUILD 重建。"
 
 printf '[test-pg] 测试库 %s 身份与连接均正常\n' "$TEST_PG_CONTAINER"

@@ -410,12 +410,21 @@ fi
 export NOCOBASE_TEST_DB_DIALECT=postgres
 
 # 本地容器检查只对真正连库的档位；docs 档不连库，CI 的连接由工作流注入的变量保证。
-if [ -z "${POSTGRES_HOST:-}" ] && [ "${CI:-0}" != "true" ] && [ "${GITHUB_ACTIONS:-}" != "true" ]; then
-  case "$STAGE" in
-    fast|unit|beta|all)
-      "$ROOT/scripts/ci/test-pg-check.sh" || exit 1
-      ;;
-  esac
+# fast 档按改动路径判断：动过测试或应用代码才查，只改文档不查（R-056 收尾第 4 点）。
+need_test_db=0
+case "$STAGE" in
+  unit|beta|all) need_test_db=1 ;;
+  fast)
+    if "$ROOT/scripts/ci/changed-needs-db.sh" "$ROOT"; then need_test_db=1; fi
+    ;;
+esac
+if [ "$need_test_db" -eq 1 ]; then
+  if [ -z "${POSTGRES_HOST:-}" ] && [ "${CI:-0}" != "true" ] && [ "${GITHUB_ACTIONS:-}" != "true" ]; then
+    "$ROOT/scripts/ci/test-pg-check.sh" || exit 1
+  fi
+else
+  # 不连库的档位给配置层一个显式信号：只定方言、缺参数不报错，但不回落 SQLite。
+  export NOCOBASE_DOCS_ONLY=1
 fi
 
 cd "$APP" || fail "进不去 app-local"

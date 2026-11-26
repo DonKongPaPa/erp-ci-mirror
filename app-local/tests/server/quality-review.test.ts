@@ -676,15 +676,15 @@ test('R-002 14: 没有查看权限的人 403；区间不合法时 400', async ({
 });
 
 /**
- * 并发确认（只在真 Postgres 上跑）：两个人同时确认同一份初筛。
+ * 并发确认：两个人同时确认同一份初筛。测试只连 Postgres，真跑。
  *
- * SQLite 复现不出来（写事务串行）。这里用一条外部事务先把初筛那一行 `FOR UPDATE`
+ * 这里用一条外部事务先把初筛那一行 `FOR UPDATE`
  * 锁住，两个确认请求会先后完成「读初筛 + 写确认记录」，然后一起停在 CAS 更新上；
  * 等 `pg_stat_activity` 里两个后台都在等锁，放锁：一个更新成功，另一个的
  * `WHERE reviewId = <它读到的值>` 不再匹配，得到 409，它写的确认记录随事务回滚。
  */
-describe.skipIf(process.env.NOCOBASE_TEST_DB_DIALECT !== 'postgres')(
-  'R-002 并发确认（SQLite 复现不出来）',
+describe(
+  'R-002 并发确认（真 Postgres）',
   () => {
     test(
       'R-002 9: 同时确认同一份初筛时，一个 200、一个 409，库里只留一行',

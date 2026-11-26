@@ -21,10 +21,9 @@ import {
  * drop，遇到死锁、锁不可用、对象被占用时只结束持有该 schema 内对象锁的会话并重试。
  * 下面是它的变异自检：拿掉等待或重试，它们会红。
  *
- * 本机默认 SQLite；`drop schema … cascade` 与 `pg_locks` 只在 Postgres 上有。
+ * 测试只连 Postgres；`drop schema … cascade` 与 `pg_locks` 都在这一方言上。
  */
 
-const dialect = process.env.NOCOBASE_TEST_DB_DIALECT ?? 'sqlite';
 const config = {
   app: { publicOrigin: 'http://localhost' },
   auth: { secret: 'test-auth-secret-at-least-32-characters' },
@@ -51,7 +50,6 @@ it('finishes an in-flight request before closing the application', async () => {
     config: {
       directory,
       testDatabases: {
-        dialect: 'sqlite',
         connections: ['main'],
         connectionConfig: () => ({}),
         drop: async () => {
@@ -60,7 +58,7 @@ it('finishes an in-flight request before closing the application', async () => {
       },
     },
   } as unknown as TestApp;
-  const app = stabilizeTestApp(fake);
+  const app = stabilizeTestApp(fake, { drop: fake.config.testDatabases.drop });
 
   const pending = app.fetch(new Request('http://localhost/in-flight'));
   await app.close();
@@ -150,7 +148,7 @@ async function inspect(
   }
 }
 
-describe.skipIf(dialect !== 'postgres')('Postgres test-app teardown', () => {
+describe('Postgres test-app teardown', () => {
   it('ends the session that locks its schema and retries the drop', async () => {
     const app = await createPlainApp();
     const lock = await holdSchemaLock(app);
