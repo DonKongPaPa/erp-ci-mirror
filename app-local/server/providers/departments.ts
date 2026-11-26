@@ -75,6 +75,8 @@ export type DepartmentRuleCode =
   | 'merge-target-self'
   | 'merge-target-deactivated'
   | 'merge-target-not-found'
+  | 'merge-successor-cycle'
+  | 'enable-merged-department'
   | 'transfer-user-not-member'
   | 'transfer-includes-manager'
   | 'transfer-target-not-found'
@@ -291,7 +293,7 @@ export function assertParentActive(
   }
 }
 
-/** 继任者在被指定的时候一定是未停用的部门（不变量 5）。 */
+/** 继任者在被指定的时候一定是未停用的部门，继任链也不能指回自己（不变量 5）。 */
 export function assertSuccessorActive(
   departments: readonly Department[],
   departmentId: string,
@@ -309,6 +311,9 @@ export function assertSuccessorActive(
   if (successor === undefined || !successor.active) {
     fail('successor-deactivated');
   }
+  // 停用会把 departmentId.successorId 设成 successorId。继任者的链若已指回
+  // departmentId，写下去就成环；与合并入口共用同一段整链校验。
+  assertSuccessorNoCycle(departments, departmentId, successorId);
 }
 
 /**
@@ -341,6 +346,33 @@ export function assertMergeable(
     )
   ) {
     fail('merge-source-has-active-children');
+  }
+  // 合并会给源部门写上 successorId = targetId；目标的继任链若已指回源，就成了环。
+  assertSuccessorNoCycle(departments, sourceId, targetId);
+}
+
+/**
+ * 目标的继任链不能指回源：否则合并后 source → target 与 target → … → source 成环，
+ * 违反不变量 5（顺着继任关系一定走到未停用的部门）。合并入口与停用指定继任者
+ * 共用这段校验；老数据里在用部门带着继任关系时同样会被挡住。
+ * visited 同时挡住数据里已有的环，不在读法里兜底。
+ */
+function assertSuccessorNoCycle(
+  departments: readonly Department[],
+  sourceId: string,
+  targetId: string,
+): void {
+  const byId = new Map(
+    departments.map((department) => [department.id, department]),
+  );
+  const visited = new Set<string>();
+  let current = byId.get(targetId)?.successorId ?? null;
+  while (current !== null) {
+    if (current === sourceId || visited.has(current)) {
+      fail('merge-successor-cycle');
+    }
+    visited.add(current);
+    current = byId.get(current)?.successorId ?? null;
   }
 }
 

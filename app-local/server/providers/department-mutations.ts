@@ -41,11 +41,15 @@ import {
  * `DepartmentService` 接口 —— 那个接口只给别的模块读（契约里只有七个读方法）。
  *
  * 并发照设计的「并发怎么挡」：
- * - 结构变更（改名、移动、启用、停用、合并）在事务开头取一把固定键的咨询锁，
- *   同一条链上的结构变更排队执行。SQLite 是单写者，跳过取锁。
- * - 设主部门靠 `departmentMembers` 上的部分唯一索引裁决；撞上就回滚，端点映射 409。
- * - 加成员以 `(departmentId, userId)` 的唯一约束为准，撞上当作跳过。
+ * - 结构变更（建、改名、移动、启用、停用、合并）与成员类写入（加成员、移出、
+ *   设主部门、调动、全部移出）都在事务开头取同一把固定键的咨询锁，同一条链上
+ *   排队执行。SQLite 是单写者，跳过取锁。成员类写入也取锁，才能挡住「停用/合并
+ *   与加成员交错留下停用部门的成员」「移出与改负责人交错留下负责人不在部门」
+ *   这类先读后写的窗口；唯一约束只裁决「不重复加入」与「主部门唯一」。
+ * - 设主部门撞上部分唯一索引就回滚，端点映射 409。
  * - 写校验用的快照与写入在同一个事务里读（走事务的仓储）。
+ * - 锁序固定为「员工 → 部门」：员工模块先取自己的锁再调这里的成员方法，
+ *   这里的方法不回调员工模块，所以不会反向取锁。
  */
 
 /** 部门表的完整一行（响应里要带时间戳与改组字段）。 */
@@ -296,7 +300,7 @@ export class DatabaseDepartmentMutations {
     });
   }
 
-  /** 启用。上级已停用的部门不能被启用（它会出现一个未停用的子部门）。 */
+  /** 启用。上级已停用的部门不能被启用；合并过的部门是终态，也不能再启用。 */
   public async activateDepartment(
     departmentId: string,
     transaction?: DatabaseConnection,
@@ -313,6 +317,11 @@ export class DatabaseDepartmentMutations {
       if (current.active) {
         return current;
       }
+      // 合并是终态：带继任关系的部门在 byCode 与 assertCodeAvailable 里都算已撤销，
+      // 启用它会出现「在用却不占自己编码」的部门，R-017 按编码找审批人会走错。
+      if (current.successorId !== null) {
+        return ruleFail('enable-merged-department');
+      }
       if (current.parentId !== null) {
         const parent = departments.find(
           (department) => department.id === current.parentId,
@@ -321,7 +330,6 @@ export class DatabaseDepartmentMutations {
           return ruleFail('parent-deactivated');
         }
       }
-      // 继任关系保留：它记的是历史（这个部门是怎么被并掉的），启用不改写历史。
       const { record } = await tx
         .repository<DepartmentRecord>('departments')
         .updateOne({
@@ -343,6 +351,8 @@ export class DatabaseDepartmentMutations {
     transaction?: DatabaseConnection,
   ): Promise<{ readonly added: readonly string[]; readonly skipped: readonly string[] }> {
     return await this.inTransaction(transaction, async (tx) => {
+      // 与停用、合并、改负责人串行：锁内重读快照才能挡住「停用后加成员」。
+      await this.lockStructure(tx);
       const { departments, memberships } = await this.snapshot(tx);
       if (!departments.some((department) => department.id === departmentId)) {
         return ruleFail('department-not-found');
@@ -412,6 +422,8 @@ export class DatabaseDepartmentMutations {
     transaction?: DatabaseConnection,
   ): Promise<DepartmentMembershipRecord> {
     return await this.inTransaction(transaction, async (tx) => {
+      // 与改负责人串行：锁内重读快照才能挡住「负责人不在本部门」。
+      await this.lockStructure(tx);
       const { departments, memberships } = await this.snapshot(tx);
       const department = departments.find(
         (entry) => entry.id === departmentId,
@@ -464,6 +476,8 @@ export class DatabaseDepartmentMutations {
     readonly departmentIds: readonly string[];
   }> {
     return await this.inTransaction(transaction, async (tx) => {
+      // 与改负责人串行：离职会把人从全部部门移出，负责人不能在移出后才被设上。
+      await this.lockStructure(tx);
       const { departments, memberships } = await this.snapshot(tx);
       if (departments.some((department) => department.managerId === userId)) {
         return ruleFail('manager-cannot-be-removed');
@@ -508,6 +522,8 @@ export class DatabaseDepartmentMutations {
     transaction?: DatabaseConnection,
   ): Promise<DepartmentMembershipRecord> {
     return await this.inTransaction(transaction, async (tx) => {
+      // 与移出串行：锁内重读快照，才不会把主部门设到别人正在移出的那一行上。
+      await this.lockStructure(tx);
       const { departments, memberships } = await this.snapshot(tx);
       if (!departments.some((department) => department.id === departmentId)) {
         return ruleFail('department-not-found');
@@ -654,6 +670,8 @@ export class DatabaseDepartmentMutations {
     transaction?: DatabaseConnection,
   ): Promise<{ readonly moved: number; readonly removed: number }> {
     return await this.inTransaction(transaction, async (tx) => {
+      // 与停用、合并、改负责人串行；重复提交也被锁排队，第二次按新快照拒绝。
+      await this.lockStructure(tx);
       const userIds = [...new Set(input.userIds)];
       if (
         userIds.length === 0 ||
@@ -693,6 +711,24 @@ export class DatabaseDepartmentMutations {
           await tx
             .repository<DepartmentMembershipRecord>('departmentMembers')
             .deleteOne({ filter: { id: source.id } });
+          // 与合并同一情形的做法：源行是主部门时不能只删掉它，目标行要接任主部门，
+          // 否则这个人还在目标部门、却没有任何主部门（不变量：要么没有部门，要么有且只有一个主部门）。
+          // 主部门唯一由部分唯一索引裁决：源行已经删掉，这里不会撞。
+          if (source.isPrimary) {
+            const targetMembership = memberships.find(
+              (membership) =>
+                membership.departmentId === input.toDepartmentId &&
+                membership.userId === userId,
+            );
+            if (targetMembership !== undefined) {
+              await tx
+                .repository<DepartmentMembershipRecord>('departmentMembers')
+                .updateOne({
+                  filter: { id: targetMembership.id },
+                  values: { isPrimary: true },
+                });
+            }
+          }
           removed += 1;
         } else {
           await tx
@@ -706,8 +742,11 @@ export class DatabaseDepartmentMutations {
         history.push({
           userId,
           fromDepartmentId: input.fromDepartmentId,
-          toDepartmentId: alreadyInTarget ? null : input.toDepartmentId,
-          isPrimary: alreadyInTarget ? false : source.isPrimary,
+          // 源行是主部门且目标行接任时，主部门关系移到目标部门（to 为 target）；
+          // 只是删掉兼职关系时视作移出（to 为空）。与合并记成同一种写法。
+          toDepartmentId:
+            alreadyInTarget && !source.isPrimary ? null : input.toDepartmentId,
+          isPrimary: source.isPrimary,
         });
       }
       await this.appendHistory(tx, batchId, actorId, history);

@@ -392,7 +392,7 @@ function DepartmentDetails({
                   {t('departments.merge')}
                 </Button>
               </>
-            ) : (
+            ) : department.successorId !== null ? null : (
               <Button
                 variant='outline'
                 size='sm'
