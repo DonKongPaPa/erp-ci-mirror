@@ -136,6 +136,19 @@ const enUS = {
       personInvalid: 'The handler or taker is not an active employee, or the department is inactive.',
     },
   },
+  // R-064: order review rule-code messages; the route supplies defaultValue for missing keys.
+  orderReview: {
+    errors: {
+      notFound: 'That review does not exist.',
+      notDraft: 'Only a draft review can be changed or submitted.',
+      notSubmitted: 'Only a submitted review can be confirmed.',
+      factorsIncomplete: 'All five factors need a conclusion and a reviewer.',
+      personInvalid: 'The reviewer is not an active employee.',
+      deliveryInvalid: 'The confirmed delivery date is invalid or earlier than the order date.',
+      orderInvalid: 'The sales order does not exist or has been cancelled.',
+      confirmedExists: 'This order already has a confirmed review; retry.',
+    },
+  },
   ticketNotifications: {
     contributor: 'Quality tickets',
     category: 'Quality tickets',
@@ -180,6 +193,53 @@ const enUS = {
       recipients: 'The assignee and the responsible department manager.',
       title: 'Ticket {{code}} reopened',
       body: 'Ticket {{code}} is now {{state}}.',
+    },
+  },
+  approvalNotifications: {
+    contributor: 'Approvals',
+    category: 'Approvals',
+    businessRule: 'Sent once after the transition commits; replaying the same idempotency key does not resend.',
+    languagePolicy: 'One message in the application default language.',
+    channel: 'Inbox',
+    variables: {
+      approvalId: 'Approval id',
+      workflowKey: 'Workflow name',
+      applicantName: 'Applicant name',
+    },
+    submit: {
+      name: 'Submitted for approval',
+      trigger: 'After an approval is submitted.',
+      recipients: 'Pending approvers of the current round.',
+      title: '{{workflowKey}} submitted for approval',
+      body: 'Approval {{approvalId}} of {{workflowKey}} was submitted by {{applicantName}} and is waiting for your review.',
+    },
+    approve: {
+      name: 'Approved',
+      trigger: 'After an approval is approved.',
+      recipients: 'The applicant.',
+      title: '{{workflowKey}} approved',
+      body: 'Approval {{approvalId}} of {{workflowKey}}, submitted by {{applicantName}}, was approved.',
+    },
+    reject: {
+      name: 'Rejected',
+      trigger: 'After an approval is rejected.',
+      recipients: 'The applicant.',
+      title: '{{workflowKey}} rejected',
+      body: 'Approval {{approvalId}} of {{workflowKey}}, submitted by {{applicantName}}, was rejected.',
+    },
+    sendBack: {
+      name: 'Returned',
+      trigger: 'After an approval is returned.',
+      recipients: 'The applicant.',
+      title: '{{workflowKey}} returned',
+      body: 'Approval {{approvalId}} of {{workflowKey}}, submitted by {{applicantName}}, was returned.',
+    },
+    reminder: {
+      name: 'Overdue reminder',
+      trigger: 'After an approval or a task stays pending past its deadline.',
+      recipients: 'The approver of the overdue task.',
+      title: '{{workflowKey}} is waiting',
+      body: 'Approval {{approvalId}} of {{workflowKey}}, submitted by {{applicantName}}, is still waiting for your review.',
     },
   },
 } as const;

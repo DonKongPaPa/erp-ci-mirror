@@ -2,7 +2,11 @@ import type { AppPluginApplication } from '@nocobase/app-server/plugins';
 import { authorizationToken } from '@nocobase/app-plugin-authorization/server';
 import { ServiceProvider } from '@nocobase/service-provider';
 
-import { APPROVAL_COLLECTIONS } from '../approvals-resources.js';
+import {
+  APPROVAL_COLLECTIONS,
+  APPROVAL_RECORD_ACCESS,
+  APPROVAL_RESOURCE,
+} from '../approvals-resources.js';
 import {
   BIZ_DICT_COLLECTIONS,
   bizDict as bizDictResource,
@@ -39,6 +43,10 @@ import {
   purchaseOrders as purchaseOrdersResource,
   salesOrders as salesOrdersResource,
 } from '../orders-resources.js';
+import {
+  ORDER_REVIEW_COLLECTIONS,
+  orderReviews as orderReviewsResource,
+} from '../order-review-resources.js';
 import { SHIFT_COLLECTIONS, shifts as shiftsResource } from '../shift-resources.js';
 import { departmentServiceToken } from './departments.js';
 
@@ -82,6 +90,7 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
       ...DOC_FILE_COLLECTIONS,
       ...FINANCE_COLLECTIONS,
       ...BIZ_DICT_COLLECTIONS,
+      ...ORDER_REVIEW_COLLECTIONS,
     ]) {
       authz.database.collections.add(collection);
     }
@@ -106,10 +115,19 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
     authz.compositeResources.define(bizOptionsResource);
     authz.compositeResources.define(expenseRecordsResource);
     authz.compositeResources.define(invoiceReceiptsResource);
+    // R-017 M3：审批的业务动作与两把「仅本人」范围键。资源 id 用单数 approval，
+    // 与 S1 守门测试里「不注册 approvals composite」不冲突；三张表仍是裸数据库资源。
+    authz.compositeResources.define(APPROVAL_RESOURCE);
+    // R-064：评审资源只声明，不做 ui.place —— 本片没有页面；销售订单的 ledgerView
+    // 动作已在 orders-resources.ts 的销售资源上追加。
+    authz.compositeResources.define(orderReviewsResource);
     const departmentService = this.app.container.resolve(
       departmentServiceToken,
     );
     for (const access of defineDepartmentRecordAccess(departmentService)) {
+      authz.recordAccess.define(access);
+    }
+    for (const access of APPROVAL_RECORD_ACCESS) {
       authz.recordAccess.define(access);
     }
     authz.ui.sections.add({

@@ -17,6 +17,8 @@ const EXECUTED_SEED_HASHES: Readonly<Record<string, string>> = {
     '8b24c0abbe25c747f43fb35eae4f4fd3f2d07f0fc41626935322963dac418e0d',
   '202611280001_seed_business_permission_sets_catchup.ts':
     '915cd1f645c8dacd2d2a3c427b72cc259f49868856dd42044f373e8536c87e43',
+  '202611280003_seed_order_review_grants.ts':
+    '63aa0da7404fd9a724142198eec68772ef524feed7d2d8b3ab426299624bc4fc',
 };
 
 const RULE =

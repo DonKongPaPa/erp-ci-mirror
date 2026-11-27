@@ -176,6 +176,43 @@ const readItemForReceive = defineDatabasePermission((permission) =>
   permission.collection('items').title(itemTitle).read(['id', 'code', 'name', 'spec', 'unitCode']),
 );
 
+/**
+ * R-064：总台账与首页提醒的窄读动作。逐列列出恰好用到的列 —— 不回价格、金额、
+ * 客户联系人与电话；`planning` 拿它而不拿订单 `view`，所以连价格入口都没有。
+ */
+const ledgerHeaderRead = defineDatabasePermission((permission) =>
+  permission.collection('salesOrders').title(salesHeaderTitle).read([
+    'id', 'orderNo', 'orderDate', 'status', 'latestDeliveryDate',
+    'customerId', 'projectCode', 'handlerUserId',
+  ]),
+);
+const ledgerLineRead = defineDatabasePermission((permission) =>
+  permission.collection('salesOrderLines').title(salesLineTitle).read([
+    'id', 'qty', 'shippedQty',
+  ]),
+);
+const ledgerPartnerRead = defineDatabasePermission((permission) =>
+  permission
+    .collection('partners')
+    .title(title('authorization.partners.tables.partners'))
+    .read(['id', 'code', 'name']),
+);
+const ledgerReviewRead = defineDatabasePermission((permission) =>
+  permission
+    .collection('orderReviews')
+    .title(title('authorization.orderReviews.tables.reviews'))
+    .read([
+      'id', 'salesOrderId', 'status', 'reviewerUserId',
+      'confirmedDeliveryDate', 'reviewedAt',
+    ]),
+);
+const ledgerProjectRead = defineDatabasePermission((permission) =>
+  permission
+    .collection('bizDictEntries')
+    .title(title('authorization.bizDict.tables.entries'))
+    .read(['dictType', 'code', 'name']),
+);
+
 export const ORDER_COLLECTIONS: readonly DatabaseCollectionDefinition[] = [
   {
     name: 'purchaseOrders',
@@ -236,6 +273,18 @@ const defineOrderResource = (kind: 'purchase' | 'sales') => {
         action
           .title(title('authorization.purchaseOrders.actions.financeView'))
           .grant('purchaseOrders', financeViewOrdersPermission),
+      );
+    }
+    // R-064：总台账只读窄列；既有 view / viewPrice 一字不改。
+    if (kind === 'sales') {
+      result = result.action('ledgerView', (action) =>
+        action
+          .title(title('authorization.salesOrders.actions.ledgerView'))
+          .grant('salesOrders', ledgerHeaderRead)
+          .grant('salesOrderLines', ledgerLineRead)
+          .grant('partners', ledgerPartnerRead)
+          .grant('orderReviews', ledgerReviewRead)
+          .grant('bizDictEntries', ledgerProjectRead),
       );
     }
     return result.action('submit', (action) =>

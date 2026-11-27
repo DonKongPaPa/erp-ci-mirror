@@ -1,5 +1,7 @@
 import {
   defineLifecycle,
+  type EffectContext,
+  type JsonObject,
   type Lifecycle,
   type LifecycleRecord,
 } from '@nocobase/lifecycle';
@@ -43,17 +45,54 @@ export interface Approval extends LifecycleRecord {
 export interface ApprovalParameters {
   /** 金额严格大于它才走多一级的那条链；由宿主在注册时覆盖。 */
   readonly extraApprovalThreshold: number;
+  /** 流程级超时：在同一状态停留超过这个毫秒数就催办。 */
+  readonly processTimeoutMs: number;
+}
+
+/** 效果在转移提交之后才拿到服务；测试工具没有注入服务时效果直接跳过。 */
+export interface ApprovalServices {
+  notifyApproval(event: {
+    readonly kind: 'submit' | 'approve' | 'reject' | 'sendBack' | 'reminder';
+    readonly approvalId: string;
+    readonly workflowKey: string;
+    readonly applicantId: string;
+    readonly version: number;
+  }): Promise<boolean>;
 }
 
 export interface ApprovalTypes {
   record: Approval;
   state: ApprovalStatus;
   parameters: ApprovalParameters;
-  services: Record<string, never>;
+  services: ApprovalServices;
 }
 
 const hasNodeKey = (value: unknown): value is string =>
   typeof value === 'string' && value.trim().length > 0;
+
+/** 提交之后才跑的通知效果；幂等键由通知服务按事件与版本算。 */
+const notifyEffect = (
+  kind: 'submit' | 'approve' | 'reject' | 'sendBack' | 'reminder',
+) => ({
+  name: `approval-notify-${kind}`,
+  run: ({ record, services }: EffectContext<ApprovalTypes>) => {
+    const notify = (services as Partial<ApprovalServices> | undefined)?.notifyApproval;
+    if (!notify) return false;
+    const input = record as unknown as JsonObject & {
+      id: string;
+      workflowKey: string;
+      applicantId: string;
+      lifecycleVersion?: number;
+    };
+    return notify({
+      kind,
+      approvalId: String(input.id),
+      workflowKey: String(input.workflowKey),
+      applicantId: String(input.applicantId),
+      version: Number(input.lifecycleVersion ?? 0),
+    });
+  },
+});
 
 export const approvalsLifecycle: Lifecycle<ApprovalTypes> =
   defineLifecycle<ApprovalTypes>({
@@ -65,7 +104,10 @@ export const approvalsLifecycle: Lifecycle<ApprovalTypes> =
     changedAtField: 'statusChangedAt',
     versionField: 'lifecycleVersion',
     initial: 'draft',
-    parameters: { extraApprovalThreshold: 100 },
+    parameters: {
+      extraApprovalThreshold: 100,
+      processTimeoutMs: 24 * 60 * 60 * 1000,
+    },
     states: [
       'draft',
       'submitted',
@@ -83,6 +125,7 @@ export const approvalsLifecycle: Lifecycle<ApprovalTypes> =
         set: ({ record }) => ({
           currentRound: (Number(record.currentRound) || 0) + 1,
         }),
+        effects: [notifyEffect('submit')],
       },
       process: { from: 'submitted', to: 'processing', manual: false },
       delegate: {
@@ -99,11 +142,13 @@ export const approvalsLifecycle: Lifecycle<ApprovalTypes> =
         from: ['submitted', 'processing'],
         to: 'approved',
         manual: false,
+        effects: [notifyEffect('approve')],
       },
       reject: {
         from: ['submitted', 'processing'],
         to: 'rejected',
         manual: false,
+        effects: [notifyEffect('reject')],
       },
       sendBack: {
         from: ['submitted', 'processing'],
@@ -111,8 +156,26 @@ export const approvalsLifecycle: Lifecycle<ApprovalTypes> =
         route: ({ input }) =>
           hasNodeKey(input.returnToNodeKey) ? 'processing' : 'returned',
         manual: false,
+        effects: [notifyEffect('sendBack')],
+      },
+      // 流程级超时催办：原地自转移，版本前进、状态不变，可以反复催。
+      remind: {
+        from: ['submitted', 'processing'],
+        to: ['submitted', 'processing'],
+        route: ({ record }) => record.status,
+        manual: false,
+        effects: [notifyEffect('reminder')],
       },
       withdraw: { from: 'submitted', to: 'draft' },
       abort: { from: ['draft', 'submitted', 'processing'], to: 'aborted' },
+    },
+    // 触发器由定时 sweep 执行；只找在 submitted/processing 停留够久的单。
+    triggers: {
+      remindIdle: {
+        transition: 'remind',
+        when: ['submitted', 'processing'],
+        after: ({ processTimeoutMs }) => processTimeoutMs,
+        batchSize: 50,
+      },
     },
   });

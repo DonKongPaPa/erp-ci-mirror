@@ -1,4 +1,7 @@
 import ApiKeysPolicyProvider from './api-keys-policy.js';
+import ApprovalNotificationsProvider from './approval-notifications.js';
+import ApprovalTimeoutProvider from './approval-timeout.js';
+import ApprovalsProvider from '../approvals-service.js';
 import AuthorizationResourcesProvider from './authorization-resources.js';
 import BizDictProvider from './biz-dict.js';
 import CodesProvider from './codes.js';
@@ -16,6 +19,8 @@ import KnowledgeAccessProvider from './knowledge-access.js';
 import LifecycleProvider from './lifecycles.js';
 import NotificationManagementProvider from './notification-management.js';
 import OrdersProvider from './orders.js';
+import OrderLedgerProvider from './order-ledger.js';
+import OrderReviewsProvider from './order-reviews.js';
 import PartnersProvider from './partners.js';
 import QualityDraftingProvider from './quality-drafting.js';
 import QualityModelGatewayProvider from './quality-model-gateway.js';
@@ -56,6 +61,9 @@ const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
   OrdersProvider,
   // R-072：业务字典的读服务与写服务；assertActiveCodes 供各单据片共用。无调用方时也可解析。
   BizDictProvider,
+  // R-064：订单评审的读写服务与总台账的只读投影；无调用方时也能被容器解析。
+  OrderReviewsProvider,
+  OrderLedgerProvider,
   AuthorizationResourcesProvider,
   NotificationManagementProvider,
   QualityScreeningProvider,
@@ -66,8 +74,13 @@ const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
   KnowledgeAccessProvider,
   // R-003 S5：唯一的 lifecycle 运行时（R-017 未落地，由本片带上）。
   LifecycleProvider,
+  // R-017 M3：审批端点共用的业务服务；单一 lifecycle 运行时已在上面登记。
+  ApprovalsProvider,
   // R-003 S8：五张站内通知模板，效果在流转/派单提交之后才发。
   TicketNotificationsProvider,
+  ApprovalNotificationsProvider,
+  // R-017 M4：进程内每小时扫一次任务级超时、流程级触发器与效果记录清理。
+  ApprovalTimeoutProvider,
   // R-026：建「人」的账号时指派基线角色 staff。开发工具的演示账户也是建人：它们在主组合之后才登记
   // （见 `server/embedded.ts` 的开发环境入口），所以自然排在这一项后面。
   StaffBaselineProvider,

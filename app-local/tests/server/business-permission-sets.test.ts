@@ -13,7 +13,14 @@ import businessPermissionSetsSeed, {
   ensureBusinessPermissionSets,
   persistBusinessPermissionSets,
 } from '../../database/main/seeds/202611240001_seed_business_permission_sets.js';
+import { APPROVAL_GRANT } from '../../database/main/seeds/202611280002_seed_staff_approval_grants.js';
 import catchupSeed from '../../database/main/seeds/202611280001_seed_business_permission_sets_catchup.js';
+import orderReviewGrantsSeed, {
+  orderReviewPermissionSets,
+  persistOrderReviewGrants,
+  planningPermissionSet,
+  salesReviewPermissionSet,
+} from '../../database/main/seeds/202611280003_seed_order_review_grants.js';
 import { createStandaloneServer } from '../../server/standalone.js';
 
 /**
@@ -280,6 +287,18 @@ const salesShipGrant = {
   resource: { type: 'composite', id: 'salesOrders' },
   actions: [{ action: 'ship' }],
 };
+const reviewGrant = {
+  resource: { type: 'composite', id: 'orderReviews' },
+  actions: ['view', 'create', 'update', 'submit', 'confirm', 'void'].map((action) => ({ action })),
+};
+const reviewViewGrant = {
+  resource: { type: 'composite', id: 'orderReviews' },
+  actions: [{ action: 'view' }],
+};
+const ledgerViewGrant = {
+  resource: { type: 'composite', id: 'salesOrders' },
+  actions: [{ action: 'ledgerView' }],
+};
 
 const expectedRoles = {
   quality_manager: {
@@ -389,7 +408,18 @@ const expectedRoles = {
   },
 } as const;
 
+/** R-064：planning 与给 sales 的两条补丁授权从新种子取，断言照旧逐项钉住。 */
+const expectedNewRoles = {
+  planning: {
+    title: { key: 'permissionSets.business.planning', ns: 'app-local' },
+    grants: [reviewGrant, ledgerViewGrant],
+  },
+} as const;
+const expectedSalesAdditions = [reviewViewGrant, ledgerViewGrant] as const;
+
 const roleKeys = Object.keys(expectedRoles);
+const newRoleKeys = Object.keys(expectedNewRoles);
+const allRoleKeys = [...roleKeys, ...newRoleKeys];
 
 const test = createAppTest({
   createServer: createStandaloneServer,
@@ -408,6 +438,31 @@ test('R-013: declares the keys, titles and grants of the designed roles', () => 
   }
 });
 
+/** R-064：原种子恢复成主线样子后，planning 与 sales 补丁只由新种子声明。 */
+test('R-064: the new seed declares planning and the sales additions', () => {
+  expect(planningPermissionSet.key).toBe('planning');
+  expect(planningPermissionSet.title).toEqual(
+    expectedNewRoles.planning.title,
+  );
+  expect(planningPermissionSet.grants).toEqual(
+    expectedNewRoles.planning.grants,
+  );
+  expect(salesReviewPermissionSet.key).toBe('sales');
+  expect(salesReviewPermissionSet.grants).toEqual(expectedSalesAdditions);
+  expect(orderReviewPermissionSets.map((set) => set.key)).toEqual([
+    'planning',
+    'sales',
+  ]);
+  // 原种子里不该再有 R-064 的任何授权；否则老环境校验和警告不会带来新角色。
+  for (const set of businessPermissionSets) {
+    for (const grant of set.grants) {
+      expect(grant.resource.id, `${set.key} 不该在原种子拿到评审授权`).not.toBe(
+        'orderReviews',
+      );
+    }
+  }
+});
+
 test('R-013: the seed creates the designed roles', async ({ app }) => {
   const sets = app.container.resolve(authorizationToken).permissionSets;
   const stored = await sets.list();
@@ -415,8 +470,38 @@ test('R-013: the seed creates the designed roles', async ({ app }) => {
     const set = stored.find((entry) => entry.key === key);
     expect(set, `seed 没有建出角色 ${key}`).toBeDefined();
     expect(set?.title).toEqual(expected.title);
-    expect(set?.grants).toEqual(expected.grants);
+    // 三颗种子都跑过：staff 在 M3 补了审批的两个仅本人动作；sales 多出 R-064 的两条只读授权。
+    expect(set?.grants).toEqual([
+      ...expected.grants,
+      ...(key === 'staff' ? [APPROVAL_GRANT] : []),
+      ...(key === 'sales' ? expectedSalesAdditions : []),
+    ]);
   }
+});
+
+/** 全新库：两颗种子都跑，planning 落库，sales 恰好多出两条只读授权。 */
+test('R-064: the new seed creates planning and adds the two sales grants on a fresh database', async ({
+  app,
+  connection,
+}) => {
+  const sets = app.container.resolve(authorizationToken).permissionSets;
+  const stored = await sets.list();
+  const planning = stored.find((entry) => entry.key === 'planning');
+  expect(planning, '新种子没有建出 planning').toBeDefined();
+  expect(planning?.title).toEqual(expectedNewRoles.planning.title);
+  expect(planning?.grants).toEqual(expectedNewRoles.planning.grants);
+
+  const sales = stored.find((entry) => entry.key === 'sales');
+  expect(sales?.grants).toEqual([
+    ...expectedRoles.sales.grants,
+    ...expectedSalesAdditions,
+  ]);
+
+  // 重跑什么都不写：角色与授权都已经存在。
+  expect(await persistOrderReviewGrants(connection.query)).toEqual({
+    created: [],
+    granted: [],
+  });
 });
 
 /** 建一个持有所给角色的用户；用户名只收字母数字。 */
@@ -449,12 +534,13 @@ const createRoleUser = async (
 const APPROVAL_TABLES = ['approvals', 'approvalRounds', 'approvalRecords'];
 
 /**
- * R-017 S1：默认拒绝要有「经过 seed 的应用」上的行为证据。
+ * R-017 S1 的默认拒绝形状在 M3 被新种子延伸。原文保留：
+ * 「staff 与零角色用户对三表的读、建、改都必须 deny」。M3 的新种子给 staff
+ * 挂了 `approval.submit`（approvals 按 applicantId 仅本人）与 `approval.review`
+ * （approvalRecords 按 assigneeId 仅本人），这两张表因此变成 conditional；
+ * approvalRounds 与零角色用户仍默认拒绝。
  *
- * 上一个切片的行为测试在没有跑 seed 的应用上证明的是「没授权就被拒」，证明不了
- * 「seed 没给」。这里在同一份 seed 已落库的应用上走授权服务的正式入口
- * `authz.for(...).authorize()`：staff 与零角色用户对三表的读、建、改都必须 deny，
- * 只有 root 可读写。把 seed 改成给 staff 审批读，这一条必须红。
+ * > Status: Outdated（2026-11-28，R-017 M3）上面那句 staff 全 deny 只适用于 S1。
  */
 test('R-017 S1: with the seed applied, staff and a roleless user are denied on approval tables', async ({
   app,
@@ -476,19 +562,20 @@ test('R-017 S1: with the seed applied, staff and a roleless user are denied on a
 
   for (const table of APPROVAL_TABLES) {
     for (const action of ['read', 'create', 'update'] as const) {
-      for (const [label, id] of [
-        ['staff', staff],
-        ['零角色用户', nobody],
-      ] as const) {
-        const denied = await decision(id, table, action);
-        expect(denied.effect, `${label} 不该能 ${action} ${table}`).toBe(
-          'deny',
+      const staffDecision = await decision(staff, table, action);
+      if (table === 'approvalRounds') {
+        expect(staffDecision.effect, `approvalRounds 不该放开 ${action}`).toBe('deny');
+        expect(codes(staffDecision)).toContain('NO_OBJECT_PERMISSION');
+      } else {
+        expect(staffDecision.effect, `staff 只能有仅本人的 ${action} ${table}`).toBe(
+          'conditional',
         );
-        expect(
-          codes(denied),
-          `${label} ${action} ${table} 的拒绝原因`,
-        ).toContain('NO_OBJECT_PERMISSION');
       }
+      const denied = await decision(nobody, table, action);
+      expect(denied.effect, `零角色用户不该能 ${action} ${table}`).toBe('deny');
+      expect(codes(denied), `零角色用户 ${action} ${table} 的拒绝原因`).toContain(
+        'NO_OBJECT_PERMISSION',
+      );
       const rootDecision = await decision(String(admin.user.id), table, action);
       expect(rootDecision.effect, `root 不能 ${action} ${table}`).not.toBe(
         'deny',
@@ -624,15 +711,56 @@ test('R-013: does not create the same role twice and keeps administrator changes
   }
 });
 
+/**
+ * 存量环境：planning 还没建，sales 已被管理员改过。新种子只补出缺的角色，
+ * 改过的 sales 一份不动；第二次执行也什么都不写。
+ */
+test('R-064: the new seed rebuilds planning but never overwrites a changed sales', async ({
+  app,
+  connection,
+}) => {
+  const sets = app.container.resolve(authorizationToken).permissionSets;
+  await sets.delete('planning');
+  const changedGrants = [
+    {
+      resource: { type: 'composite', id: 'orderReviews' },
+      actions: [{ action: 'view' }],
+    },
+  ];
+  await sets.update('sales', { key: 'sales', grants: changedGrants });
+
+  expect(await persistOrderReviewGrants(connection.query)).toEqual({
+    created: ['planning'],
+    granted: [],
+  });
+  const stored = new Map((await sets.list()).map((set) => [set.key, set]));
+  expect(stored.get('planning')?.title).toEqual(expectedNewRoles.planning.title);
+  expect(stored.get('planning')?.grants).toEqual(
+    expectedNewRoles.planning.grants,
+  );
+  expect(stored.get('sales')?.grants, '管理员改过的 sales 不被覆盖').toEqual(
+    changedGrants,
+  );
+
+  expect(await persistOrderReviewGrants(connection.query)).toEqual({
+    created: [],
+    granted: [],
+  });
+  expect(
+    (await sets.get('sales'))?.grants,
+    '重跑也不覆盖管理员改过的 sales',
+  ).toEqual(changedGrants);
+});
+
 test('R-013: writes no grant on the user resource for any business role', async ({
   connection,
 }) => {
   const rows = await connection.query
     .selectFrom('authorizationPermissionSets')
     .select(['key', 'grants'])
-    .where('key', 'in', roleKeys)
+    .where('key', 'in', allRoleKeys)
     .execute();
-  expect(rows.length).toBe(roleKeys.length);
+  expect(rows.length).toBe(allRoleKeys.length);
   for (const row of rows) {
     const grants = JSON.parse(String(row.grants)) as {
       resource: { type: string; id: string };
@@ -656,7 +784,7 @@ test('R-013: writes no grant on the user resource for any business role', async 
  * 「没有在 seed 里先放开」这一条；谁加了一条宽授权这里就红。
  */
 test('R-017 S1: the seed grants no approval table and no user resource to business roles', () => {
-  for (const set of businessPermissionSets) {
+  for (const set of [...businessPermissionSets, ...orderReviewPermissionSets]) {
     for (const grant of set.grants) {
       expect(
         grant.resource.type,
@@ -757,6 +885,13 @@ test('R-013: names the seed after its file so the loader can find it', () => {
     '202611240001_seed_business_permission_sets',
   );
   expect(typeof businessPermissionSetsSeed.run).toBe('function');
+});
+
+test('R-064: names the new seed after its file so the loader can find it', () => {
+  expect(orderReviewGrantsSeed.name).toBe(
+    '202611280003_seed_order_review_grants',
+  );
+  expect(typeof orderReviewGrantsSeed.run).toBe('function');
 });
 
 test('R-075: the catchup seed is named after its file', () => {

@@ -132,6 +132,19 @@ const zhCN: AppServerResource = {
       personInvalid: '经办人、领用人不是在职员工，或领用部门不在用。',
     },
   },
+  // R-064：订单评审规则码文案；端点在缺键时用 defaultValue 兜底。
+  orderReview: {
+    errors: {
+      notFound: '这张评审不存在。',
+      notDraft: '只有草稿评审可以修改或提交。',
+      notSubmitted: '只有已提交的评审才能确认交期。',
+      factorsIncomplete: '人、机、料、法、环五项都要填结论与评审人。',
+      personInvalid: '评审人不是在职员工。',
+      deliveryInvalid: '确认交期不是合法日期，或早于销售订单日期。',
+      orderInvalid: '销售订单不存在或已取消。',
+      confirmedExists: '这张订单已有确认中的评审，请重试。',
+    },
+  },
   ticketNotifications: {
     contributor: '质量工单',
     category: '质量工单',
@@ -178,6 +191,54 @@ const zhCN: AppServerResource = {
       body: '工单 {{code}} 现在是 {{state}}。',
     },
   },
+  approvalNotifications: {
+    contributor: '审批',
+    category: '审批',
+    businessRule: '只在转移提交之后或定时扫描里发一次；同一幂等键重放不重发。',
+    languagePolicy: '按应用默认语言发送一条。',
+    channel: '站内收件箱',
+    variables: {
+      approvalId: '审批单标识',
+      workflowKey: '流程名',
+      applicantName: '申请人姓名',
+    },
+    submit: {
+      name: '提交待审',
+      trigger: '一张审批单提交之后。',
+      recipients: '当前轮次待处理的审批人。',
+      title: '{{workflowKey}} 待审批',
+      body: '{{applicantName}} 提交的 {{workflowKey}} 审批单 {{approvalId}} 等待你处理。',
+    },
+    approve: {
+      name: '审批通过',
+      trigger: '一张审批单通过之后。',
+      recipients: '申请人。',
+      title: '{{workflowKey}} 已通过',
+      body: '{{applicantName}} 提交的 {{workflowKey}} 审批单 {{approvalId}} 已通过。',
+    },
+    reject: {
+      name: '审批拒绝',
+      trigger: '一张审批单被拒绝之后。',
+      recipients: '申请人。',
+      title: '{{workflowKey}} 已拒绝',
+      body: '{{applicantName}} 提交的 {{workflowKey}} 审批单 {{approvalId}} 已被拒绝。',
+    },
+    sendBack: {
+      name: '审批退回',
+      trigger: '一张审批单被退回之后。',
+      recipients: '申请人。',
+      title: '{{workflowKey}} 已退回',
+      body: '{{applicantName}} 提交的 {{workflowKey}} 审批单 {{approvalId}} 已被退回。',
+    },
+    reminder: {
+      name: '超时提醒',
+      trigger: '一张审批单或一条任务超过期限仍未处理。',
+      recipients: '过期任务的审批人。',
+      title: '{{workflowKey}} 仍待处理',
+      body: '{{applicantName}} 提交的 {{workflowKey}} 审批单 {{approvalId}} 仍等待你处理。',
+    },
+  },
+
 };
 
 export default zhCN;

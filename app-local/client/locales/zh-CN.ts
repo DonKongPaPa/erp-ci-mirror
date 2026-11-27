@@ -1451,6 +1451,20 @@ const zhCN: AppResource = {
         createIssue: '生成出库单',
         ship: '从销售订单发货',
         viewPrice: '查看价格与金额',
+        ledgerView: '查看订单总台账',
+      },
+    },
+    // R-064：订单评审资源；ledgerView 是上面销售订单资源的新动作。
+    orderReviews: {
+      title: '订单评审',
+      tables: { reviews: '订单评审', lines: '评审项目' },
+      actions: {
+        view: '查看订单评审',
+        create: '新建订单评审',
+        update: '修改评审草稿',
+        submit: '提交订单评审',
+        confirm: '确认交期',
+        void: '作废订单评审',
       },
     },
     // R-014：客户与供应商两个业务资源，动作都是 view / create / update，没有删除。
@@ -1512,6 +1526,7 @@ const zhCN: AppResource = {
       purchase: '采购',
       finance: '财务',
       sales: '销售',
+      planning: '计划',
     },
   },
   // R-020：规则码文案；端点在缺键时用 defaultValue 兜底。

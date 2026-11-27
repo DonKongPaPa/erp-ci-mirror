@@ -14,10 +14,12 @@ import {
   type ServiceToken,
 } from '@nocobase/service-provider';
 
+import { approvalsLifecycle } from '../lifecycles/approvals.js';
 import { fqcTicketsLifecycle } from '../lifecycles/fqc-tickets.js';
 import { departmentServiceToken } from './departments.js';
 import { ticketScopeFor } from '../ticket-scope.js';
 import { ticketNotifierToken } from '../ticket-notifications.js';
+import { approvalNotifierToken } from '../approval-notifications.js';
 import { activeMemberIdsOf } from '../active-users.js';
 
 /**
@@ -57,6 +59,14 @@ export default class LifecycleProvider extends ServiceProvider<Application> {
     const previousAssignees = new Map<string, string | null>();
     const runtime = new LifecycleRuntime({
       store: createRepositoryLifecycleStore(database),
+    });
+    // R-017 M4：审批定义与工单定义共用这一个运行时。通知服务延迟解析，
+    // 所以效果只在转移提交之后才碰到它；测试工具没注入服务时效果直接跳过。
+    runtime.register(approvalsLifecycle, {
+      services: () => ({
+        notifyApproval: (event) =>
+          this.app.container.resolve(approvalNotifierToken).notify(event),
+      }),
     });
     runtime.register(fqcTicketsLifecycle, {
       services: () => ({

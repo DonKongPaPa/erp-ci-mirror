@@ -21,6 +21,7 @@ import { ServiceContainer } from '@nocobase/service-provider';
 import { expect, vi } from 'vitest';
 
 import AuthorizationResourcesProvider from '../../server/providers/authorization-resources.js';
+import { ORDER_REVIEW_COLLECTIONS } from '../../server/order-review-resources.js';
 import {
   departmentServiceToken,
   type DepartmentService,
@@ -663,12 +664,14 @@ test('R-017 S1: registers the three approval tables with exactly read/create/upd
 });
 
 /**
- * R-017 S1：默认拒绝要有行为证据，不能只读 seed 文本。
+ * R-017 S1 的形状在 M3 被新种子延伸，原文保留在下面这条注释里：
+ * 原写「staff 对三表的读、建、改都为 deny:NO_OBJECT_PERMISSION」。M3 给 staff
+ * 挂了 `approval.submit`（approvals 按 applicantId 仅本人）与 `approval.review`
+ * （approvalRecords 按 assigneeId 仅本人），所以这两张表变成 conditional，
+ * approvalRounds 仍默认拒绝；零角色用户仍是 deny。这里逐表断言新的精确形状。
  *
- * 走授权服务的正式入口 `authz.for(...).authorize()`，不手拼决策：持 staff 的角色
- * 与撤销基线后的零角色用户，对三张表的读、建、改都应为 deny:NO_OBJECT_PERMISSION；
- * delete 没有登记，连 root 都是 RESOURCE_ACTION_NOT_SUPPORTED；root 的读、建、改放行。
- * seed 只要给 staff 任一审批表授权，这里的读就会红。
+ * > Status: Outdated（2026-11-28，R-017 M3 给 staff 补了两个仅本人动作）
+ * 上面那句「staff 对三表都为 deny」只适用于 S1。
  */
 test('R-017 S1: business roles are denied on approval tables while root may read and write', async ({
   testApp,
@@ -693,16 +696,21 @@ test('R-017 S1: business roles are denied on approval tables while root may read
       expect(rootDecision.effect, `root 不能 ${action} ${table}`).not.toBe(
         'deny',
       );
-      for (const [label, id] of [
-        ['staff', staff.id],
-        ['零角色用户', nobody.id],
-      ] as const) {
-        const denied = await decision(id, table, action);
-        expect(denied.effect, `${label} 不该能 ${action} ${table}`).toBe('deny');
-        expect(codes(denied), `${label} ${action} ${table} 的拒绝原因`).toContain(
-          'NO_OBJECT_PERMISSION',
-        );
+      const staffDecision = await decision(staff.id, table, action);
+      if (table === 'approvalRounds') {
+        expect(staffDecision.effect, `approvalRounds 不该放开 ${action}`).toBe('deny');
+        expect(codes(staffDecision)).toContain('NO_OBJECT_PERMISSION');
+      } else {
+        expect(
+          staffDecision.effect,
+          `staff 只能有仅本人的 ${action} ${table}`,
+        ).toBe('conditional');
       }
+      const denied = await decision(nobody.id, table, action);
+      expect(denied.effect, `零角色用户不该能 ${action} ${table}`).toBe('deny');
+      expect(codes(denied), `零角色用户 ${action} ${table} 的拒绝原因`).toContain(
+        'NO_OBJECT_PERMISSION',
+      );
     }
     const remove = await decision(rootId, table, 'delete');
     expect(remove.effect, `delete 没有登记，root 也删得了 ${table}`).toBe(
@@ -1349,6 +1357,8 @@ test('R-013: booting the authorization resources provider twice registers once',
     'invoiceReceiptRecordLines',
     // R-072：业务字典一张表，两个只读资源各不分表。
     'bizDictEntries',
+    // R-064：订单评审头表与五项明细表。
+    ...ORDER_REVIEW_COLLECTIONS.map((collection) => collection.name),
   ]);
   expect(registered.composites.map((composite) => composite.name)).toContain(
     'fqc',
@@ -1362,6 +1372,7 @@ test('R-013: booting the authorization resources provider twice registers once',
   for (const name of ['bizDict', 'bizOptions']) {
     expect(registered.composites.map((composite) => composite.name)).toContain(name);
   }
+  expect(registered.composites.map((composite) => composite.name)).toContain('orderReviews');
 
   await expect(provider.boot()).resolves.toBeUndefined();
   expect(registrationSnapshot(authz)).toEqual(registered);
@@ -1381,8 +1392,11 @@ test('R-065: financeView 只登记在采购订单资源上，销售订单的动�
     'submit', 'update', 'view', 'viewPrice',
   ]);
   expect(actionsOf('salesOrders')).toEqual([
-    'cancel', 'create', 'createIssue', 'ship', 'submit', 'update',
+    'cancel', 'create', 'createIssue', 'ledgerView', 'ship', 'submit', 'update',
     'view', 'viewPrice',
+  ]);
+  expect(actionsOf('orderReviews')).toEqual([
+    'confirm', 'create', 'submit', 'update', 'view', 'void',
   ]);
   expect(actionsOf('purchaseOrders')).toContain('financeView');
   expect(actionsOf('salesOrders'), '销售订单不该有借采购授权的 financeView').not.toContain('financeView');

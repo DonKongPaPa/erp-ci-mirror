@@ -1555,7 +1555,21 @@ const enUS = {
         cancel: 'Cancel sales orders',
         createIssue: 'Create outbound documents',
         viewPrice: 'View prices and amounts',
+        ledgerView: 'View the sales order progress ledger',
         ship: 'Ship from sales orders',
+      },
+    },
+    // R-064: the order review resource; ledgerView is an action of salesOrders above.
+    orderReviews: {
+      title: 'Order reviews',
+      tables: { reviews: 'Order reviews', lines: 'Review factors' },
+      actions: {
+        view: 'View order reviews',
+        create: 'Create order reviews',
+        update: 'Edit draft reviews',
+        submit: 'Submit order reviews',
+        confirm: 'Confirm delivery dates',
+        void: 'Void order reviews',
       },
     },
     // R-014: customers and suppliers are two business resources with three actions each and no delete.
@@ -1630,6 +1644,7 @@ const enUS = {
       purchase: 'Purchasing',
       finance: 'Finance',
       sales: 'Sales',
+      planning: 'Planning',
     },
   },
   // R-020: rule-code messages; defaultValue in the route covers any missing key.

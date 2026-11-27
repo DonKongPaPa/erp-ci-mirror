@@ -21,6 +21,7 @@ import AuthzUpgradeR021Page from '../../cli/authz/upgrade-r021-page.js';
 import AuthzUpgradeR025 from '../../cli/authz/upgrade-r025.js';
 import AuthzUpgradeR026 from '../../cli/authz/upgrade-r026.js';
 import AuthzUpgradeR065 from '../../cli/authz/upgrade-r065.js';
+import AuthzUpgradeR064 from '../../cli/authz/upgrade-r064.js';
 import AuthzUpgradeR072 from '../../cli/authz/upgrade-r072.js';
 import cliPlugins from '../../cli/plugins.js';
 import {
@@ -57,6 +58,7 @@ test('R-013: the authz commands are registered under their own topic', () => {
     'upgrade-r021-price',
     'upgrade-r025',
     'upgrade-r026',
+    'upgrade-r064',
     'upgrade-r065',
     'upgrade-r072',
   ]);
@@ -93,6 +95,10 @@ test('R-013: the authz commands are registered under their own topic', () => {
   expect(AuthzUpgradeR021.description).toContain('purchaseOrders');
   expect(AuthzUpgradeR021.description).toContain('salesOrders');
   // R-072 的升级步骤：给已有环境的三个业务角色补字典与选项只读，可单独跑、可重跑。
+  // R-064 的升级步骤：建 planning 并补评审与台账只读，可单独跑、可重跑。
+  expect(plugin!.commands['upgrade-r064']).toBe(AuthzUpgradeR064);
+  expect(AuthzUpgradeR064.description).toContain('orderReviews.view');
+  expect(AuthzUpgradeR064.description).toContain('salesOrders.ledgerView');
   expect(plugin!.commands['upgrade-r065']).toBe(AuthzUpgradeR065);
   expect(plugin!.commands['upgrade-r072']).toBe(AuthzUpgradeR072);
   expect(AuthzUpgradeR072.description).toContain('bizDict.view');
@@ -600,6 +606,7 @@ test(
         'dept_manager',
         'finance',
         'member',
+        'planning',
         'purchase',
         'quality_inspector',
         'quality_manager',
