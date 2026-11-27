@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from 'react';
 
+import { FeedbackForm } from '#components/feedback-form';
 import { PendingButton } from '#components/pending-button';
 import { RouteDialog } from '#components/route-dialog';
 import { useRouteOverlay } from '#components/use-route-overlay';
@@ -209,9 +210,8 @@ function FormDialogBody<V, R>({
 
   return (
     <>
-      <form
+      <FeedbackForm
         id={formId}
-        noValidate
         onSubmit={(event) => void onSubmit(event)}
         className='flex flex-col gap-4'
       >
@@ -221,7 +221,7 @@ function FormDialogBody<V, R>({
           </Alert>
         ) : null}
         {render({ values, set, errors, busy })}
-      </form>
+      </FeedbackForm>
       {leave.dialog}
     </>
   );
