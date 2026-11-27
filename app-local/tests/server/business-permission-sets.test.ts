@@ -243,6 +243,59 @@ const createRoleUser = async (
   return ((await response.json()).data as { id: string }).id;
 };
 
+/** R-017 S1：审批三张表，seed 里没有任何业务角色拿到授权。 */
+const APPROVAL_TABLES = ['approvals', 'approvalRounds', 'approvalRecords'];
+
+/**
+ * R-017 S1：默认拒绝要有「经过 seed 的应用」上的行为证据。
+ *
+ * 上一个切片的行为测试在没有跑 seed 的应用上证明的是「没授权就被拒」，证明不了
+ * 「seed 没给」。这里在同一份 seed 已落库的应用上走授权服务的正式入口
+ * `authz.for(...).authorize()`：staff 与零角色用户对三表的读、建、改都必须 deny，
+ * 只有 root 可读写。把 seed 改成给 staff 审批读，这一条必须红。
+ */
+test('R-017 S1: with the seed applied, staff and a roleless user are denied on approval tables', async ({
+  app,
+  testApp,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const authz = app.container.resolve(authorizationToken);
+  const staff = await createRoleUser(admin, 'r017-seed-staff', 'staff');
+  const nobody = await createRoleUser(admin, 'r017-seed-nobody', 'staff');
+  await authz.permissionSets.revoke(`user:${nobody}:staff`);
+
+  const decision = (userId: string, table: string, action: string) =>
+    authz
+      .for({ principal: { type: 'user', id: userId } })
+      .authorize({ resource: { type: 'database.collection', id: table }, action });
+  const codes = (d: { reasons: readonly { code: string }[] }) =>
+    d.reasons.map((reason) => reason.code);
+
+  for (const table of APPROVAL_TABLES) {
+    for (const action of ['read', 'create', 'update'] as const) {
+      for (const [label, id] of [
+        ['staff', staff],
+        ['零角色用户', nobody],
+      ] as const) {
+        const denied = await decision(id, table, action);
+        expect(denied.effect, `${label} 不该能 ${action} ${table}`).toBe('deny');
+        expect(codes(denied), `${label} ${action} ${table} 的拒绝原因`).toContain(
+          'NO_OBJECT_PERMISSION',
+        );
+      }
+      const rootDecision = await decision(String(admin.user.id), table, action);
+      expect(rootDecision.effect, `root 不能 ${action} ${table}`).not.toBe(
+        'deny',
+      );
+    }
+    const remove = await decision(String(admin.user.id), table, 'delete');
+    expect(remove.effect, `delete 没有登记，root 也删得了 ${table}`).toBe(
+      'deny',
+    );
+    expect(codes(remove)).toContain('RESOURCE_ACTION_NOT_SUPPORTED');
+  }
+});
+
 // 这一条要在「管理员改过的角色不被覆盖」之前跑：那条测试会把 quality_manager 的
 // 授权改成只剩页面授权，后面的测试看到的不再是 seed 的初始状态。
 test('R-026 25: seed 的五个动作逐条展开，该放行的没有 NO_MATCHING_GRANT', async ({
@@ -381,6 +434,42 @@ test('R-013: writes no grant on the user resource for any business role', async 
         grant.resource.type,
         `角色 ${String(row.key)} 授予了「用户」资源：${JSON.stringify(grant)}`,
       ).not.toBe('user');
+    }
+  }
+});
+
+/**
+ * R-017 S1：审批的「默认授权」是默认拒绝。
+ *
+ * R-017.md 把审批授权放在端点自己身上、页面取 authz='skip'，没有定义 composite
+ * 资源与业务动作；seed 因此不给任何业务角色审批表的授权，也不给「用户 · 读」
+ * （R-028）。后续片在端点与页面落地时按实际读写列补声明与授权，本测试守住
+ * 「没有在 seed 里先放开」这一条；谁加了一条宽授权这里就红。
+ */
+test('R-017 S1: the seed grants no approval table and no user resource to business roles', () => {
+  for (const set of businessPermissionSets) {
+    for (const grant of set.grants) {
+      expect(
+        grant.resource.type,
+        `角色 ${set.key} 被授了「用户」资源`,
+      ).not.toBe('user');
+      if (grant.resource.type === 'database.collection') {
+        expect(
+          APPROVAL_TABLES,
+          `角色 ${set.key} 被授了审批表 ${grant.resource.id}`,
+        ).not.toContain(grant.resource.id);
+      }
+      const scopes = grant.actions.flatMap((action) =>
+        action.policy?.type === 'composite' && action.policy.scopes
+          ? Object.keys(action.policy.scopes)
+          : [],
+      );
+      for (const table of APPROVAL_TABLES) {
+        expect(
+          scopes,
+          `角色 ${set.key} 的授权里出现了审批表 ${table}`,
+        ).not.toContain(table);
+      }
     }
   }
 });

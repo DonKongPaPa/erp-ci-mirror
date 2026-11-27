@@ -2,6 +2,7 @@ import type { AppPluginApplication } from '@nocobase/app-server/plugins';
 import { authorizationToken } from '@nocobase/app-plugin-authorization/server';
 import { ServiceProvider } from '@nocobase/service-provider';
 
+import { APPROVAL_COLLECTIONS } from '../approvals-resources.js';
 import {
   DEPARTMENT_COLLECTIONS,
   departments as departmentsResource,
@@ -16,12 +17,14 @@ import { departmentServiceToken } from './departments.js';
 
 /**
  * R-013 的启动注册：把 FQC 接进授权模型；R-012 的部门资源、R-011 的员工资源
- * 也在这里登记。
+ * 也在这里登记。R-017 S1 只登记三张审批表，没有业务资源与业务动作（设计把
+ * 授权放在端点自己身上，seed 默认不给业务角色审批授权）。
  *
  * 声明在 server/fqc-resources.ts、server/department-resources.ts、
- * server/employees-resources.ts 与 server/department-record-access.ts，这里只做注册：
- * 三张 FQC 表、三张部门表、四张员工表、`fqc`、`departments` 与 `employees`
- * 三个业务资源、两把部门范围键、工作区的分节与条目。
+ * server/employees-resources.ts、server/approvals-resources.ts 与
+ * server/department-record-access.ts，这里只做注册：
+ * 三张 FQC 表、三张部门表、四张员工表、三张审批表、`fqc`、`departments` 与
+ * `employees` 三个业务资源、两把部门范围键、工作区的分节与条目。
  * 注册只描述能做什么，不给任何人授权；初始角色由 seed 建。
  */
 export default class AuthorizationResourcesProvider extends ServiceProvider<AppPluginApplication> {
@@ -41,6 +44,7 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
       ...FQC_COLLECTIONS,
       ...DEPARTMENT_COLLECTIONS,
       ...EMPLOYEE_COLLECTIONS,
+      ...APPROVAL_COLLECTIONS,
     ]) {
       authz.database.collections.add(collection);
     }

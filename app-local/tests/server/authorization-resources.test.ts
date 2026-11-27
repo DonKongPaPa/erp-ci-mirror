@@ -59,6 +59,8 @@ const json = (body: unknown, method = 'POST') => ({
 });
 
 const FQC_TABLES = ['fqcMessages', 'fqcScreenings', 'fqcTickets'];
+/** R-017 S1：审批三张表，只登记读、建、改，没有业务资源与业务动作。 */
+const APPROVAL_TABLES = ['approvals', 'approvalRounds', 'approvalRecords'];
 /** R-002：确认记录表。只追加，只登记读与建。 */
 const REVIEW_TABLE = 'fqcScreeningReviews';
 const PASSWORD = 'R013-test-123!';
@@ -605,6 +607,108 @@ test('R-013: registers the three FQC tables with three actions, the fqc actions,
       authz.ui.placementOf({ type: 'database.collection', id: table }),
       `${table} 被放进了角色编辑器`,
     ).toBeUndefined();
+  }
+});
+
+/**
+ * R-017 S1：审批三张表的登记形状。
+ *
+ * 设计把审批授权放在端点自己身上、页面取 authz='skip'，没有给出业务资源与动作；
+ * 所以只登记表，动作恰好是 read/create/update（多登记一个 delete 就红），不建
+ * `approvals` composite，也不把表放进角色编辑器。root 也不能删这三张表。
+ */
+test('R-017 S1: registers the three approval tables with exactly read/create/update and no business action', async ({
+  app,
+  testApp,
+}) => {
+  const authz = app.container.resolve(authorizationToken);
+  for (const table of APPROVAL_TABLES) {
+    expect(authz.database.collections.has(table), `${table} 没有注册`).toBe(
+      true,
+    );
+    const definition = authz.database.collections
+      .list()
+      .find((collection) => collection.name === table);
+    expect(
+      definition?.actions,
+      `${table} 的登记动作应当只有读、建、改`,
+    ).toEqual(['read', 'create', 'update']);
+    expect(
+      authz.ui.placementOf({ type: 'database.collection', id: table }),
+      `${table} 被放进了角色编辑器`,
+    ).toBeUndefined();
+  }
+  expect(
+    authz.compositeResources.list().some((resource) => resource.name === 'approvals'),
+    '设计没有审批业务资源，不该注册 approvals composite',
+  ).toBe(false);
+
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const root = authz.for({
+    principal: { type: 'user', id: String(admin.user.id) },
+  });
+  for (const table of APPROVAL_TABLES) {
+    const read = await root.authorize({
+      resource: { type: 'database.collection', id: table },
+      action: 'read',
+    });
+    expect(read.effect, `root 读不了 ${table}`).not.toBe('deny');
+    const remove = await root.authorize({
+      resource: { type: 'database.collection', id: table },
+      action: 'delete',
+    });
+    expect(remove.effect, `root 删得了 ${table}`).toBe('deny');
+    expect(codes(remove)).toContain('RESOURCE_ACTION_NOT_SUPPORTED');
+  }
+});
+
+/**
+ * R-017 S1：默认拒绝要有行为证据，不能只读 seed 文本。
+ *
+ * 走授权服务的正式入口 `authz.for(...).authorize()`，不手拼决策：持 staff 的角色
+ * 与撤销基线后的零角色用户，对三张表的读、建、改都应为 deny:NO_OBJECT_PERMISSION；
+ * delete 没有登记，连 root 都是 RESOURCE_ACTION_NOT_SUPPORTED；root 的读、建、改放行。
+ * seed 只要给 staff 任一审批表授权，这里的读就会红。
+ */
+test('R-017 S1: business roles are denied on approval tables while root may read and write', async ({
+  testApp,
+  app,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const authz = app.container.resolve(authorizationToken);
+  const staff = await createUser(admin, 'r017s1staff', { app: ['staff'] });
+  const nobody = await createUser(admin, 'r017s1nobody', { app: [] });
+  // 建人初始化器会补基线 staff；把它撤掉，留一个真正的零角色主体。
+  await authz.permissionSets.revoke(`user:${nobody.id}:staff`);
+
+  const decision = (userId: string, table: string, action: string) =>
+    authz
+      .for({ principal: { type: 'user', id: userId } })
+      .authorize({ resource: { type: 'database.collection', id: table }, action });
+
+  const rootId = String(admin.user.id);
+  for (const table of APPROVAL_TABLES) {
+    for (const action of ['read', 'create', 'update'] as const) {
+      const rootDecision = await decision(rootId, table, action);
+      expect(rootDecision.effect, `root 不能 ${action} ${table}`).not.toBe(
+        'deny',
+      );
+      for (const [label, id] of [
+        ['staff', staff.id],
+        ['零角色用户', nobody.id],
+      ] as const) {
+        const denied = await decision(id, table, action);
+        expect(denied.effect, `${label} 不该能 ${action} ${table}`).toBe('deny');
+        expect(codes(denied), `${label} ${action} ${table} 的拒绝原因`).toContain(
+          'NO_OBJECT_PERMISSION',
+        );
+      }
+    }
+    const remove = await decision(rootId, table, 'delete');
+    expect(remove.effect, `delete 没有登记，root 也删得了 ${table}`).toBe(
+      'deny',
+    );
+    expect(codes(remove)).toContain('RESOURCE_ACTION_NOT_SUPPORTED');
   }
 });
 
@@ -1212,6 +1316,8 @@ test('R-013: booting the authorization resources provider twice registers once',
     'employeeChanges',
     'positions',
     'jobGrades',
+    // R-017 S1：三张审批表，没有 composite 资源与业务动作。
+    ...APPROVAL_TABLES,
   ]);
   expect(registered.composites.map((composite) => composite.name)).toContain(
     'fqc',
