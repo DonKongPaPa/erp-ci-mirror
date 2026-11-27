@@ -10,6 +10,7 @@ import AuthzImport from '../../cli/authz/import.js';
 import AuthzUpgradeR002 from '../../cli/authz/upgrade-r002.js';
 import AuthzUpgradeR014 from '../../cli/authz/upgrade-r014.js';
 import AuthzUpgradeR020 from '../../cli/authz/upgrade-r020.js';
+import AuthzUpgradeR021 from '../../cli/authz/upgrade-r021.js';
 import AuthzUpgradeR025 from '../../cli/authz/upgrade-r025.js';
 import AuthzUpgradeR026 from '../../cli/authz/upgrade-r026.js';
 import cliPlugins from '../../cli/plugins.js';
@@ -37,6 +38,7 @@ test('R-013: the authz commands are registered under their own topic', () => {
     'upgrade-r003',
     'upgrade-r014',
     'upgrade-r020',
+    'upgrade-r021',
     'upgrade-r025',
     'upgrade-r026',
   ]);
@@ -55,6 +57,10 @@ test('R-013: the authz commands are registered under their own topic', () => {
   expect(plugin!.commands['upgrade-r014']).toBe(AuthzUpgradeR014);
   expect(plugin!.commands['upgrade-r020']).toBe(AuthzUpgradeR020);
   expect(AuthzUpgradeR020.description).toContain('inventory');
+  // R-021/R-022 的升级步骤：给采购/销售补订单授权与只读引用，可单独跑、可重跑。
+  expect(plugin!.commands['upgrade-r021']).toBe(AuthzUpgradeR021);
+  expect(AuthzUpgradeR021.description).toContain('purchaseOrders');
+  expect(AuthzUpgradeR021.description).toContain('salesOrders');
   // R-014 的升级步骤：给销售/采购补客户/供应商授权。
   expect(AuthzUpgradeR014.description).toContain('customers');
 });

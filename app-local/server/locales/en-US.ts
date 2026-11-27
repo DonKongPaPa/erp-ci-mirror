@@ -34,6 +34,28 @@ const enUS = {
       'invalidParent': 'A category cannot be its own parent.',
     },
   },
+  // R-021/R-022: order rule messages; the route supplies defaultValue for missing keys.
+  orders: {
+    errors: {
+      orderNotFound: 'That order does not exist.',
+      notDraft: 'Only a draft order can be changed or submitted.',
+      notCancellable: 'That order cannot be cancelled (it may already have a linked stock document).',
+      notIssuable: 'Only a submitted or partially completed order can issue a stock document.',
+      lineInvalid: 'An order line is invalid.',
+      lineDuplicated: 'The same item cannot appear twice in one order.',
+      linesIssued: 'That line has already been fully issued.',
+      qtyExceeds: 'The quantity exceeds what remains on that line.',
+      emptyUpdate: 'Give at least one field to change.',
+      partnerNotFound: 'That supplier or customer does not exist.',
+      partnerNotSupplier: 'That partner is not a supplier.',
+      partnerNotCustomer: 'That partner is not a customer.',
+      partnerInactive: 'That partner is inactive; reactivate it first.',
+      itemNotFound: 'That item does not exist.',
+      itemInactive: 'That item is inactive. Choose another one.',
+      warehouseNotFound: 'That warehouse does not exist.',
+      warehouseInactive: 'That warehouse is inactive. Choose another one.',
+    },
+  },
   employees: {
     errors: {
       'target-user-not-found': 'That account does not exist.',

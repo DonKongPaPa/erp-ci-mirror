@@ -12,6 +12,7 @@ import ItemsProvider from './items.js';
 import KnowledgeAccessProvider from './knowledge-access.js';
 import LifecycleProvider from './lifecycles.js';
 import NotificationManagementProvider from './notification-management.js';
+import OrdersProvider from './orders.js';
 import PartnersProvider from './partners.js';
 import QualityDraftingProvider from './quality-drafting.js';
 import QualityModelGatewayProvider from './quality-model-gateway.js';
@@ -41,6 +42,8 @@ const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
   ItemsProvider,
   // R-020：仓库、单据、现存量与流水的读服务与写服务；过账在写服务里取行锁。
   InventoryProvider,
+  // R-021/R-022：订单读写服务；生成单据复用库存写服务，回写由 order-progress 挂在过账事务里。
+  OrdersProvider,
   AuthorizationResourcesProvider,
   NotificationManagementProvider,
   QualityScreeningProvider,

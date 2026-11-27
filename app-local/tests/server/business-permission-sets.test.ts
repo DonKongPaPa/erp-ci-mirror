@@ -169,6 +169,24 @@ const supplierGrant = {
   ],
 };
 
+/** R-021/R-022：订单六动作各一条，另给物料与仓库只读；动作清单无删除。 */
+const purchaseOrderGrant = {
+  resource: { type: 'composite', id: 'purchaseOrders' },
+  actions: ['view', 'create', 'update', 'submit', 'cancel', 'createReceipt'].map((action) => ({ action })),
+};
+const salesOrderGrant = {
+  resource: { type: 'composite', id: 'salesOrders' },
+  actions: ['view', 'create', 'update', 'submit', 'cancel', 'createIssue'].map((action) => ({ action })),
+};
+const orderItemRead = {
+  resource: { type: 'composite', id: 'items' },
+  actions: [{ action: 'view' }],
+};
+const orderWarehouseRead = {
+  resource: { type: 'composite', id: 'inventory' },
+  actions: [{ action: 'warehouseView' }],
+};
+
 /** R-020：仓管五个库存动作，不含 warehouseManage，没有页面授权。 */
 const inventoryGrant = {
   resource: { type: 'composite', id: 'inventory' },
@@ -225,11 +243,11 @@ const expectedRoles = {
   },
   sales: {
     title: { key: 'permissionSets.business.sales', ns: 'app-local' },
-    grants: [customerGrant],
+    grants: [customerGrant, salesOrderGrant, orderItemRead, orderWarehouseRead],
   },
   purchase: {
     title: { key: 'permissionSets.business.purchase', ns: 'app-local' },
-    grants: [supplierGrant],
+    grants: [supplierGrant, purchaseOrderGrant, orderItemRead, orderWarehouseRead],
   },
 } as const;
 

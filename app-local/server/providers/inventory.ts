@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 import type { Knex } from 'knex';
 
 import { CODE_PREFIXES, codeServiceToken, type CodeService } from './codes.js';
+import { syncOrderProgress } from './order-progress.js';
 
 /**
  * R-020 MVP：仓库、单据、现存量与流水的读写服务。
@@ -198,7 +199,11 @@ export interface StockReader {
 export interface StockMutations {
   createWarehouse(input: CreateWarehouseInput): Promise<WarehouseRecord>;
   updateWarehouse(id: string, input: UpdateWarehouseInput): Promise<WarehouseRecord>;
-  createDoc(input: CreateDocInput, byUserId: string): Promise<StockDocRecord>;
+  createDoc(
+    input: CreateDocInput,
+    byUserId: string,
+    transaction?: DatabaseConnection,
+  ): Promise<StockDocRecord>;
   updateDoc(id: string, input: UpdateDocInput): Promise<StockDocRecord>;
   post(id: string, byUserId: string, transaction?: DatabaseConnection): Promise<StockDocRecord>;
   void(id: string, byUserId: string): Promise<StockDocRecord>;
@@ -618,9 +623,13 @@ export class DatabaseStockMutations implements StockMutations {
     }
   }
 
-  public async createDoc(input: CreateDocInput, byUserId: string): Promise<StockDocRecord> {
+  public async createDoc(
+    input: CreateDocInput,
+    byUserId: string,
+    transaction?: DatabaseConnection,
+  ): Promise<StockDocRecord> {
     validateDoc(input, input.docType);
-    return await this.inTransaction(undefined, async (tx) => {
+    return await this.inTransaction(transaction, async (tx) => {
       const knex = await this.knex(tx);
       await this.requireWarehouses(knex, input.lines);
       await assertItemsActive(knex, input.lines.map((line) => line.itemId));
@@ -726,6 +735,8 @@ export class DatabaseStockMutations implements StockMutations {
         posted_by_id: byUserId,
         updated_at: at,
       });
+      // R-021/R-022：来源单据是订单时，在同一个事务里回写订单进度。
+      await syncOrderProgress(knex, header);
       return await this.detailIn(tx, id);
     });
   }
@@ -745,10 +756,25 @@ export class DatabaseStockMutations implements StockMutations {
   private async requireDraft(
     knex: Knex,
     id: string,
-  ): Promise<{ doc_no: string; doc_type: string; status: string }> {
+  ): Promise<{
+    doc_no: string;
+    doc_type: string;
+    status: string;
+    source_type: string | null;
+    source_id: string | null;
+  }> {
     const result = await knex.raw<{
-      rows?: readonly { doc_no: string; doc_type: string; status: string }[];
-    }>('select doc_no, doc_type, status from stock_docs where id = ? for update', [id]);
+      rows?: readonly {
+        doc_no: string;
+        doc_type: string;
+        status: string;
+        source_type: string | null;
+        source_id: string | null;
+      }[];
+    }>(
+      'select doc_no, doc_type, status, source_type, source_id from stock_docs where id = ? for update',
+      [id],
+    );
     const row = result.rows?.[0];
     if (row === undefined) return fail('doc-not-found');
     if (row.status !== 'draft') return fail('doc-not-draft');

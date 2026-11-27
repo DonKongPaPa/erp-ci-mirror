@@ -1333,6 +1333,11 @@ test('R-013: booting the authorization resources provider twice registers once',
     'stockDocLines',
     'stockBalances',
     'stockTransactions',
+    // R-021/R-022：采购与销售订单各两张表。
+    'purchaseOrders',
+    'purchaseOrderLines',
+    'salesOrders',
+    'salesOrderLines',
   ]);
   expect(registered.composites.map((composite) => composite.name)).toContain(
     'fqc',

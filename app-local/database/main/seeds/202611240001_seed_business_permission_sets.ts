@@ -148,6 +148,28 @@ const partnerGrant = (id: 'customers' | 'suppliers') => ({
 });
 
 /**
+ * R-021/R-022：订单六个动作各成一条授权；没有删除。采购另拿物料与仓库只读，
+ * 销售拿同一份只读（items.view 同时展开物料分类），都不拿库存单据的读写与过账。
+ */
+const ORDER_ACTIONS = ['view', 'create', 'update', 'submit', 'cancel'] as const;
+const purchaseOrderGrant = {
+  resource: { type: 'composite', id: 'purchaseOrders' },
+  actions: [...ORDER_ACTIONS, 'createReceipt'].map((action) => ({ action })),
+};
+const salesOrderGrant = {
+  resource: { type: 'composite', id: 'salesOrders' },
+  actions: [...ORDER_ACTIONS, 'createIssue'].map((action) => ({ action })),
+};
+const orderItemRead = {
+  resource: { type: 'composite', id: 'items' },
+  actions: [{ action: 'view' }],
+};
+const orderWarehouseRead = {
+  resource: { type: 'composite', id: 'inventory' },
+  actions: [{ action: 'warehouseView' }],
+};
+
+/**
  * R-002：知识库的业务键是 `{ type: 'kb', id: 'kb.knowledge' }`，动作名带档位
  * （`manage.related` / `propose.related`）。`kb.knowledge/manage` 是业务键，不是授权
  * 动作名；知识库插件登记到授权插件的才是这些档位。
@@ -208,10 +230,16 @@ export const businessPermissionSets: readonly PermissionSet[] = [
   definePermissionSet('sales')
     .title({ key: 'permissionSets.business.sales', ns: NAMESPACE })
     .grant(partnerGrant('customers'))
+    .grant(salesOrderGrant)
+    .grant(orderItemRead)
+    .grant(orderWarehouseRead)
     .build(),
   definePermissionSet('purchase')
     .title({ key: 'permissionSets.business.purchase', ns: NAMESPACE })
     .grant(partnerGrant('suppliers'))
+    .grant(purchaseOrderGrant)
+    .grant(orderItemRead)
+    .grant(orderWarehouseRead)
     .build(),
 ];
 

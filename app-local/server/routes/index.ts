@@ -8,6 +8,8 @@ import { apiRoutes as employeeRoutes } from './employees.js';
 import { apiRoutes as partnerRoutes } from './partners.js';
 import { apiRoutes as shiftRoutes } from './shifts.js';
 import { apiRoutes as inventoryRoutes } from './inventory.js';
+import { apiRoutes as purchaseOrderRoutes } from './purchase-orders.js';
+import { apiRoutes as salesOrderRoutes } from './sales-orders.js';
 import { apiRoutes as itemRoutes } from './items.js';
 import { apiRoutes as unitRoutes } from './units.js';
 import { apiRoutes as itemCategoryRoutes } from './item-categories.js';
@@ -20,6 +22,8 @@ const routes: readonly AppRouteContribution<Application>[] = [
   partnerRoutes,
   shiftRoutes,
   inventoryRoutes,
+  purchaseOrderRoutes,
+  salesOrderRoutes,
   itemRoutes,
   unitRoutes,
   itemCategoryRoutes,

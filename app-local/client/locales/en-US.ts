@@ -818,6 +818,37 @@ const enUS = {
         stockVoid: 'Void stock documents',
       },
     },
+    // R-021/R-022: order resources; no page placement in this MVP.
+    purchaseOrders: {
+      title: 'Purchase orders',
+      tables: {
+        orders: 'Purchase orders',
+        lines: 'Purchase order lines',
+      },
+      actions: {
+        view: 'View purchase orders',
+        create: 'Create purchase orders',
+        update: 'Edit draft purchase orders',
+        submit: 'Submit purchase orders',
+        cancel: 'Cancel purchase orders',
+        createReceipt: 'Create inbound documents',
+      },
+    },
+    salesOrders: {
+      title: 'Sales orders',
+      tables: {
+        orders: 'Sales orders',
+        lines: 'Sales order lines',
+      },
+      actions: {
+        view: 'View sales orders',
+        create: 'Create sales orders',
+        update: 'Edit draft sales orders',
+        submit: 'Submit sales orders',
+        cancel: 'Cancel sales orders',
+        createIssue: 'Create outbound documents',
+      },
+    },
     recordAccess: {
       myDepartments: 'My departments',
       myDepartmentsAndBelow: 'My departments and below',
@@ -831,6 +862,8 @@ const enUS = {
       deptManager: 'Department manager',
       staff: 'Staff',
       warehouse: 'Warehouse keeper',
+      purchase: 'Purchasing',
+      sales: 'Sales',
     },
   },
   // R-020: rule-code messages; defaultValue in the route covers any missing key.
@@ -850,6 +883,28 @@ const enUS = {
       docNotDraft: 'Only a draft document can be changed.',
       insufficient: 'Insufficient stock; the whole document was rolled back.',
       emptyUpdate: 'At least one field is required.',
+    },
+  },
+  // R-021/R-022: order rule-code messages; defaultValue in the route covers any missing key.
+  orders: {
+    errors: {
+      orderNotFound: 'That order does not exist.',
+      notDraft: 'Only a draft order can be changed or submitted.',
+      notCancellable: 'That order cannot be cancelled (it may already have a linked stock document).',
+      notIssuable: 'Only a submitted or partially completed order can issue a stock document.',
+      lineInvalid: 'An order line is invalid.',
+      lineDuplicated: 'The same item cannot appear twice in one order.',
+      linesIssued: 'That line has already been fully issued.',
+      qtyExceeds: 'The quantity exceeds what remains on that line.',
+      emptyUpdate: 'Give at least one field to change.',
+      partnerNotFound: 'That supplier or customer does not exist.',
+      partnerNotSupplier: 'That partner is not a supplier.',
+      partnerNotCustomer: 'That partner is not a customer.',
+      partnerInactive: 'That partner is inactive; reactivate it first.',
+      itemNotFound: 'That item does not exist.',
+      itemInactive: 'That item is inactive. Choose another one.',
+      warehouseNotFound: 'That warehouse does not exist.',
+      warehouseInactive: 'That warehouse is inactive. Choose another one.',
     },
   },
   // R-037: the development-only account switch in the avatar menu.

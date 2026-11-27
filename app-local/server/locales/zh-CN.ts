@@ -30,6 +30,28 @@ const zhCN: AppServerResource = {
       'invalidParent': '分类不能把自己的父分类设成自己。',
     },
   },
+  // R-021/R-022：订单规则码文案；端点在缺键时用 defaultValue 兜底。
+  orders: {
+    errors: {
+      orderNotFound: '这张订单不存在。',
+      notDraft: '只有草稿订单可以修改或提交。',
+      notCancellable: '这张订单不能取消（可能已有关联的出入库单）。',
+      notIssuable: '只有已提交或部分完成的订单才能生成出入库单。',
+      lineInvalid: '订单明细不合法。',
+      lineDuplicated: '同一张订单里不能重复同一个物料。',
+      linesIssued: '这条明细已经全部生成过了。',
+      qtyExceeds: '数量超过这条明细的剩余可生成数量。',
+      emptyUpdate: '至少要给一项要改的内容。',
+      partnerNotFound: '这个供应商或客户不存在。',
+      partnerNotSupplier: '这个往来单位不是供应商。',
+      partnerNotCustomer: '这个往来单位不是客户。',
+      partnerInactive: '这个往来单位已停用，请先启用。',
+      itemNotFound: '这条物料不存在。',
+      itemInactive: '这条物料已停用，请换一个。',
+      warehouseNotFound: '这个仓库不存在。',
+      warehouseInactive: '这个仓库已停用，请换一个。',
+    },
+  },
   employees: {
     errors: {
       'target-user-not-found': '这个账号不存在。',

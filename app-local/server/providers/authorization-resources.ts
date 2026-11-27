@@ -23,6 +23,11 @@ import {
   suppliers as suppliersResource,
 } from '../partner-resources.js';
 import { ITEM_COLLECTIONS, items as itemsResource } from '../items-resources.js';
+import {
+  ORDER_COLLECTIONS,
+  purchaseOrders as purchaseOrdersResource,
+  salesOrders as salesOrdersResource,
+} from '../orders-resources.js';
 import { SHIFT_COLLECTIONS, shifts as shiftsResource } from '../shift-resources.js';
 import { departmentServiceToken } from './departments.js';
 
@@ -61,6 +66,7 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
       ...PARTNER_COLLECTIONS,
       ...ITEM_COLLECTIONS,
       ...INVENTORY_COLLECTIONS,
+      ...ORDER_COLLECTIONS,
     ]) {
       authz.database.collections.add(collection);
     }
@@ -77,6 +83,9 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
     const itemsReference = authz.compositeResources.define(itemsResource);
     // R-020：库存资源只声明，不 ui.place —— 本片没有页面，也不改角色编辑器目录。
     authz.compositeResources.define(inventoryResource);
+    // R-021/R-022：采购与销售订单各一份资源，同样不做页面目录。
+    authz.compositeResources.define(purchaseOrdersResource);
+    authz.compositeResources.define(salesOrdersResource);
     const departmentService = this.app.container.resolve(
       departmentServiceToken,
     );
