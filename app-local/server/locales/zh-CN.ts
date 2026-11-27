@@ -30,6 +30,52 @@ const zhCN: AppServerResource = {
       'employee-no-exhausted': '工号已用到 E999999，无法继续发号。',
     },
   },
+  ticketNotifications: {
+    contributor: '质量工单',
+    category: '质量工单',
+    businessRule: '只在流转提交之后发一次；重放同一个幂等键不重发。',
+    languagePolicy: '按应用默认语言发送一条。',
+    channel: '站内收件箱',
+    variables: {
+      code: '工单编号',
+      state: '工单状态',
+    },
+    dispatch: {
+      name: '派单通知',
+      trigger: '一份初筛被确认并派单之后。',
+      recipients: '责任部门负责人与经办人。',
+      title: '工单 {{code}} 已派单',
+      body: '工单 {{code}} 现在是 {{state}}。',
+    },
+    reassign: {
+      name: '转派通知',
+      trigger: '一张工单被转派之后。',
+      recipients: '责任部门负责人、经办人与原来的经办人。',
+      title: '工单 {{code}} 已转派',
+      body: '工单 {{code}} 现在是 {{state}}。',
+    },
+    resolve: {
+      name: '解决通知',
+      trigger: '一张工单被解决之后。',
+      recipients: '确认并派单的人。',
+      title: '工单 {{code}} 已解决',
+      body: '工单 {{code}} 现在是 {{state}}。',
+    },
+    close: {
+      name: '关闭通知',
+      trigger: '一张工单被关闭之后。',
+      recipients: '经办人。',
+      title: '工单 {{code}} 已关闭',
+      body: '工单 {{code}} 现在是 {{state}}。',
+    },
+    reopen: {
+      name: '重开通知',
+      trigger: '一张工单被重开之后。',
+      recipients: '经办人与责任部门负责人。',
+      title: '工单 {{code}} 已重开',
+      body: '工单 {{code}} 现在是 {{state}}。',
+    },
+  },
 };
 
 export default zhCN;

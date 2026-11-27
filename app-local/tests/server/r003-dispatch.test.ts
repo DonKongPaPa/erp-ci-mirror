@@ -213,7 +213,12 @@ test('R-003 验收2：确认即派单，201，open 工单七列与确认记录�
     await session.fetch(dispatchPath(screening.id), json({})),
     201,
   );
-  const ticket = response.data as TicketRow;
+  // 派单 201 在工单行之外带刚写的 review；逐字段比工单行时不把这一列算进去。
+  const { review: dispatchReview, ...ticket } = response.data as TicketRow & {
+    review: { kind: string; actorName: string };
+  };
+  expect(dispatchReview.kind).toBe('dispatch');
+  expect(dispatchReview.actorName).toBeTruthy();
   expect(ticket.screeningId).toBe(screening.id);
   expect(ticket.state).toBe('open');
   expect(ticket.category).toBe('dimension');
@@ -225,9 +230,18 @@ test('R-003 验收2：确认即派单，201，open 工单七列与确认记录�
   expect(ticket.reopenCount).toBe(0);
   expect(ticket.closedAt).toBeNull();
 
-  // 库里那一行和响应逐字段相同。
+  // 库里那一行去掉停写的两列后，和响应逐字段相同；响应本身也不出现这两列。
   const stored = await ticketOf(connection, screening.id);
-  expect(stored).toEqual(ticket);
+  const { ownerDepartment: _ownerDepartment, dueAt: _dueAt, ...storedPublic } = stored as any;
+  const {
+    departmentTitle: _departmentTitle,
+    assigneeName: _assigneeName,
+    canTransition: _canTransition,
+    ...ticketRow
+  } = ticket as any;
+  expect(storedPublic).toEqual(ticketRow);
+  expect(ticket).not.toHaveProperty('ownerDepartment');
+  expect(ticket).not.toHaveProperty('dueAt');
 
   // 一行 dispatch 确认记录，departmentId 是生效责任部门。
   const rows = await reviewsOf(connection, screening.id);

@@ -20,6 +20,7 @@ import {
   isUniqueConstraintViolation,
   type DatabaseConnection,
   type FilterBuilder,
+  type FilterNode,
   type RepositoryPolicy,
 } from '@nocobase/db';
 import {
@@ -41,6 +42,7 @@ import {
   type JsonObject,
 } from '@nocobase/lifecycle';
 import { Hono, type Context } from 'hono';
+import { createMiddleware } from 'hono/factory';
 import { z } from 'zod';
 import { bodyLimit } from 'hono/body-limit';
 import { randomUUID } from 'node:crypto';
@@ -65,9 +67,13 @@ import {
   MineFeedbackQuery,
   ScreeningListItemSchema,
   ScreeningReviewResultSchema,
+  ReplaceRoutingRulesBody,
   SetAssigneeBody,
+  TicketAssistSchema,
+  TicketDepartmentsSchema,
   TicketCandidateSchema,
   TicketCandidatesQuery,
+  TicketDetailSchema,
   TicketSchema,
   UpdateFeedbackBody,
   type CreateFeedbackInput,
@@ -96,6 +102,8 @@ import {
   ticketScopeOfDecision,
 } from '../ticket-scope.js';
 import { lifecycleRuntimeToken } from '../providers/lifecycles.js';
+import { ticketNotifierToken } from '../ticket-notifications.js';
+import { activeMemberIdsOf } from '../active-users.js';
 
 type FqcAction =
   | 'view'
@@ -103,7 +111,8 @@ type FqcAction =
   | 'intake'
   | 'submit'
   | 'maintain'
-  | 'ticket';
+  | 'ticket'
+  | 'configure';
 type FqcTable =
   | 'fqcMessages'
   | 'fqcScreenings'
@@ -364,6 +373,88 @@ export function feedbackUniqueError(error: unknown): ApiError | undefined {
   return undefined;
 }
 
+/** 附件不可用的统一错误；网页入口、投递与改字段共用同一个原因码。 */
+function attachmentNotAvailable(message: string): ApiError {
+  return new ApiError({
+    status: 'FAILED_PRECONDITION',
+    httpStatus: 422,
+    reason: 'ATTACHMENT_NOT_AVAILABLE',
+    domain: 'quality',
+    message,
+  });
+}
+
+/**
+ * 附件三条规则共用一处判断，都在调用方的事务里：核验归属与占用、挂上新绑的、
+ * 拿掉摘下的。核验与更新不在同一个锁里，真 Postgres 上另一个事务在中间抢走
+ * 附件时，带谓词的更新会在行锁释放后重算谓词、匹配不足；核行数并抛 422 回滚，
+ * 否则单上列着附件、文件行却挂在别的单上。
+ */
+async function applyFeedbackAttachments(
+  transaction: DatabaseConnection,
+  options: {
+    readonly ownerId: string | null;
+    readonly feedbackId: string;
+    readonly added: readonly string[];
+    readonly removed: readonly string[];
+    readonly now: string;
+  },
+): Promise<void> {
+  const { ownerId, feedbackId, added, removed, now } = options;
+  const files = transaction.repository('fqcFeedbackFiles');
+
+  // ① 每个标识都得是调用者自己上传的、而且还没挂在别的单上。
+  for (const id of added) {
+    const file = await files.findOne({
+      filter: (filter) =>
+        filter.and([
+          filter.string('id').eq(id),
+          ownerId === null
+            ? filter.string('ownerId').empty()
+            : filter.string('ownerId').eq(ownerId),
+          filter.string('feedbackId').empty(),
+        ]),
+    });
+    if (!file) {
+      throw attachmentNotAvailable(`Attachment ${id} is not available to this caller.`);
+    }
+  }
+
+  // ② 挂上：只认还没被占用的行，核行数；抢输就整笔回滚。
+  if (added.length > 0) {
+    const bound = await files.updateMany({
+      filter: (filter) =>
+        filter.and([
+          filter.or(added.map((id) => filter.string('id').eq(id))),
+          filter.string('feedbackId').empty(),
+        ]),
+      values: { feedbackId, updatedAt: now } as never,
+    });
+    if (bound.updatedCount !== added.length) {
+      throw attachmentNotAvailable(
+        'An attachment was claimed by another feedback while this one was being saved.',
+      );
+    }
+  }
+
+  // ③ 拿掉：只认还挂在这张单上的行，同样核行数。
+  if (removed.length > 0) {
+    const released = await files.updateMany({
+      filter: (filter) =>
+        filter.and([
+          filter.or(removed.map((id) => filter.string('id').eq(id))),
+          filter.string('feedbackId').eq(feedbackId),
+        ]),
+      values: { feedbackId: null, updatedAt: now } as never,
+    });
+    if (released.updatedCount !== removed.length) {
+      throw attachmentNotAvailable(
+        'An attachment changed ownership while this feedback was being updated.',
+      );
+    }
+  }
+}
+
 /**
  * 两个入口共用的录入函数：核附件、挂标识、写原文、写草稿，四件事同成同败。
  *
@@ -389,33 +480,19 @@ export async function ingestFeedback(
   const receivedAt = input.receivedAt ? new Date(input.receivedAt) : now;
   const result = screen(input.content);
   const attachmentIds = [...(input.attachmentIds ?? [])];
-  const files = transaction.repository('fqcFeedbackFiles');
+  const messageId = randomUUID();
 
-  // ① 每个标识都得是调用者自己上传的、而且还没挂在别的单上。
-  for (const id of attachmentIds) {
-    const file = await files.findOne({
-      filter: (filter) =>
-        filter.and([
-          filter.string('id').eq(id),
-          attachmentOwnerId === null
-            ? filter.string('ownerId').empty()
-            : filter.string('ownerId').eq(attachmentOwnerId),
-          filter.string('feedbackId').empty(),
-        ]),
-    });
-    if (!file) {
-      throw new ApiError({
-        status: 'FAILED_PRECONDITION',
-        httpStatus: 422,
-        reason: 'ATTACHMENT_NOT_AVAILABLE',
-        domain: 'quality',
-        message: `Attachment ${id} is not available to this caller.`,
-      });
-    }
-  }
+  // 附件三条规则与改字段共用一处判断：核归属、核占用、挂上并核行数。
+  await applyFeedbackAttachments(transaction, {
+    ownerId: attachmentOwnerId,
+    feedbackId: messageId,
+    added: attachmentIds,
+    removed: [],
+    now: storedNow,
+  });
 
   const message: Record<string, unknown> = {
-    id: randomUUID(),
+    id: messageId,
     channel: input.channel,
     externalId: feedbackExternalId(input.externalId),
     senderName: input.senderName ?? null,
@@ -434,30 +511,7 @@ export async function ingestFeedback(
     updatedAt: storedNow,
   };
 
-  // ② 先挂上标识：带谓词的更新，只认「还没被占用」的行。前面的核验与这里的更新
-  // 不在同一个锁里：真 Postgres 上两个事务同时绑同一个附件时，后到的更新会在
-  // 行锁释放后重算谓词，匹配 0 行。不检查行数就会让同一个附件挂到两张单上。
-  if (attachmentIds.length > 0) {
-    const bound = await files.updateMany({
-      filter: (filter) =>
-        filter.and([
-          filter.or(attachmentIds.map((id) => filter.string('id').eq(id))),
-          filter.string('feedbackId').empty(),
-        ]),
-      values: { feedbackId: message.id, updatedAt: storedNow } as never,
-    });
-    if (bound.updatedCount !== attachmentIds.length) {
-      throw new ApiError({
-        status: 'FAILED_PRECONDITION',
-        httpStatus: 422,
-        reason: 'ATTACHMENT_NOT_AVAILABLE',
-        domain: 'quality',
-        message: 'An attachment was claimed by another feedback while this one was being submitted.',
-      });
-    }
-  }
-
-  // ③ 写原文。不先查再写：撞唯一约束时整笔事务回滚，附件绑定也随之撤销。
+  // 写原文。不先查再写：撞唯一约束时整笔事务回滚，附件绑定也随之撤销。
   try {
     await transaction
       .repository('fqcMessages')
@@ -755,6 +809,128 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
     }
 
     /**
+     * S6：一次业务动作授权，被拒时回 null 而不是抛 403。
+     * 列表先按「查看」取行，再拿它问「处理工单」：持有才逐行算按钮，
+     * 不持有时每行都是空数组（设计第 184 行）。
+     */
+    async function optionalFqcDecision(
+      context: Context<AuthEnv & AuthorizationEnv>,
+      action: FqcAction,
+    ): Promise<FqcDecision | null> {
+      try {
+        return await authorizeFqc(context, action);
+      } catch (error) {
+        if (error instanceof AuthorizationDeniedError) return null;
+        throw error;
+      }
+    }
+
+    /**
+     * S6：工单一行的公开投影。显式列名，不做 `...row`：停写的 `ownerDepartment` /
+     * `dueAt` 以及任何新增的内部列都不会从列表、详情里漏出去。
+     */
+    function publicTicket(row: Record<string, unknown>) {
+      return {
+        id: asText(row.id),
+        code: asText(row.code),
+        title: asText(row.title),
+        description:
+          row.description === null || row.description === undefined
+            ? null
+            : asText(row.description),
+        sourceMessageId:
+          row.sourceMessageId === null || row.sourceMessageId === undefined
+            ? null
+            : asText(row.sourceMessageId),
+        screeningId:
+          row.screeningId === null || row.screeningId === undefined
+            ? null
+            : asText(row.screeningId),
+        category:
+          row.category === null || row.category === undefined
+            ? null
+            : asText(row.category),
+        severity: asText(row.severity),
+        departmentId:
+          row.departmentId === null || row.departmentId === undefined
+            ? null
+            : asText(row.departmentId),
+        departmentTitle: null as string | null,
+        assigneeId:
+          row.assigneeId === null || row.assigneeId === undefined
+            ? null
+            : asText(row.assigneeId),
+        assigneeName: null as string | null,
+        state: asText(row.state),
+        closedAt: row.closedAt ?? null,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        statusChangedAt: row.statusChangedAt ?? null,
+        lifecycleVersion: Number(row.lifecycleVersion ?? 0),
+        lifecycleDefinition:
+          row.lifecycleDefinition === null || row.lifecycleDefinition === undefined
+            ? null
+            : asText(row.lifecycleDefinition),
+        reopenCount: Number(row.reopenCount ?? 0),
+        createdBy:
+          row.createdBy === null || row.createdBy === undefined
+            ? null
+            : asText(row.createdBy),
+        resolution:
+          row.resolution === null || row.resolution === undefined
+            ? null
+            : asText(row.resolution),
+        canTransition: [] as string[],
+      };
+    }
+
+    /** S6：逐行算 canTransition。真正的规则是 lifecycle 的守卫，这里只是问它一遍。 */
+    async function fillCanTransition(
+      rows: readonly ReturnType<typeof publicTicket>[],
+      canDecide: boolean,
+      actorId: string | null,
+    ) {
+      if (!canDecide || actorId === null) return rows;
+      for (const row of rows) {
+        try {
+          const available = await lifecycle.available('fqcTickets', row.id, {
+            id: actorId,
+          });
+          row.canTransition = available
+            .filter((transition) => transition.allowed)
+            .map((transition) => transition.name);
+        } catch (error) {
+          // 迁移前的存量工单若没有绑定定义，运行时对 available() 也抛
+          // DEFINITION_MISMATCH；这类行没有按钮，不能让整个列表 500。
+          if (!(error instanceof LifecycleError)) throw error;
+          row.canTransition = [];
+        }
+      }
+      return rows;
+    }
+
+    /** S6：部门名与经办人姓名都只解析成显示名，不回用户名、邮箱或联系方式。 */
+    async function fillNames(rows: readonly ReturnType<typeof publicTicket>[]) {
+      const titles = await departments.titlesByIds(
+        rows
+          .map((row) => row.departmentId)
+          .filter((id): id is string => id !== null),
+      );
+      const names = await namesOf(
+        rows.map((row) => row.assigneeId ?? ''),
+      );
+      for (const row of rows) {
+        row.departmentTitle = row.departmentId
+          ? (titles[row.departmentId] ?? null)
+          : null;
+        row.assigneeName = row.assigneeId
+          ? (names.get(row.assigneeId) ?? null)
+          : null;
+      }
+      return rows;
+    }
+
+    /**
      * 列表随行带的最近一次确认：用查看决策里这张表自己的范围读，按
      * `createdAt DESC, id DESC` 排序，每个初筛只留第一条。读被折成 false 时整段为空，
      * 不报错，也不许绕开范围按 id 另查。
@@ -898,6 +1074,8 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
     router.use('/quality/tickets', auth.required(), authz.middleware());
     router.use('/quality/tickets/*', auth.required(), authz.middleware());
     router.use('/quality/ticket-candidates', auth.required(), authz.middleware());
+    router.use('/quality/ticket-departments', auth.required(), authz.middleware());
+    router.use('/quality/routing-rules', auth.required(), authz.middleware());
     router.use('/quality/messages', auth.required(), authz.middleware());
     router.use('/quality/screenings', auth.required(), authz.middleware());
     router.use('/quality/screenings/*', auth.required(), authz.middleware());
@@ -906,6 +1084,29 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
     router.use('/quality/feedbacks/*', auth.required(), authz.middleware());
     router.use('/quality/feedback-files', auth.required(), authz.middleware());
     router.use('/quality/feedback-files/*', auth.required(), authz.middleware());
+
+    /**
+     * 投递的个数上限回与网页入口相同的 TOO_MANY_ATTACHMENTS：schema 的 `.max(10)`
+     * 只会给通用的 INVALID_INPUT，所以先在校验器之前挡下；但授权要更早 —— 没有投递
+     * 资格的人一律先得 403，不因附件个数得到 400。读过的请求体由 Hono 缓存，
+     * 后面的 apiValidator 仍能拿到同一份。
+     */
+    const guardIntakeAttachmentLimit = createMiddleware<AuthEnv & AuthorizationEnv>(
+      async (context, next) => {
+        await authorizeFqc(context, 'intake');
+        const body: unknown = await context.req.json().catch(() => undefined);
+        const ids = (body as { attachmentIds?: unknown } | null | undefined)?.attachmentIds;
+        if (Array.isArray(ids) && ids.length > 10) {
+          throw new ApiError({
+            status: 'INVALID_ARGUMENT',
+            reason: 'TOO_MANY_ATTACHMENTS',
+            domain: 'quality',
+            message: 'A feedback may carry at most ten attachments.',
+          });
+        }
+        await next();
+      },
+    );
 
     // 外部渠道回调：企业微信/微信网关把客户消息推到这里。
     // 授权一次「投递」；两张表的写入在同一个事务里完成，不建工单。
@@ -926,6 +1127,7 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
           '500': apiErrorResponse(500),
         },
       }),
+      guardIntakeAttachmentLimit,
       apiValidator('json', IngestMessageBody),
       async (context) => {
         const body = context.req.valid('json');
@@ -1061,22 +1263,36 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
       }),
       apiValidator('query', ListTicketsQuery),
       async (context) => {
-        const { state, ownerDepartment, page, pageSize } =
+        const { state, departmentId, assigneeId, q, page, pageSize } =
           context.req.valid('query');
+        // 先按「查看」取行；部门主管的查看范围只含本部门及下级工单，范围之外
+        // 的行由带策略的仓储直接排除，与不存在同形。
         const decision = await authorizeFqc(context, 'view');
-        const filter: Record<string, string> = {};
-        if (state) {
-          filter.state = state;
-        }
-        if (ownerDepartment) {
-          filter.ownerDepartment = ownerDepartment;
-        }
+        const ticketDecision = await optionalFqcDecision(context, 'ticket');
+        const actorId = context.get('auth')?.user?.id;
         const repo = database
           .repository('fqcTickets')
           .withPolicy(policyOf(decision, 'fqcTickets'));
-        const scoped = Object.keys(filter).length > 0;
-        const rows = await repo.findMany({
-          ...(scoped ? { filter } : {}),
+        const buildFilter = (filter: FilterBuilder) => {
+          const parts: FilterNode[] = [];
+          if (state) parts.push(filter.string('state').eq(state));
+          if (departmentId) parts.push(filter.string('departmentId').eq(departmentId));
+          if (assigneeId) parts.push(filter.string('assigneeId').eq(assigneeId));
+          if (q) {
+            // q 只匹配编号与标题；描述是客户的正文，绝不参与列表搜索。
+            parts.push(
+              filter.or([
+                filter.string('code').includes(q, { mode: 'insensitive' }),
+                filter.string('title').includes(q, { mode: 'insensitive' }),
+              ]),
+            );
+          }
+          return parts.length === 0
+            ? filter.string('id').notEmpty()
+            : filter.and(parts);
+        };
+        const rows = (await repo.findMany({
+          filter: buildFilter,
           limit: pageSize,
           offset: (page - 1) * pageSize,
           sort: {
@@ -1084,12 +1300,330 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
             version: 1,
             items: [{ kind: 'field', path: ['createdAt'], direction: 'desc' }],
           },
-        });
-        const total = await (scoped ? repo.count({ filter }) : repo.count());
+        })) as unknown as Record<string, unknown>[];
+        const total = await repo.count({ filter: buildFilter });
+        const decorated = await fillNames(rows.map(publicTicket));
+        await fillCanTransition(
+          decorated,
+          ticketDecision !== null,
+          actorId === undefined || actorId === null ? null : String(actorId),
+        );
         return context.json({
-          data: rows,
+          data: decorated,
           meta: { page, pageSize, total },
         });
+      },
+    );
+
+    /**
+     * S6 详情：工单一行 + 确认记录 + 流转历史。
+     *
+     * 两处授权细节：① 行本身按「查看」取，范围外与不存在同形 404；② 确认记录用
+     * 同一查看决策在确认记录表上的范围读——部门主管的查看不含这张表，框架把读
+     * 折成 false，带策略仓储读会抛 READ_FORBIDDEN，这里显式当空数组处理，
+     * 详情才不会因为一张他不该看的表而整体 403。
+     */
+    router.get(
+      '/quality/tickets/:ticketId',
+      describeRoute({
+        tags: ['Quality'],
+        summary: 'Get one quality ticket with reviews and transition history',
+        operationId: 'getQualityTicket',
+        responses: {
+          '200': dataResponse(z.object({ data: TicketDetailSchema })),
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '404': apiErrorResponse(404),
+          '500': apiErrorResponse(500),
+        },
+      }),
+      async (context) => {
+        const ticketId = context.req.param('ticketId');
+        const decision = await authorizeFqc(context, 'view');
+        const ticketDecision = await optionalFqcDecision(context, 'ticket');
+        const actorId = context.get('auth')?.user?.id;
+        const found = (await database
+          .repository('fqcTickets')
+          .withPolicy(policyOf(decision, 'fqcTickets'))
+          .findOne({ filter: { id: ticketId } })) as Record<string, unknown> | undefined;
+        if (!found) {
+          throw new ApiError({
+            status: 'NOT_FOUND',
+            reason: 'TICKET_NOT_FOUND',
+            domain: 'quality',
+            message: `Ticket ${ticketId} was not found.`,
+          });
+        }
+        const row = publicTicket(found);
+        await fillNames([row]);
+        await fillCanTransition(
+          [row],
+          ticketDecision !== null,
+          actorId === undefined || actorId === null ? null : String(actorId),
+        );
+
+        // 确认记录：按工单指着的初筛取；read === false 显式当空数组（设计点名）。
+        const reviewPolicy = policyOf(decision, 'fqcScreeningReviews');
+        let reviewRows: Record<string, unknown>[] = [];
+        if (row.screeningId !== null && reviewPolicy.read !== false) {
+          reviewRows = await database
+            .connection()
+            .repository('fqcScreeningReviews')
+            .withPolicy(reviewPolicy)
+            .findMany({
+              filter: (filter) =>
+                filter.string('screeningId').eq(row.screeningId),
+              sort: {
+                kind: 'sort',
+                version: 1,
+                items: [{ kind: 'field', path: ['createdAt'], direction: 'desc' }],
+              },
+            });
+        }
+        const reviewNames = await namesOf(reviewRows.map((r) => asText(r.actorId)));
+        const reviews = reviewRows.map((review) => ({
+          id: String(review.id),
+          screeningId: String(review.screeningId),
+          kind: String(review.kind),
+          category: review.category ?? null,
+          severity: review.severity ?? null,
+          departmentId: review.departmentId ?? null,
+          actorId: String(review.actorId),
+          actorName: reviewNames.get(asText(review.actorId)) ?? UNKNOWN_ACTOR_NAME,
+          createdAt: review.createdAt,
+        }));
+        let transitions: unknown[] = [];
+        try {
+          transitions = (await lifecycle.history('fqcTickets', ticketId)).transitions as unknown[];
+        } catch (error) {
+          if (!(error instanceof LifecycleError)) throw error;
+        }
+        return context.json({
+          data: { ticket: row, reviews, transitions },
+        });
+      },
+    );
+
+    /**
+     * S7 帮手：只回调用者按「处理工单」看得到、且已解决或已关闭的工单。
+     *
+     * 相似的办法是拿本单标题在候选工单的描述里做关键字匹配；描述只用来匹配，
+     * 返回的行由 publicAssistTicket 显式列名，绝不带描述或发件人字段。
+     * 开关关着或没有模型：suggestion 空形状、engine none，不接模型不外发。
+     */
+    router.get(
+      '/quality/tickets/:ticketId/assist',
+      describeRoute({
+        tags: ['Quality'],
+        summary: 'Similar resolved tickets and an empty suggestion for an agent',
+        operationId: 'assistQualityTicket',
+        responses: {
+          '200': dataResponse(z.object({ data: TicketAssistSchema })),
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '404': apiErrorResponse(404),
+          '500': apiErrorResponse(500),
+        },
+      }),
+      async (context) => {
+        const ticketId = context.req.param('ticketId');
+        const decision = await authorizeFqc(context, 'ticket');
+        const repo = database
+          .repository('fqcTickets')
+          .withPolicy(policyOf(decision, 'fqcTickets'));
+        const subject = (await repo.findOne({
+          filter: { id: ticketId },
+        })) as Record<string, unknown> | undefined;
+        if (!subject) {
+          throw new ApiError({
+            status: 'NOT_FOUND',
+            reason: 'TICKET_NOT_FOUND',
+            domain: 'quality',
+            message: `Ticket ${ticketId} was not found.`,
+          });
+        }
+        const title = asText(subject.title);
+        const candidates = title.length
+          ? ((await repo.findMany({
+              filter: (filter) =>
+                filter.and([
+                  filter.or([
+                    filter.string('state').eq('resolved'),
+                    filter.string('state').eq('closed'),
+                  ]),
+                  filter.text('description').includes(title, {
+                    mode: 'insensitive',
+                  }),
+                ]),
+              limit: 50,
+              sort: {
+                kind: 'sort',
+                version: 1,
+                items: [{ kind: 'field', path: ['closedAt'], direction: 'desc' }],
+              },
+            })) as unknown as Record<string, unknown>[])
+          : [];
+        return context.json({
+          data: {
+            similar: candidates.map((row) => ({
+              id: String(row.id),
+              code: String(row.code),
+              title: String(row.title),
+              category: row.category ?? null,
+              severity: String(row.severity),
+              resolution: row.resolution ?? null,
+              closedAt: row.closedAt ?? null,
+            })),
+            suggestion: { text: '', source: null },
+            engine: 'none',
+          },
+        });
+      },
+    );
+
+    /**
+     * 主会话追加：派单/转派对话框的部门下拉。只回在用部门的 id 与 title，
+     * 不回负责人、成员或编码以外的信息；持「处理」或「处理工单」任一即可调
+     * （部门名称不是人员信息）。质量角色默认没有读 /departments/tree 的授权，
+     * 这个窄端点是它在默认部署里唯一能取到的部门清单。
+     */
+    router.get(
+      '/quality/ticket-departments',
+      describeRoute({
+        tags: ['Quality'],
+        summary: 'List active departments for ticket assignment dialogs',
+        operationId: 'listTicketDepartments',
+        responses: {
+          '200': dataResponse(TicketDepartmentsSchema),
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '500': apiErrorResponse(500),
+        },
+      }),
+      async (context) => {
+        const handle = await optionalFqcDecision(context, 'handle');
+        const ticket = await optionalFqcDecision(context, 'ticket');
+        const decision = handle ?? ticket;
+        if (decision === null) {
+          throw new AuthorizationDeniedError(
+            (await context.get('authz').authorize({
+              resource: { type: 'composite', id: 'fqc' },
+              action: 'handle',
+            })),
+          );
+        }
+        // 验收门：部门清单也按调用者在工单表上的范围过滤，不让人借此判断范围外
+        // 的部门是否存在；范围解析不出来时只回空，不放宽成全公司。
+        const scope = ticketScopeOfDecision(decision);
+        const rows = (await database
+          .connection()
+          .repository('departments')
+          .findMany({ filter: { active: true } })) as unknown as Record<string, unknown>[];
+        return context.json({
+          data: rows
+            .filter((row) => inTicketScope(scope, asText(row.id)))
+            .map((row) => ({
+              id: asText(row.id),
+              title: asText(row.title),
+            })),
+        });
+      },
+    );
+
+    /** 派单规则的只读清单与整体替换（设计 HTTP 表最后一行）。 */
+    router.get(
+      '/quality/routing-rules',
+      describeRoute({
+        tags: ['Quality'],
+        summary: 'Read the category to department routing rules',
+        operationId: 'listRoutingRules',
+        responses: {
+          '200': dataResponse(z.unknown()),
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '500': apiErrorResponse(500),
+        },
+      }),
+      async (context) => {
+        const decision = await authorizeFqc(context, 'view');
+        const repo = database
+          .repository('fqcRoutingRules')
+          .withPolicy(policyOf(decision, 'fqcRoutingRules'));
+        const rows = (await repo.findMany()) as unknown as Record<string, unknown>[];
+        return context.json({
+          data: rows.map((row) => ({
+            category: String(row.category),
+            departmentId: row.departmentId ?? null,
+          })),
+        });
+      },
+    );
+
+    router.put(
+      '/quality/routing-rules',
+      describeRoute({
+        tags: ['Quality'],
+        summary: 'Replace all category to department routing rules',
+        operationId: 'replaceRoutingRules',
+        responses: {
+          '200': dataResponse(z.unknown()),
+          '400': apiErrorResponse(400),
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '422': unprocessableResponse,
+          '500': apiErrorResponse(500),
+        },
+      }),
+      apiValidator('json', ReplaceRoutingRulesBody),
+      async (context) => {
+        await authorizeFqc(context, 'configure');
+        const rules = context.req.valid('json').rules;
+        const seen = new Set<string>();
+        for (const rule of rules) {
+          if (seen.has(rule.category)) {
+            throw new ApiError({
+              status: 'INVALID_ARGUMENT',
+              reason: 'DUPLICATE_CATEGORY',
+              domain: 'quality',
+              message: `Category ${rule.category} appears more than once.`,
+            });
+          }
+          seen.add(rule.category);
+          if (
+            rule.departmentId !== null &&
+            (await departments.subtreeIds(rule.departmentId)).length === 0
+          ) {
+            throw new ApiError({
+              status: 'FAILED_PRECONDITION',
+              httpStatus: 422,
+              reason: 'DEPARTMENT_NOT_FOUND',
+              domain: 'quality',
+              message: `Department ${rule.departmentId} does not exist or is disabled.`,
+            });
+          }
+        }
+        const session = context.get('auth');
+        const actorId = session?.user?.id === undefined ? null : String(session.user.id);
+        const stored = await database.connection().transaction(async (transaction) => {
+          const repo = transaction.repository('fqcRoutingRules');
+          await repo.deleteMany({ filter: (filter) => filter.string('category').notEmpty() });
+          const now = new Date();
+          for (const rule of rules) {
+            // 表里的 departmentId 非空：请求里的 null 表示这个类别「不配规则」，
+            // 整体替换时自然不落行，而不是往库里写 NULL。
+            if (rule.departmentId === null) continue;
+            await repo.createOne({
+              values: {
+                category: rule.category,
+                departmentId: rule.departmentId,
+                updatedAt: now,
+                updatedBy: actorId ?? 'system',
+              },
+            });
+          }
+          return rules;
+        });
+        return context.json({ data: stored });
       },
     );
 
@@ -1132,6 +1666,16 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
           });
         }
         const actor = { id: String(session.user.id) };
+        const rawRequestId = context.req.header('idempotency-key');
+        if (rawRequestId !== undefined && (rawRequestId.length === 0 || rawRequestId.startsWith('$'))) {
+          throw new ApiError({
+            status: 'INVALID_ARGUMENT',
+            reason: 'INVALID_REQUEST_ID',
+            domain: 'quality',
+            message: 'Idempotency-Key must be non-empty and not start with $.',
+          });
+        }
+        const requestId = rawRequestId;
         const found = await database
           .connection()
           .repository('fqcTickets')
@@ -1154,11 +1698,21 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
               actor,
               manual: true,
               input: (body.input ?? {}) as JsonObject,
+              ...(requestId === undefined ? {} : { requestId }),
             },
           );
-          const view = await lifecycle.view('fqcTickets', ticketId, actor);
+          // 审计 B1：只持「处理工单」的人能点按钮，但不因此拿到工单的客户正文。
+          // 审计 B3：重放返回第一次的结果（effectRuns 为空，通知不会重发）。
           return context.json({
-            data: { ...view, replayed: result.replayed === true },
+            data: {
+              id: String(result.record.id),
+              state: result.record.state,
+              lifecycleVersion: Number(
+                (result.record as unknown as Record<string, unknown>)
+                  .lifecycleVersion ?? 0,
+              ),
+              replayed: result.replayed === true,
+            },
           });
         } catch (error) {
           throw toLifecycleApiError(error);
@@ -1211,8 +1765,9 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
           });
         }
         if (assigneeId !== null) {
-          const memberIds = await departments.memberIdsOf(
-            asText(ticket.departmentId),
+          const memberIds = await activeMemberIdsOf(
+            database.connection(),
+            await departments.memberIdsOf(asText(ticket.departmentId)),
           );
           if (!memberIds.includes(assigneeId)) {
             throw new ApiError({
@@ -1224,20 +1779,31 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
             });
           }
         }
+        // 审计 A2：不设版本前提（设计 :177），但关单不能与改经办人竞态：
+        // 带 state 谓词更新，读到未关闭却更新 0 行只可能是并发关单。
         const changed = await repo.updateMany({
-          filter: { id: ticketId },
+          filter: (filter) =>
+            filter.and([
+              filter.string('id').eq(ticketId),
+              filter.string('state').ne('closed'),
+            ]),
           values: { assigneeId },
         });
         if (changed.updatedCount !== 1) {
           throw new ApiError({
             status: 'ABORTED',
-            reason: 'TICKET_ASSIGNEE_CONFLICT',
+            reason: 'TICKET_CLOSED',
             domain: 'quality',
-            message: 'The ticket changed while changing the assignee.',
+            message: 'The ticket is closed; reopen it before changing the assignee.',
           });
         }
-        const updated = await repo.findOne({ filter: { id: ticketId } });
-        return context.json({ data: updated });
+        return context.json({
+          data: {
+            id: asText(ticket.id),
+            state: asText(ticket.state),
+            lifecycleVersion: Number(ticket.lifecycleVersion ?? 0),
+          },
+        });
       },
     );
 
@@ -1282,7 +1848,10 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         // 部门不存在或已停用时 subtreeIds 回空；与范围外同形。
         if ((await departments.subtreeIds(departmentId)).length === 0) throw notFound();
 
-        const memberIds = await departments.memberIdsOf(departmentId);
+        const memberIds = await activeMemberIdsOf(
+          database.connection(),
+          await departments.memberIdsOf(departmentId),
+        );
         const result = await people.search({
           q,
           userIds: memberIds,
@@ -1457,7 +2026,9 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
             message: 'A ticket already exists for this screening.',
           });
 
-        const ticket = await database.connection().transaction(async (transaction) => {
+        const { ticket, review } = await database
+          .connection()
+          .transaction(async (transaction) => {
           const screenings = transaction
             .repository('fqcScreenings')
             .withPolicy(policyOf(decision, 'fqcScreenings'));
@@ -1554,7 +2125,10 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
 
           const assigneeId = body.assigneeId ?? null;
           if (assigneeId !== null) {
-            const memberIds = await departments.memberIdsOf(departmentId);
+            const memberIds = await activeMemberIdsOf(
+              database.connection(),
+              await departments.memberIdsOf(departmentId),
+            );
             if (!memberIds.includes(assigneeId)) {
               throw new ApiError({
                 status: 'FAILED_PRECONDITION',
@@ -1567,20 +2141,17 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
           }
 
           const reviewId = randomUUID();
-          await reviews.createMany({
-            values: [
-              {
-                id: reviewId,
-                screeningId,
-                kind: 'dispatch',
-                category,
-                severity,
-                departmentId,
-                actorId,
-                createdAt: new Date(),
-              },
-            ],
-          });
+          const reviewValues = {
+            id: reviewId,
+            screeningId,
+            kind: 'dispatch',
+            category,
+            severity,
+            departmentId,
+            actorId,
+            createdAt: new Date(),
+          };
+          await reviews.createMany({ values: [reviewValues] });
 
           // 与确认同一套版本前提：并发派单只让一个 UPDATE 匹配到行。
           const observedReviewId =
@@ -1651,10 +2222,45 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
               message: 'The new ticket could not be read back.',
             });
           }
-          return stored;
+          return { ticket: stored, review: reviewValues };
         });
 
-        return context.json({ data: ticket }, 201);
+        // 201 在工单行之外带上刚写的确认记录（与确认端点同形），页面不必等列表重取。
+        const reviewNames = await namesOf([asText(review.actorId)]);
+        const dispatchReview = {
+          ...review,
+          actorName: reviewNames.get(asText(review.actorId)) ?? UNKNOWN_ACTOR_NAME,
+        };
+
+        // S8：派单通知是提交之后的效果，不进上面的事务。事务失败时这一句不会执行，
+        // 回滚自然没有通知；通知服务按幂等键去重，重放不重发。通知失败只记日志，
+        // 不把已经提交的 201 改成 500。
+        try {
+          await app.container.resolve(ticketNotifierToken).notify({
+            kind: 'dispatch',
+            ticketId: asText(ticket.id),
+            code: asText(ticket.code),
+            state: asText(ticket.state),
+            version: Number(ticket.lifecycleVersion ?? 0),
+            departmentId:
+              ticket.departmentId === null || ticket.departmentId === undefined
+                ? null
+                : asText(ticket.departmentId),
+            assigneeId:
+              ticket.assigneeId === null || ticket.assigneeId === undefined
+                ? null
+                : asText(ticket.assigneeId),
+            previousAssigneeId: null,
+            createdBy: actorId,
+          });
+        } catch (error) {
+          logger?.warn(
+            { error },
+            'The dispatch notification failed; the committed ticket stands.',
+          );
+        }
+
+        return context.json({ data: { ...publicTicket(ticket), review: dispatchReview } }, 201);
       },
     );
 
@@ -1725,6 +2331,25 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
               filter: { screeningId },
             });
             const isRejudge = ticket !== null && ticket !== undefined;
+            // 审计 A3：这份草稿确实派过单（确认记录里有 dispatch 行）却读不到
+            // 工单，说明「处理」在工单表上没有读权限或范围不含它。不能静默
+            // 退化成确认分支，否则初筛指针动了、工单没改，不变量 2 被打破。
+            const dispatched = await reviews.findMany({
+              filter: (filter) =>
+                filter.and([
+                  filter.string('screeningId').eq(screeningId),
+                  filter.string('kind').eq('dispatch'),
+                ]),
+              limit: 1,
+            });
+            if (!isRejudge && dispatched.length > 0) {
+              throw new ApiError({
+                status: 'PERMISSION_DENIED',
+                reason: 'TICKET_NOT_READABLE',
+                domain: 'quality',
+                message: 'The dispatched ticket is not readable with this authorization.',
+              });
+            }
             if (isRejudge) {
               if (ticket.state === 'closed') {
                 throw new ApiError({
@@ -1747,9 +2372,14 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
                 });
               }
             }
-            // 请求体缺省时用草稿里的值：人没有改，就是确认 AI 的判断。
-            const category = body.category ?? asText(existing.category);
-            const severity = body.severity ?? asText(existing.severity);
+            // 确认分支缺省取草稿值（人没改就是确认 AI 的判断）；改判分支缺省取工单现值。
+            // 只带 severity 改判时，类别不能悄悄回落到草稿（审计 A2）。
+            const category =
+              body.category ??
+              (isRejudge ? asText(ticket.category) : asText(existing.category));
+            const severity =
+              body.severity ??
+              (isRejudge ? asText(ticket.severity) : asText(existing.severity));
             if (!category || !severity) {
               throw new ApiError({
                 status: 'INVALID_ARGUMENT',
@@ -1757,6 +2387,21 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
                 domain: 'quality',
                 message:
                   'The screening has no category or severity; pass them in the request body.',
+              });
+            }
+            // 审计 B1：确认分支显式带的 departmentId 也走派单一处的部门存在性与在用校验；
+            // 改判分支的 departmentId 必须与工单现值一致（USE_REASSIGN），建单时已校验过。
+            if (
+              !isRejudge &&
+              body.departmentId !== undefined &&
+              (await departments.subtreeIds(body.departmentId)).length === 0
+            ) {
+              throw new ApiError({
+                status: 'FAILED_PRECONDITION',
+                httpStatus: 422,
+                reason: 'DEPARTMENT_NOT_FOUND',
+                domain: 'quality',
+                message: `Department ${body.departmentId} does not exist or is disabled.`,
               });
             }
             const reviewId = randomUUID();
@@ -1808,11 +2453,32 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
             });
           }
           if (isRejudge) {
-            // 只动类别与严重度：责任部门、经办人、状态、流转历史都不碰。
-            await tickets.updateMany({
-              filter: { id: asText(ticket.id) },
+            // 审计 A2：带读到的版本前提更新；关单并发时另一次流转已把版本推进，
+            // 这里更新 0 行，整笔事务回滚，不会改到已关闭的工单。
+            const rejudged = await tickets.updateMany({
+              filter: (filter) =>
+                filter.and([
+                  filter.string('id').eq(asText(ticket.id)),
+                  filter
+                    .number('lifecycleVersion')
+                    .eq(Number(ticket.lifecycleVersion ?? 0)),
+                ]),
               values: { category, severity },
             });
+            if (rejudged.updatedCount !== 1) {
+              // 原因码要如实：已关闭才能说 TICKET_CLOSED；只是被别人改过版本时，
+              // 用与 SCREENING_REVIEW_CONFLICT / TICKET_ASSIGNEE_CONFLICT 同惯例的码。
+              const current = await tickets.findOne({ filter: { id: asText(ticket.id) } });
+              const nowClosed = current?.state === 'closed';
+              throw new ApiError({
+                status: 'ABORTED',
+                reason: nowClosed ? 'TICKET_CLOSED' : 'TICKET_VERSION_CONFLICT',
+                domain: 'quality',
+                message: nowClosed
+                  ? 'The ticket is closed; reopen it before rejudging.'
+                  : 'The ticket changed while rejudging. Reload and rejudge again.',
+              });
+            }
           }
           const updated = await screenings.findOne({
             filter: { id: screeningId },
@@ -1927,6 +2593,13 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         reason: 'FEEDBACK_NOT_OPEN',
         domain: 'quality',
         message: 'This feedback is no longer open.',
+      });
+    const patchConflict = () =>
+      new ApiError({
+        status: 'ABORTED',
+        reason: 'FEEDBACK_CONFLICT',
+        domain: 'quality',
+        message: 'This feedback was changed by another request while it was being updated.',
       });
     const replayUnreadable = () =>
       new ApiError({
@@ -2111,7 +2784,11 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
           sort: {
             kind: 'sort',
             version: 1,
-            items: [{ kind: 'field', path: ['createdAt'], direction: 'desc' }],
+            // 同一毫秒创建时靠 id 定序，否则跨页会重复或漏行。
+            items: [
+              { kind: 'field', path: ['createdAt'], direction: 'desc' },
+              { kind: 'field', path: ['id'], direction: 'desc' },
+            ],
           },
         })) as unknown as Record<string, unknown>[];
         const total =
@@ -2178,6 +2855,10 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         ) => {
           const parts = [
             ...(status === undefined ? [] : [filter.string('status').eq(status)]),
+            // 未处理与逾期都只认还开着的单；已丢弃的单即使初筛未确认也不算。
+            ...(pending === true || overdue === true
+              ? [filter.string('status').eq('open')]
+              : []),
             ...(channel === undefined ? [] : [filter.string('channel').eq(channel)]),
             ...(createdBefore === undefined
               ? []
@@ -2222,7 +2903,11 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
           sort: {
             kind: 'sort',
             version: 1,
-            items: [{ kind: 'field', path: ['createdAt'], direction: 'desc' }],
+            // 同一毫秒创建时靠 id 定序，否则跨页会重复或漏行。
+            items: [
+              { kind: 'field', path: ['createdAt'], direction: 'desc' },
+              { kind: 'field', path: ['id'], direction: 'desc' },
+            ],
           },
         })) as unknown as Record<string, unknown>[];
         const total = await repo.count({ filter });
@@ -2325,71 +3010,65 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
               message: 'A feedback may carry at most ten attachments.',
             });
           }
-          // 附件三条规则与录入共用一处判断，都在这个事务里。
-          const files = transaction.repository('fqcFeedbackFiles');
           const previousIds = Array.isArray(existing.attachmentIds)
             ? (existing.attachmentIds as string[]).map(String)
             : [];
-          const added = (desiredIds ?? []).filter((fileId) => !previousIds.includes(fileId));
-          for (const fileId of added) {
-            const file = await files.findOne({
-              filter: (filter) =>
-                filter.and([
-                  filter.string('id').eq(fileId),
-                  actorId === null
-                    ? filter.string('ownerId').empty()
-                    : filter.string('ownerId').eq(actorId),
-                  filter.string('feedbackId').empty(),
-                ]),
-            });
-            if (!file) {
-              throw new ApiError({
-                status: 'FAILED_PRECONDITION',
-                httpStatus: 422,
-                reason: 'ATTACHMENT_NOT_AVAILABLE',
-                domain: 'quality',
-                message: `Attachment ${fileId} is not available to this caller.`,
-              });
+          const expectedIds =
+            body.expectedAttachmentIds === undefined
+              ? undefined
+              : [...(body.expectedAttachmentIds as string[])];
+          if (expectedIds !== undefined) {
+            // 版本是客户端加载表单时读到的那份，不是服务端刚读到的现值；按集合比，
+            // 顺序变化不算冲突。不一致就是陈旧表单，整笔回滚。
+            const currentSet = new Set(previousIds);
+            const expectedSet = new Set(expectedIds);
+            if (
+              currentSet.size !== expectedSet.size ||
+              [...expectedSet].some((fileId) => !currentSet.has(fileId))
+            ) {
+              throw patchConflict();
             }
           }
-          fields.updatedAt = storedDateTime(new Date());
+          const attachmentNow = storedDateTime(new Date());
+          if (desiredIds !== undefined) {
+            // 附件三条规则与录入共用一处判断：核归属、核占用、挂上/拿掉都核行数。
+            await applyFeedbackAttachments(transaction, {
+              ownerId: actorId,
+              feedbackId: id,
+              added: desiredIds.filter((fileId) => !previousIds.includes(fileId)),
+              removed: previousIds.filter((fileId) => !desiredIds.includes(fileId)),
+              now: attachmentNow,
+            });
+          }
+          fields.updatedAt = attachmentNow;
           if (desiredIds !== undefined) {
             fields.attachmentIds = desiredIds;
           }
           const updated = await repo.updateMany({
-            filter: (filter) =>
-              filter.and([
+            filter: (filter) => {
+              const parts = [
                 filter.string('id').eq(id),
                 filter.string('status').eq('open'),
-              ]),
+              ];
+              if (desiredIds !== undefined) {
+                // 读到的 attachmentIds 当版本：两笔同时改附件的 PATCH 只有一笔能改到行，
+                // 另一笔连同它挂上的文件行一起回滚，不会留下不在列里的孤儿附件。
+                parts.push(
+                  existing.attachmentIds === null || existing.attachmentIds === undefined
+                    ? filter.json('attachmentIds').isDbNull()
+                    : filter.json('attachmentIds').eq(previousIds),
+                );
+              }
+              return filter.and(parts);
+            },
             values: fields as never,
           });
           if (updated.updatedCount !== 1) {
-            throw notOpen();
-          }
-          if (desiredIds !== undefined) {
-            const removed = previousIds.filter((fileId) => !desiredIds.includes(fileId));
-            const now = storedDateTime(new Date());
-            if (added.length > 0) {
-              await files.updateMany({
-                filter: (filter) =>
-                  filter.and([
-                    filter.or(added.map((fileId) => filter.string('id').eq(fileId))),
-                    filter.string('feedbackId').empty(),
-                  ]),
-                values: { feedbackId: id, updatedAt: now } as never,
-              });
+            const current = await repo.findOne({ filter: { id } });
+            if (!current || asText(current.status) !== 'open') {
+              throw notOpen();
             }
-            if (removed.length > 0) {
-              await files.updateMany({
-                filter: (filter) =>
-                  filter.and([
-                    filter.or(removed.map((fileId) => filter.string('id').eq(fileId))),
-                    filter.string('feedbackId').eq(id),
-                  ]),
-                values: { feedbackId: null, updatedAt: now } as never,
-              });
-            }
+            throw patchConflict();
           }
           return await repo.findOne({ filter: { id } });
         });

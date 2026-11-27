@@ -223,6 +223,14 @@ test('R-002 9: 确认不改写草稿，只追加一行确认记录，响应里�
   connection,
 }) => {
   const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  // B1：确认分支带的 departmentId 现在走部门存在性校验，夹具要建真实部门。
+  const department = (await expectJson(
+    await admin.fetch(
+      '/departments',
+      json({ title: '部门-R002确认', code: `R002-${randomUUID().slice(0, 8)}` }),
+    ),
+    201,
+  )) as { data: { id: string } };
   const manager = await createUser(admin, 'r002confirmmanager', {
     app: ['quality_manager'],
   });
@@ -255,7 +263,7 @@ test('R-002 9: 确认不改写草稿，只追加一行确认记录，响应里�
       json({
         category: 'appearance',
         severity: 'critical',
-        departmentId: 'department-r002',
+        departmentId: department.data.id,
       }),
     ),
     200,
@@ -271,7 +279,7 @@ test('R-002 9: 确认不改写草稿，只追加一行确认记录，响应里�
   expect(response.data.review.kind).toBe('confirm');
   expect(response.data.review.category).toBe('appearance');
   expect(response.data.review.severity).toBe('critical');
-  expect(response.data.review.departmentId).toBe('department-r002');
+  expect(response.data.review.departmentId).toBe(department.data.id);
   expect(response.data.review.actorId).toBe(manager.id);
   expect(response.data.reviewId).toBe(response.data.review.id);
 

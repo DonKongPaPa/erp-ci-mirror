@@ -88,6 +88,153 @@ const enUS = {
       empty: 'No tickets yet. New tickets appear here as they are created.',
       department: 'Department: {{department}}',
       state: 'State: {{state}}',
+      assignee: 'Assignee: {{name}}',
+      assigneeLabel: 'Assignee',
+      detail: 'Details',
+      detailTitle: 'Ticket {{code}}',
+      filters: {
+        state: 'State',
+        all: 'All states',
+        department: 'Department',
+        departmentAll: 'All departments',
+        assignee: 'Assignee',
+        assigneeAll: 'All assignees',
+        q: 'Search',
+        // 搜索只按编号与标题匹配；提示照实说，不暗示能搜到正文。
+        qPlaceholder: 'Search by code or title',
+        clear: 'Clear filters',
+      },
+      fields: {
+        department: 'Department',
+        created: 'Created',
+        closed: 'Closed',
+        resolution: 'Resolution note',
+        reopenCount: 'Reopened (times)',
+      },
+      reviews: 'Confirmations',
+      reviewsEmpty: 'No confirmation records.',
+      reviewLine:
+        '{{kind}} by {{actor}} · {{time}} · {{category}} / {{severity}}',
+      reviewKind: {
+        confirm: 'Confirm',
+        dispatch: 'Dispatch',
+        rejudge: 'Rejudge',
+      },
+      transitions: 'History',
+      transitionsEmpty: 'No transitions yet.',
+      transitionLine:
+        '{{name}}: {{from}} → {{to}} · {{actor}} · {{time}}',
+      actions: {
+        accept: 'Accept',
+        resolve: 'Resolve',
+        close: 'Close',
+        reopen: 'Reopen',
+        reassign: 'Reassign',
+        changeAssignee: 'Change assignee',
+        rejudge: 'Rejudge',
+      },
+    },
+    // R-003 确认并派单：表单里留空的值由服务端按规则取。
+    dispatch: {
+      title: 'Confirm & dispatch',
+      description:
+        'Create an internal ticket for this draft. Values left empty are taken from the confirmation record or the routing rules.',
+      category: 'Category',
+      severity: 'Severity',
+      department: 'Responsible department',
+      departmentByRule: 'By routing rules',
+      departmentHint:
+        'The responsible department is taken from the routing rules unless you choose one here.',
+      assignee: 'Assignee',
+      unspecified: 'Choose one',
+      requiredValues: 'Choose a category and a severity before dispatching.',
+      submit: 'Confirm & dispatch',
+      saved: 'Ticket created',
+    },
+    accept: {
+      description:
+        'Accepting moves this ticket to in progress. Leave the assignee empty to take it yourself.',
+      assignee: 'Assignee (optional)',
+      assigneeSelf: 'Leave empty to take it yourself.',
+    },
+    resolve: {
+      resolution: 'Resolution note',
+      resolutionRequired: 'Enter what was done before resolving.',
+    },
+    close: {
+      note: 'Note (optional)',
+    },
+    reopen: {
+      reason: 'Reason',
+      reasonRequired: 'Enter why this ticket is reopened.',
+    },
+    reassign: {
+      department: 'New responsible department',
+      departmentPlaceholder: 'Choose a department',
+      departmentRequired: 'Choose the new responsible department.',
+      assignee: 'Assignee (optional)',
+    },
+    changeAssignee: {
+      submit: 'Save',
+      saved: 'Assignee updated',
+    },
+    rejudge: {
+      title: 'Rejudge ticket',
+      description:
+        'Change the category and the severity. The change is recorded as a rejudge confirmation; the transition history stays untouched.',
+      departmentHint: 'To change the responsible department, use Reassign.',
+      submit: 'Rejudge',
+      saved: 'Ticket rejudged',
+    },
+    transitionsSaved: 'Done',
+    // R-003 帮手：相似的工单不带描述；处理建议等模型接入，没有就如实说。
+    assist: {
+      title: 'Assistant',
+      similar: 'Similar tickets',
+      similarEmpty: 'No similar resolved or closed tickets.',
+      suggestion: 'Suggestion',
+      suggestionPending: 'Suggestions start once the chat model is enabled.',
+      closedAt: 'Closed {{time}}',
+    },
+    routingRules: {
+      title: 'Routing rules',
+      description:
+        'The department responsible for each defect category. Saved all at once.',
+      edit: 'Edit',
+      save: 'Save',
+      cancel: 'Cancel',
+      unset: 'Unassigned',
+      saved: 'Routing rules saved',
+      failed: 'Could not load the routing rules.',
+      departmentColumn: 'Department',
+    },
+    candidates: {
+      search: 'Search',
+      placeholder: 'Search by name or username',
+      needDepartment: 'Choose a department first to search colleagues.',
+      empty: 'No matching colleagues.',
+      clear: 'Clear',
+      // 接口回标识、姓名、用户名三列，页面只显示姓名；姓名为空给占位。
+      noName: 'No name on file',
+    },
+    departmentsUnavailable: 'Could not load the department list.',
+    ticketErrors: {
+      INVALID_TRANSITION:
+        'This action does not fit the current state. Refresh and check the ticket.',
+      ASSIGNED_TO_OTHER:
+        'This ticket is assigned to someone else; only that person can act on it.',
+      DEPARTMENT_OUT_OF_SCOPE:
+        'The target department is outside your ticket scope.',
+      DEPARTMENT_DISABLED: 'The target department is disabled.',
+      ASSIGNEE_NOT_DEPARTMENT_MEMBER:
+        'The assignee is not a member of that department.',
+      TICKET_CLOSED: 'This ticket is closed; reopen it first.',
+      SCREENING_ALREADY_DISPATCHED: 'This draft already has a ticket.',
+      USE_REASSIGN: 'Changing the department is a reassignment; use Reassign.',
+      ROUTING_RULE_MISSING:
+        'This category has no routing rule; choose a department.',
+      forbidden: 'You do not have permission for this action.',
+      generic: 'The action failed ({{reason}}).',
     },
     channels: {
       wechat: 'WeChat',
@@ -104,7 +251,8 @@ const enUS = {
       confidence: 'Confidence {{value}}',
       ownerAndModel: 'Suggested owner: {{owner}} · Model: {{model}}',
       empty: 'No screenings',
-      review: 'Confirm',
+      // R-003：草稿唯一的动作「确认并派单」，表单里四项都能改；单独的「确认」没有入口。
+      reviewDispatch: 'Confirm & dispatch',
       // R-002: where each draft came from — which engine, and why the model did not run.
       engines: {
         rules: 'Rules',
@@ -122,8 +270,6 @@ const enUS = {
       similarCases: 'Similar cases referenced: {{count}}',
     },
     review: {
-      saved: 'Screening confirmed',
-      failed: 'Review failed',
       record:
         'Confirmed by {{actor}} · {{time}} · {{category}} / {{severity}}',
     },
@@ -166,10 +312,14 @@ const enUS = {
       open: 'Open',
       in_progress: 'In progress',
       resolved: 'Resolved',
+      reopened: 'Reopened',
       closed: 'Closed',
     },
     outcomes: {
+      // `suggested` 取代了 `auto`（迁移把存量改了名）；`auto` 的词条留着，
+      // 存量行在严格 i18n 下渲染不缺键。
       auto: 'Auto routed',
+      suggested: 'Suggested',
       'needs-review': 'Needs review',
       reviewed: 'Reviewed',
     },
@@ -294,6 +444,8 @@ const enUS = {
       forbidden: 'You do not have permission for this action.',
       attachmentNotFound: 'That attachment is not on this feedback sheet.',
       operationConflict: 'This action conflicts with a change already made. Refresh and try again.',
+      feedbackConflict: 'This sheet was changed by someone else. Refresh and try again.',
+      conflict: 'This action conflicts with another change. Refresh and try again.',
       invalidMultipart: 'The upload is not a valid multipart request.',
       unsupportedMediaType: 'This upload format is not supported.',
     },
@@ -416,6 +568,28 @@ const enUS = {
       noConflict: 'Employee numbers were contested; retry the request.',
       noExhausted: 'All employee numbers up to E999999 are used; no more can be issued.',
       syntheticEmailReserved: 'That address is reserved for employees without an email; choose another one.',
+    },
+  },
+  // R-025: server-side shift errors (page copy arrives in S3).
+  shifts: {
+    errors: {
+      denied: 'You do not have permission for this action. Ask an administrator to grant your role the required permission.',
+      session: 'Your session has expired. Sign in again.',
+      notFound: 'That shift does not exist. Reload and try again.',
+      codeExists: 'That shift code is already in use, including by a deactivated shift. Choose another.',
+      emptyRange: 'A shift cannot start and end at the same minute.',
+      breakOutOfRange: 'The break must lie inside the shift and start before it ends.',
+      fieldImmutable: 'The code, start, end and break cannot be changed. Create a new shift and deactivate this one.',
+      invalidRequest: 'Some values are not valid. Check the code, title and times.',
+      invalidCode: 'Use 1–32 uppercase letters, digits, hyphens or underscores, starting with a letter or digit.',
+      invalidTitle: 'The title must be 1–64 characters after trimming.',
+      invalidMinute: 'Times must be minutes from 0 to 1439.',
+      invalidBreak: 'Give both the break start and end, or neither.',
+      alreadyInactive: 'This shift is already deactivated.',
+      alreadyActive: 'This shift is already active.',
+      conflict: 'Another change won; reload and try again.',
+      failed: 'The request failed. Please try again.',
+      generic: 'Something went wrong ({{reason}}). Please try again.',
     },
   },
   // R-012: the department maintenance page. Rejections say what to do next, not just what failed.
@@ -614,6 +788,17 @@ const enUS = {
         manage: 'Manage employees',
       },
     },
+    // R-025: shifts are their own business resource, not personnel information.
+    shifts: {
+      title: 'Shift definitions',
+      tables: {
+        shifts: 'Shifts',
+      },
+      actions: {
+        view: 'View shifts',
+        manage: 'Manage shifts',
+      },
+    },
     recordAccess: {
       myDepartments: 'My departments',
       myDepartmentsAndBelow: 'My departments and below',
@@ -784,6 +969,42 @@ const enUS = {
       accepted: 'Accepted',
       failed: 'Failed',
       unknown: 'Unknown',
+    },
+  },
+  ticketNotifications: {
+    contributor: 'Quality tickets',
+    category: 'Quality tickets',
+    businessRule: 'Sent once after the transition commits; replaying the same idempotency key does not resend.',
+    languagePolicy: 'One message in the application default language.',
+    channel: 'Inbox',
+    variables: {
+      code: 'Ticket code',
+      state: 'Ticket state',
+    },
+    dispatch: {
+      name: 'Ticket dispatched',
+      trigger: 'After a screening is confirmed and dispatched.',
+      recipients: 'The responsible department manager and the assignee.',
+    },
+    reassign: {
+      name: 'Ticket reassigned',
+      trigger: 'After a ticket is reassigned.',
+      recipients: 'The responsible department manager, the assignee and the previous assignee.',
+    },
+    resolve: {
+      name: 'Ticket resolved',
+      trigger: 'After a ticket is resolved.',
+      recipients: 'The person who confirmed and dispatched the ticket.',
+    },
+    close: {
+      name: 'Ticket closed',
+      trigger: 'After a ticket is closed.',
+      recipients: 'The assignee.',
+    },
+    reopen: {
+      name: 'Ticket reopened',
+      trigger: 'After a ticket is reopened.',
+      recipients: 'The assignee and the responsible department manager.',
     },
   },
 };

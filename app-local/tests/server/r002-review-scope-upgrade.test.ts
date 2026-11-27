@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 
 import type { AppAuthorization } from '@nocobase/app-plugin-authorization';
 import { authorizationToken } from '@nocobase/app-plugin-authorization';
@@ -7,12 +8,14 @@ import {
   signIn,
   type TestSession,
 } from '@nocobase/app-plugin-authentication/testing';
+import { bindAppCommand, runAppCommand } from '@nocobase/app-testing/cli';
 import { createAppTest } from '../helpers/test-app.js';
 import { expect, vi } from 'vitest';
 
-import {
+import AuthzUpgradeR002, {
   upgradeR002,
   upgradeR002ReviewScope,
+  type R002UpgradeReport,
 } from '../../cli/authz/upgrade-r002.js';
 import { createStandaloneServer } from '../../server/standalone.js';
 
@@ -37,6 +40,24 @@ const test = createAppTest({
 const PASSWORD = 'R002-upgrade-123!';
 const REVIEW_TABLE = 'fqcScreeningReviews';
 const TARGETS = ['quality_manager', 'quality_inspector'];
+const appRoot = fileURLToPath(new URL('../../', import.meta.url));
+
+/** 部署脚本看退出码：把命令钉在测试应用起好的服务上，按真实 oclif runner 跑一遍。 */
+const runUpgradeCommand = (authz: AppAuthorization) => {
+  const Bound = bindAppCommand(AuthzUpgradeR002, {
+    rootDir: appRoot,
+    id: 'authz:upgrade-r002',
+    loadRuntime: async () =>
+      ({ env: {}, scope: { destroy: async () => undefined } }) as never,
+    createApp: () =>
+      ({
+        start: async () => undefined,
+        shutdown: async () => undefined,
+        container: { resolve: () => authz },
+      }) as never,
+  });
+  return runAppCommand(Bound, []);
+};
 
 interface JsonGrant {
   resource: { type: string; id: string };
@@ -69,6 +90,29 @@ const stripReviewScope = async (
       }
     }
   }
+  await authz.permissionSets.update(key, {
+    key,
+    ...(set.title === undefined ? {} : { title: set.title }),
+    grants,
+  });
+};
+
+/** 把 fqc.view 改成不带 policy 的形状：声明形状对不上，范围补不进去。 */
+const stripViewPolicy = async (authz: AppAuthorization, key: string) => {
+  const set = await authz.permissionSets.get(key);
+  if (!set) {
+    throw new Error(`permission set ${key} is missing`);
+  }
+  const grants = grantsOf(set).map((grant) =>
+    grant.resource.type === 'composite' && grant.resource.id === 'fqc'
+      ? {
+          ...grant,
+          actions: grant.actions.map((entry) =>
+            entry.action === 'view' ? { action: entry.action } : entry,
+          ),
+        }
+      : grant,
+  );
   await authz.permissionSets.update(key, {
     key,
     ...(set.title === undefined ? {} : { title: set.title }),
@@ -335,6 +379,14 @@ test('R-002 升级：升级之前确认是拒绝的，跑过命令之后同一�
 }) => {
   const authz = app.container.resolve(authorizationToken);
   const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  // B1：确认分支现在校验 departmentId，夹具要建真实部门。
+  const departmentResponse = await admin.fetch(
+    '/departments',
+    json({ title: '部门-R002升级', code: `R002UP-${randomUUID().slice(0, 8)}` }),
+  );
+  const departmentText = await departmentResponse.text();
+  expect(departmentResponse.status, `${departmentText}`).toBe(201);
+  const departmentId = (JSON.parse(departmentText) as { data: { id: string } }).data.id;
   await createUser(admin, 'r002upgrademanager', { app: ['quality_manager'] });
   const session = await signIn(testApp, {
     username: 'r002upgrademanager',
@@ -388,7 +440,7 @@ test('R-002 升级：升级之前确认是拒绝的，跑过命令之后同一�
 
   const after = await session.fetch(
     `/quality/screenings/${screeningId}/review`,
-    json({ departmentId: 'department-r002' }),
+    json({ departmentId }),
   );
   const afterText = await after.text();
   expect(after.status, `${afterText}`).toBe(200);
@@ -673,7 +725,7 @@ test('R-002 升级：质量主管只有带 policy 的 manage.related 时补无�
     '原有的带条件档位不该被删掉',
   ).toBe(true);
 
-  // 幂等：第二次不重复加，版本不动。
+  // 幂等：第二次不重复加。
   const revision = (await authz.permissionSets.get(role))?.revision;
   const second = await upgradeR002(authz, { info: () => undefined });
   expect(second.knowledgeAccess.changed).not.toContain(role);
@@ -685,6 +737,74 @@ test('R-002 升级：质量主管只有带 policy 的 manage.related 时补无�
   ).toBe(1);
   expect((await authz.permissionSets.get(role))?.revision).toBe(revision);
 });
+
+test('R-002 升级：角色缺失时加法没做成，命令非零退出且报告先打印完', async ({
+  app,
+  connection,
+}) => {
+  const authz = app.container.resolve(authorizationToken);
+  await connection.query
+    .deleteFrom('authorizationPermissionSets')
+    .where('key', '=', 'quality_inspector')
+    .execute();
+  expect(
+    await authz.permissionSets.get('quality_inspector'),
+    '前置条件：角色确实不存在，不是测试写了个空断言',
+  ).toBeUndefined();
+
+  const command = await runUpgradeCommand(authz);
+  expect(
+    command.exitCode ?? 0,
+    '加法没做成时命令必须非零退出，部署脚本才能发现',
+  ).toBeGreaterThan(0);
+  const error = String(command.error ?? '');
+  expect(error).toMatch(/review scope/u);
+  expect(error).toMatch(/quality_inspector/u);
+  expect(error).toMatch(/rerun/u);
+  expect(command.stdout).toContain(
+    '[r002-review-scope] quality_inspector: not found; skipped',
+  );
+  expect(
+    command.stdout,
+    '退出前两段报告都要打印完，包括各自的汇总行',
+  ).toContain('[r002-review-scope] changed:');
+  expect(command.stdout).toContain('[r002-knowledge] changed:');
+});
+
+test('R-002 升级：加法都做成、重跑本来就齐时命令以 0 退出', async ({ app }) => {
+  const authz = app.container.resolve(authorizationToken);
+  for (const key of TARGETS) {
+    await stripReviewScope(authz, key);
+    await stripKnowledgeAccess(authz, key);
+  }
+
+  const first = await runUpgradeCommand(authz);
+  expect(first.error, `命令不该报错：${String(first.error)}`).toBeUndefined();
+  expect(first.exitCode ?? 0, '全部补上时以 0 退出').toBe(0);
+  const report = first.result as R002UpgradeReport | undefined;
+  expect(report?.reviewScope.changed.sort()).toEqual([...TARGETS].sort());
+  expect(report?.knowledgeAccess.changed.sort()).toEqual([...TARGETS].sort());
+  expect(report?.reviewScope.missing).toEqual([]);
+  expect(report?.knowledgeAccess.missing).toEqual([]);
+
+  const revisions = await Promise.all(
+    TARGETS.map(async (key) => (await authz.permissionSets.get(key))?.revision),
+  );
+  const second = await runUpgradeCommand(authz);
+  expect(second.error, `重跑不该报错：${String(second.error)}`).toBeUndefined();
+  expect(second.exitCode ?? 0, '本来就齐时以 0 退出').toBe(0);
+  const again = second.result as R002UpgradeReport | undefined;
+  expect(again?.reviewScope.changed).toEqual([]);
+  expect(again?.reviewScope.unchanged.sort()).toEqual([...TARGETS].sort());
+  expect(again?.knowledgeAccess.unchanged.sort()).toEqual([...TARGETS].sort());
+  expect(
+    await Promise.all(
+      TARGETS.map(async (key) => (await authz.permissionSets.get(key))?.revision),
+    ),
+    '重跑不该改版本号',
+  ).toEqual(revisions);
+});
+
 
 test('R-002 升级：质量员只有带 policy 的 propose.related 时补无条件的，can() 由假变真', async ({
   app,
@@ -716,12 +836,19 @@ test('R-002 升级：质量员只有带 policy 的 propose.related 时补无条�
   expect(report.knowledgeAccess.changed).toContain(role);
   // 行为断言：升级后 can() 真的放开，不是只看 grants 里有动作名。
   expect(await canPropose()).toBe(true);
+  const after = grantsOf((await authz.permissionSets.get(role))!);
+  expect(unconditionalKbActionCount(after, action)).toBe(1);
   expect(
-    unconditionalKbActionCount(
-      grantsOf((await authz.permissionSets.get(role))!),
-      action,
+    after.some(
+      (grant) =>
+        grant.resource.type === 'kb' &&
+        grant.resource.id === 'kb.knowledge' &&
+        grant.actions.some(
+          (entry) => entry.action === action && entry.policy?.type === 'custom',
+        ),
     ),
-  ).toBe(1);
+    '原有的带条件档位不该被删掉',
+  ).toBe(true);
 
   // 幂等：第二次不重复加。
   const revision = (await authz.permissionSets.get(role))?.revision;
@@ -734,4 +861,90 @@ test('R-002 升级：质量员只有带 policy 的 propose.related 时补无条�
     ),
   ).toBe(1);
   expect((await authz.permissionSets.get(role))?.revision).toBe(revision);
+});
+
+test('R-002 升级：fqc.view 没有 composite 范围时静默跳过算失败，命令非零退出', async ({
+  app,
+}) => {
+  const authz = app.container.resolve(authorizationToken);
+  await stripViewPolicy(authz, 'quality_manager');
+  const grants = grantsOf((await authz.permissionSets.get('quality_manager'))!);
+  const view = grants
+    .flatMap((grant) => grant.actions)
+    .find((entry) => entry.action === 'view');
+  expect(view?.policy, '前置条件：view 确实没有 policy，范围补不进去').toBeUndefined();
+
+  const command = await runUpgradeCommand(authz);
+  expect(
+    command.exitCode ?? 0,
+    '想补的授权落不下去时必须非零退出',
+  ).toBeGreaterThan(0);
+  const error = String(command.error ?? '');
+  expect(error).toMatch(/fqc\.view/u);
+  expect(error).toMatch(/declaration mismatch/u);
+  expect(error).toMatch(/rerun/u);
+  expect(command.stdout).toContain(
+    '[r002-review-scope] quality_manager: declaration mismatch: quality_manager/fqc.view: action has no composite policy with data scopes',
+  );
+  expect(command.stdout, '退出前报告要打印完').toContain(
+    '[r002-review-scope] changed:',
+  );
+});
+
+test('R-002 升级：声明不含确认记录范围时静默跳过算失败，命令非零退出', async ({
+  app,
+}) => {
+  const authz = app.container.resolve(authorizationToken);
+  await stripReviewScope(authz, 'quality_manager');
+  expect(
+    authz.compositeResources
+      .getAction('fqc', 'view')
+      ?.dataScopes?.some((scope) => scope.key === REVIEW_TABLE),
+    '前置条件：真实声明里 view 带这张表的范围',
+  ).toBe(true);
+  const before = grantsOf((await authz.permissionSets.get('quality_manager'))!);
+  expect(
+    before
+      .flatMap((grant) => grant.actions)
+      .find((entry) => entry.action === 'view')?.policy?.scopes?.[REVIEW_TABLE],
+    '前置条件：库里的 view 确实缺这个范围',
+  ).toBeUndefined();
+
+  const realGetAction = authz.compositeResources.getAction.bind(
+    authz.compositeResources,
+  );
+  // 模拟声明漂移：只把 view 声明里的这张表抹掉，handle 等其它动作不动。
+  const spy = vi
+    .spyOn(authz.compositeResources, 'getAction')
+    .mockImplementation((id, action) => {
+      const definition = realGetAction(id, action);
+      if (action !== 'view' || definition === undefined) {
+        return definition;
+      }
+      return {
+        ...definition,
+        dataScopes: definition.dataScopes?.filter(
+          (scope) => scope.key !== REVIEW_TABLE,
+        ),
+      };
+    });
+  try {
+    const command = await runUpgradeCommand(authz);
+    expect(
+      command.exitCode ?? 0,
+      '声明形状对不上、范围补不进去时必须非零退出',
+    ).toBeGreaterThan(0);
+    const error = String(command.error ?? '');
+    expect(error).toMatch(/fqc\.view/u);
+    expect(error).toMatch(/declaration mismatch/u);
+    expect(error).toMatch(/rerun/u);
+    expect(command.stdout).toContain(
+      '[r002-review-scope] quality_manager: declaration mismatch: quality_manager/fqc.view: fqc.view has no data scope fqcScreeningReviews in the current declaration',
+    );
+    expect(command.stdout, '退出前报告要打印完').toContain(
+      '[r002-review-scope] changed:',
+    );
+  } finally {
+    spy.mockRestore();
+  }
 });

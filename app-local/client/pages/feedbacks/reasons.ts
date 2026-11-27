@@ -8,6 +8,7 @@ const MESSAGES: Readonly<Record<string, string>> = {
   TOO_MANY_ATTACHMENTS: 'feedbacks.errors.tooManyAttachments',
   OPERATION_KEY_REQUIRED: 'feedbacks.errors.operationKey',
   OPERATION_CONFLICT: 'feedbacks.errors.operationConflict',
+  FEEDBACK_CONFLICT: 'feedbacks.errors.feedbackConflict',
   EMPTY_UPDATE: 'feedbacks.errors.emptyUpdate',
   ATTACHMENT_NOT_AVAILABLE: 'feedbacks.errors.attachmentUnavailable',
   ATTACHMENT_NOT_FOUND: 'feedbacks.errors.attachmentNotFound',
@@ -30,6 +31,7 @@ const MESSAGES: Readonly<Record<string, string>> = {
 const STATUS_MESSAGES: Readonly<Record<number, string>> = {
   401: 'feedbacks.errors.session',
   400: 'feedbacks.errors.invalidInput',
+  409: 'feedbacks.errors.conflict',
   422: 'feedbacks.errors.invalidInput',
 };
 

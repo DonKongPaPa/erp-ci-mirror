@@ -1,11 +1,16 @@
 import {
   defineLifecycle,
+  type EffectContext,
   type JsonObject,
   type Lifecycle,
   type LifecycleRecord,
 } from '@nocobase/lifecycle';
 
 import { inTicketScope, type TicketScope } from '../ticket-scope.js';
+import type {
+  TicketNotificationEvent,
+  TicketNotificationKind,
+} from '../ticket-notifications.js';
 
 /**
  * R-003 S5：工单的 lifecycle 定义。
@@ -31,11 +36,13 @@ export type FqcTicketState =
   | 'closed';
 
 export interface FqcTicket extends LifecycleRecord {
+  readonly code: string;
   readonly state: FqcTicketState;
   readonly departmentId: string | null;
   readonly assigneeId: string | null;
   readonly resolution: string | null;
   readonly reopenCount: number;
+  readonly createdBy: string | null;
 }
 
 export interface FqcTicketServices {
@@ -43,6 +50,11 @@ export interface FqcTicketServices {
   scopeOf(actorId: string): Promise<TicketScope | null>;
   departmentActive(departmentId: string): Promise<boolean>;
   memberOf(departmentId: string, userId: string): Promise<boolean>;
+  /** S8：转派 guard 记下流转前的经办人，effect 发通知时取走。 */
+  capturePreviousAssignee(ticketId: string, assigneeId: string | null): void;
+  previousAssigneeOf(ticketId: string): string | null;
+  /** S8：提交之后的效果，通知在这里才发。 */
+  notifyTicket(event: TicketNotificationEvent): Promise<boolean>;
 }
 
 export interface FqcTicketTypes {
@@ -51,6 +63,29 @@ export interface FqcTicketTypes {
   parameters: Record<string, never>;
   services: FqcTicketServices;
 }
+
+/**
+ * S8：提交之后才跑的通知效果。effect 的运行写在与流转同一个事务里、提交后才执行，
+ * 所以事务回滚就没有通知；幂等键由服务按工单 + 事件 + 版本算，重放不重发。
+ */
+const notifyEffect = (kind: TicketNotificationKind) => ({
+  name: `fqc-notify-${kind}`,
+  run: ({ record, to, services }: EffectContext<FqcTicketTypes>) =>
+    services.notifyTicket({
+      kind,
+      ticketId: String(record.id),
+      code: String(record.code),
+      state: to,
+      version: Number(
+        (record as unknown as Record<string, unknown>).lifecycleVersion ?? 0,
+      ),
+      departmentId: record.departmentId ?? null,
+      assigneeId: record.assigneeId ?? null,
+      previousAssigneeId:
+        kind === 'reassign' ? services.previousAssigneeOf(String(record.id)) : null,
+      createdBy: record.createdBy ?? null,
+    }),
+});
 
 /** 已经指派给别人时，只有那个人能受理或解决；没有经办人时任何人。 */
 const assigneeMayAct = (record: FqcTicket, actorId: string) =>
@@ -70,6 +105,7 @@ const textOf = (input: JsonObject, field: string): string => {
   const value = input[field];
   return typeof value === 'string' ? value : '';
 };
+const asText = (value: unknown): string => (typeof value === 'string' ? value : '');
 
 export const fqcTicketsLifecycle: Lifecycle<FqcTicketTypes> =
   defineLifecycle<FqcTicketTypes>({
@@ -124,12 +160,14 @@ export const fqcTicketsLifecycle: Lifecycle<FqcTicketTypes> =
             ? null
             : [{ field: 'resolution', message: 'A processing note is required.' }],
         accept: ['resolution'],
+        effects: [notifyEffect('resolve')],
       },
       close: {
         from: 'resolved',
         to: 'closed',
         // 「可以带一句备注」只落在流转日志的 input 里，工单没有备注列。
         set: () => ({ closedAt: new Date() }),
+        effects: [notifyEffect('close')],
       },
       reopen: {
         from: ['resolved', 'closed'],
@@ -143,6 +181,7 @@ export const fqcTicketsLifecycle: Lifecycle<FqcTicketTypes> =
           reopenCount: (Number(record.reopenCount) || 0) + 1,
           closedAt: null,
         }),
+        effects: [notifyEffect('reopen')],
       },
       reassign: {
         from: ['open', 'in_progress'],
@@ -174,9 +213,21 @@ export const fqcTicketsLifecycle: Lifecycle<FqcTicketTypes> =
               message: 'The target department is disabled.',
             };
           }
+          // 审计 B2：带了经办人键就必须是一个非空且在用、属于新部门的用户标识；
+          // 与受理一致回 422，不静默忽略空串 / 数字 / 布尔 / null / 纯空格。
+          const carriesAssignee = Object.prototype.hasOwnProperty.call(
+            input,
+            'assigneeId',
+          );
           const assigneeId = nonEmpty(input, 'assigneeId')
             ? textOf(input, 'assigneeId')
             : null;
+          if (carriesAssignee && assigneeId === null) {
+            return {
+              code: 'ASSIGNEE_NOT_DEPARTMENT_MEMBER',
+              message: 'The assignee must be a non-empty user id.',
+            };
+          }
           if (
             assigneeId !== null &&
             !(await services.memberOf(departmentId, assigneeId))
@@ -186,17 +237,23 @@ export const fqcTicketsLifecycle: Lifecycle<FqcTicketTypes> =
               message: 'The assignee is not a member of the new department.',
             };
           }
+          // S8：guard 看到的是流转前的记录，记下原经办人给提交后的效果用。
+          services.capturePreviousAssignee(String(record.id), record.assigneeId ?? null);
           return true;
         },
-        set: ({ input }) => {
-          const values: Record<string, unknown> = {
-            departmentId: textOf(input, 'departmentId'),
-          };
+        set: ({ record, input }) => {
+          const departmentId = textOf(input, 'departmentId');
+          const values: Record<string, unknown> = { departmentId };
           if (nonEmpty(input, 'assigneeId')) {
             values.assigneeId = textOf(input, 'assigneeId');
+          } else if (asText(record.departmentId) !== departmentId) {
+            // 审计 A1：责任部门变了而请求没有带经办人时，原来的经办人不再属于
+            // 新部门，必须置空，否则新部门的人受理不了（违反不变量 3）。
+            values.assigneeId = null;
           }
           return values;
         },
+        effects: [notifyEffect('reassign')],
       },
     },
   });

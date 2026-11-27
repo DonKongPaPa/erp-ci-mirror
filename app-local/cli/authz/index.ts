@@ -5,6 +5,7 @@ import AuthzImport from './import.js';
 import AuthzUpgradeR002 from './upgrade-r002.js';
 import AuthzUpgradeR003 from './upgrade-r003.js';
 import AuthzUpgradeR026 from './upgrade-r026.js';
+import AuthzUpgradeR025 from './upgrade-r025.js';
 
 /**
  * `authz export` / `authz import`（R-013 验收第 8 条）。
@@ -26,6 +27,8 @@ const authzCli = defineCliPlugin({
     'upgrade-r003': AuthzUpgradeR003,
     // R-026：给三个角色补反馈单页与两个新动作，给存量的人补 staff。可单独跑、可重跑。
     'upgrade-r026': AuthzUpgradeR026,
+    // R-025：给已有环境的 staff 补班次只读授权。可单独跑、可重跑。
+    'upgrade-r025': AuthzUpgradeR025,
   },
 });
 

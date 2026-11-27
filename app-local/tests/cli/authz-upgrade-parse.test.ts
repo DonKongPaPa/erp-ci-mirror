@@ -30,24 +30,81 @@ afterEach(() => {
   for (const undo of restore.splice(0)) undo();
 });
 
-/** 只满足升级命令的读取路径：权限集为空、没有可指派的人，所以不会写库。 */
+interface EmptyQuery {
+  select(): EmptyQuery;
+  where(): EmptyQuery;
+  orderBy(): EmptyQuery;
+  limit(): EmptyQuery;
+  execute(): Promise<unknown[]>;
+}
+
+/**
+ * 只满足升级命令的读取路径：三个目标角色都在，且三样加法都已经是 seed 的形状，
+ * 没有可指派的人 —— 不写库、不缺角色、声明都对得上，所以命令以 0 退出。
+ * 这一步的前提现在也是被断言的：加法没做成会非零退出，不能拿空权限集来验解析告警。
+ */
 function fakeApp() {
+  const grants = [
+    { resource: { type: 'page', id: 'knowledge' }, actions: [{ action: 'access' }] },
+    { resource: { type: 'page', id: 'feedback' }, actions: [{ action: 'access' }] },
+    {
+      resource: { type: 'kb', id: 'kb.knowledge' },
+      actions: [{ action: 'manage.related' }, { action: 'propose.related' }],
+    },
+    {
+      resource: { type: 'composite', id: 'fqc' },
+      actions: [
+        { action: 'ticket' },
+        { action: 'configure' },
+        { action: 'submit' },
+        { action: 'maintain' },
+        {
+          action: 'handle',
+          policy: {
+            type: 'composite',
+            scopes: { fqcRoutingRules: 'allRecords', fqcScreeningReviews: 'allRecords' },
+          },
+        },
+      ],
+    },
+  ];
+  const sets = ['staff', 'quality_manager', 'quality_inspector'].map((key) => ({
+    key,
+    revision: 'r1',
+    grants,
+  }));
+  const emptyQuery: EmptyQuery = {
+    select: () => emptyQuery,
+    where: () => emptyQuery,
+    orderBy: () => emptyQuery,
+    limit: () => emptyQuery,
+    execute: async () => [],
+  };
   const services = {
     permissionSets: {
-      list: async () => [],
-      get: async () => undefined,
+      list: async () => sets,
+      get: async (key: string) => sets.find((set) => set.key === key),
+      listAssignments: async () => [],
+    },
+    pages: {
+      grant: (id: string) => ({
+        resource: { type: 'page', id },
+        actions: [{ action: 'access' }],
+      }),
     },
     compositeResources: {
-      getAction: () => undefined,
+      getAction: () => ({
+        dataScopes: [
+          { key: 'fqcTickets' },
+          { key: 'fqcRoutingRules' },
+          { key: 'fqcMessages' },
+          { key: 'fqcScreenings' },
+          { key: 'fqcScreeningReviews' },
+        ],
+      }),
       validateGrant: () => undefined,
     },
-    connection: () => ({
-      query: {
-        selectFrom: () => {
-          throw new Error('空权限集不该查用户表');
-        },
-      },
-    }),
+    connection: () => ({ query: { selectFrom: () => emptyQuery } }),
   };
   return {
     start: async () => undefined,
@@ -68,7 +125,7 @@ function run(command: (typeof commands)[number], argv: readonly string[]) {
 
 describe('authz 升级命令的参数解析告警', () => {
   for (const [name, source, marker] of [
-    ['upgrade-r002', 'upgrade-r002.ts', '[r002-review-scope] quality_manager: not found; skipped'],
+    ['upgrade-r002', 'upgrade-r002.ts', '[r002-review-scope] quality_manager before:'],
     ['upgrade-r003', 'upgrade-r003.ts', '[r003] === role grants ==='],
     ['upgrade-r026', 'upgrade-r026.ts', '[r026] === role grants ==='],
   ] as const) {

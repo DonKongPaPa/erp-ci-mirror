@@ -454,6 +454,38 @@ export function assertStaffAssignmentsSucceeded(
   );
 }
 
+/**
+ * 加法只要有一条没做成就非零退出。判据是报告里的 `missing`（角色不存在）与 `invalid`
+ * （声明对不上）；`unchanged`（本来就已经有了）不算失败。报告在 `upgradeR026` 里已经
+ * 打印完，staff 指派照常进行；部署脚本按退出码判断升级是否完成，静默跳过会让它以为
+ * 升级成功，而三个角色仍拿不到反馈单页与新动作。
+ */
+export function assertR026AdditionsSucceeded(report: R026UpgradeReport): void {
+  const failed: string[] = [];
+  if (report.grants.missing.length > 0) {
+    failed.push(`role grants: missing ${report.grants.missing.join(', ')}`);
+  }
+  if (report.grants.invalid.length > 0) {
+    failed.push(
+      `role grants: declaration mismatch ${report.grants.invalid.join(', ')}`,
+    );
+  }
+  if (failed.length === 0) {
+    return;
+  }
+  throw new CommandError(
+    `R-026: additive grants failed for ${failed.join(' and ')}; see the [r026] not found or declaration mismatch lines above. Fix the named roles or declarations, reload and rerun pnpm nocobase authz upgrade-r026.`,
+    {
+      code: 'R026_ADDITIONS_FAILED',
+      suggestions: ['Reload and rerun pnpm nocobase authz upgrade-r026'],
+      details: {
+        missing: [...report.grants.missing],
+        invalid: [...report.grants.invalid],
+      },
+    },
+  );
+}
+
 /** `authz upgrade-r026` 的完整步骤：先补授权，再给存量的人补 `staff`。 */
 export async function upgradeR026(
   services: R026UpgradeServices,
@@ -489,6 +521,7 @@ export default class AuthzUpgradeR026 extends AppCommand {
       const report = await upgradeR026(services, {
         info: (message) => this.log(message),
       });
+      assertR026AdditionsSucceeded(report);
       assertStaffAssignmentsSucceeded(report);
       return report;
     });

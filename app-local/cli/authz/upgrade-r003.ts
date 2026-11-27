@@ -621,6 +621,52 @@ export function assertR003NarrowingsSucceeded(report: R003UpgradeReport): void {
   );
 }
 
+/**
+ * 加法只要有一条没做成就非零退出。判据是报告里的 `missing`（角色不存在）与 `invalid`
+ * （声明对不上）；`unchanged`（本来就已经有了）不算失败。报告在 `upgradeR003` 里已经
+ * 打印完，前面生效的授权保持原样；部署脚本按退出码判断升级是否完成，静默跳过会让
+ * 它以为升级成功，而两个质量角色仍拿不到新动作。
+ */
+export function assertR003AdditionsSucceeded(report: R003UpgradeReport): void {
+  const failed: string[] = [];
+  if (report.grants.missing.length > 0) {
+    failed.push(`role grants: missing ${report.grants.missing.join(', ')}`);
+  }
+  if (report.grants.invalid.length > 0) {
+    failed.push(
+      `role grants: declaration mismatch ${report.grants.invalid.join(', ')}`,
+    );
+  }
+  if (report.handleRouting.missing.length > 0) {
+    failed.push(`handle routing: missing ${report.handleRouting.missing.join(', ')}`);
+  }
+  if (report.handleRouting.invalid.length > 0) {
+    failed.push(
+      `handle routing: declaration mismatch ${report.handleRouting.invalid.join(', ')}`,
+    );
+  }
+  if (failed.length === 0) {
+    return;
+  }
+  throw new CommandError(
+    `R-003: additive upgrades failed for ${failed.join(' and ')}; see the [r003] / [r003-handle] not found or declaration mismatch lines above. Fix the named roles or declarations, reload and rerun pnpm nocobase authz upgrade-r003.`,
+    {
+      code: 'R003_ADDITIONS_FAILED',
+      suggestions: ['Reload and rerun pnpm nocobase authz upgrade-r003'],
+      details: {
+        grants: {
+          missing: [...report.grants.missing],
+          invalid: [...report.grants.invalid],
+        },
+        handleRouting: {
+          missing: [...report.handleRouting.missing],
+          invalid: [...report.handleRouting.invalid],
+        },
+      },
+    },
+  );
+}
+
 export default class AuthzUpgradeR003 extends AppCommand {
   static summary =
     'Bring existing environments up to date with R-003: new grants, intake scopes and the department manager view.';
@@ -644,8 +690,9 @@ export default class AuthzUpgradeR003 extends AppCommand {
       const report = await upgradeR003(authz, {
         info: (message) => this.log(message),
       });
-      // 报告已打印完；收窄没做成时非零退出，别让部署脚本把静默跳过当成成功。
+      // 报告已打印完；收窄与加法没做成时都非零退出，别让部署脚本把静默跳过当成成功。
       assertR003NarrowingsSucceeded(report);
+      assertR003AdditionsSucceeded(report);
       return report;
     });
   }

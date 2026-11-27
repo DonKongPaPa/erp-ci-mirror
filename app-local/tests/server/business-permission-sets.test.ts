@@ -145,6 +145,12 @@ const fqcMaintain = {
   ],
 };
 
+/** R-025：班次定义不是人员信息，独立资源；staff 只读，没有 policy、没有页面授权。 */
+const shiftsViewGrant = {
+  resource: { type: 'composite', id: 'shifts' },
+  actions: [{ action: 'view' }],
+};
+
 const expectedRoles = {
   quality_manager: {
     title: { key: 'permissionSets.business.qualityManager', ns: 'app-local' },
@@ -181,7 +187,7 @@ const expectedRoles = {
   },
   staff: {
     title: { key: 'permissionSets.business.staff', ns: 'app-local' },
-    grants: [feedbackPageGrant, fqcSubmit],
+    grants: [feedbackPageGrant, fqcSubmit, shiftsViewGrant],
   },
 } as const;
 

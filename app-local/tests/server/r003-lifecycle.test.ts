@@ -377,8 +377,10 @@ test('R-003 改经办人只改一列；非成员 422，已关闭 409', async ({
     await session.fetch(assigneePath(ticket.id), json({ assigneeId: member.id })),
     200,
   )).data;
-  expect(ok.assigneeId).toBe(member.id);
+  // 审计 B1：响应只回状态/版本，不回整行；经办人落库值从库里读。
+  expect(Object.keys(ok).sort()).toEqual(['id', 'lifecycleVersion', 'state']);
   const after = await ticketOf(connection, ticket.id);
+  expect(after?.assigneeId).toBe(member.id);
   expect(after?.state).toBe(before?.state);
   expect(after?.lifecycleVersion).toBe(before?.lifecycleVersion);
   expect(after?.departmentId).toBe(dept.id);
@@ -487,8 +489,9 @@ test('R-003 验收10：本部门工单流转成功、别的部门 404；转派�
     await fire(session, own.id, 'reassign', { departmentId: deptA.id }),
     200,
   );
-  expect(ok.data.record?.departmentId ?? ok.data.departmentId).toBe(deptA.id);
+  expect(Object.keys(ok.data).sort()).toEqual(['id', 'lifecycleVersion', 'replayed', 'state']);
   const after = await ticketOf(connection, own.id);
+  expect(after?.departmentId).toBe(deptA.id);
   expect(after?.lifecycleVersion).toBe(before!.lifecycleVersion + 1);
   expect(after?.state).toBe('in_progress');
   const logs = await logsOf(connection, own.id);

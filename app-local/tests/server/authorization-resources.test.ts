@@ -1318,12 +1318,17 @@ test('R-013: booting the authorization resources provider twice registers once',
     'jobGrades',
     // R-017 S1：三张审批表，没有 composite 资源与业务动作。
     ...APPROVAL_TABLES,
+    // R-025 S1：班次定义一张表，独立 composite 资源。
+    'shifts',
   ]);
   expect(registered.composites.map((composite) => composite.name)).toContain(
     'fqc',
   );
   expect(registered.composites.map((composite) => composite.name)).toContain(
     'employees',
+  );
+  expect(registered.composites.map((composite) => composite.name)).toContain(
+    'shifts',
   );
 
   await expect(provider.boot()).resolves.toBeUndefined();

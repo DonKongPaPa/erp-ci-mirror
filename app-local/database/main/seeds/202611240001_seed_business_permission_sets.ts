@@ -16,7 +16,7 @@ import { randomUUID } from 'node:crypto';
  * - 质量主管、质量员：FQC 查看与处理、处理工单、质量页、知识库；R-026 再加反馈单页、
  *   「提交反馈」与「维护反馈单」；质量主管另有「维护派单规则」
  * - 部门主管：FQC 查看（只工单表的「本部门及下级」）、质量页；不给他新动作
- * - 普通员工：R-026 的反馈单页与「提交反馈」（两张表都是「仅本人」）
+ * - 普通员工：R-026 的反馈单页与「提交反馈」（两张表都是「仅本人」）；R-025 的班次只读
  *
  * 「查看」「处理」「维护反馈单」的数据范围填 `allRecords`（Q31）；R-026 的
  * 「提交反馈」按设计只给「仅本人」（`recordsIOwn`，比的是 `ownerId`）。两把部门
@@ -111,6 +111,16 @@ const knowledgePage = {
 };
 
 /**
+ * R-025：班次定义不是人员信息，独立资源。`staff` 默认只拿 `view`（报工与排班以后要选班次），
+ * 写只给 root（root 不受限，不需要在这里登记）；其余业务角色一份都不给。
+ * 这张表没有记录范围键，所以授权不带 policy；页面授权也不写（管理页默认只有 root）。
+ */
+const shiftsView = {
+  resource: { type: 'composite', id: 'shifts' },
+  actions: [{ action: 'view' }],
+};
+
+/**
  * R-002：知识库的业务键是 `{ type: 'kb', id: 'kb.knowledge' }`，动作名带档位
  * （`manage.related` / `propose.related`）。`kb.knowledge/manage` 是业务键，不是授权
  * 动作名；知识库插件登记到授权插件的才是这些档位。
@@ -161,6 +171,8 @@ export const businessPermissionSets: readonly PermissionSet[] = [
     .title({ key: 'permissionSets.business.staff', ns: NAMESPACE })
     .grant(feedbackPage)
     .grant(fqcGrant(['submit'], submitFqcScopes))
+    // R-025：只读班次定义，没有写、没有页面授权。
+    .grant(shiftsView)
     .build(),
 ];
 

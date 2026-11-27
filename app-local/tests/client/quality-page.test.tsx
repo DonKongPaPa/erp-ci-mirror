@@ -12,9 +12,10 @@ import enUS from '../../client/locales/en-US.js';
 import { renderAuthenticatedClient } from '../helpers/authenticated-client.js';
 
 /**
- * R-013 验收第 6 条：质量页的按钮按权限显隐，质量员能确认「待人工复核」的初筛。
+ * R-013 验收第 6 条：质量页的按钮按权限显隐；R-003 起草稿的唯一动作是
+ * 「确认并派单」（点开表单，类别/严重度/责任部门/经办人都能改，POST dispatch）。
  * R-002 验收第 17 条：初筛明细每行带出处（规则/模型、回落原因、知识引用），
- * 确认之后草稿原样、下方追加确认记录；页面上多一张「代填效果」卡片。
+ * 派单之后草稿原样、下方追加确认记录；页面上多一张「代填效果」卡片。
  *
  * 用真实的应用与授权：测试用户是自助注册的普通成员，另按本文件给的授权建一份权限集，
  * `useCan` 走真实的 `GET authorization/permissions`，端点也真的按授权判定。所以这里
@@ -27,6 +28,8 @@ const ALL_FQC_SCOPES = {
   fqcTickets: 'allRecords',
   // R-002：确认要读写确认记录表；没配范围就是拒绝。
   fqcScreeningReviews: 'allRecords',
+  // R-003：派单时服务端按调用者的范围读派单规则；质量角色照 seed 配这张表。
+  fqcRoutingRules: 'allRecords',
 } as const;
 
 /** R-003 S2：投递只写消息与初筛两张表，工单表的范围已收掉。 */
@@ -160,10 +163,11 @@ function expectStat(
   ).toBeVisible();
 }
 
-/** 插一条工单，用来钉列表里的时间格式。 */
+/** 插一条工单，用来钉列表里的时间格式；带 screeningId 时草稿视为已派单。 */
 async function insertTicket(
   server: TestApp,
   createdAt: string,
+  overrides: { readonly screeningId?: string } = {},
 ): Promise<string> {
   const id = randomUUID();
   await server.connection.repository('fqcTickets').createOne({
@@ -173,7 +177,7 @@ async function insertTicket(
       title: 'dimension / minor',
       description: '时间格式测试工单',
       sourceMessageId: null,
-      screeningId: null,
+      screeningId: overrides.screeningId ?? null,
       category: 'dimension',
       severity: 'minor',
       ownerDepartment: null,
@@ -186,6 +190,36 @@ async function insertTicket(
     },
   });
   return id;
+}
+
+/** 派单目标部门的固定 id：派单的服务端校验要求这个部门存在且未停用。 */
+const DISPATCH_DEPARTMENT_ID = 'dept-dispatch-rule';
+
+/** 插派单目标部门。 */
+async function insertDispatchDepartment(server: TestApp): Promise<string> {
+  const id = DISPATCH_DEPARTMENT_ID;
+  const now = new Date();
+  await server.connection.repository('departments').createOne({
+    values: {
+      id,
+      title: 'Assembly workshop',
+      createdAt: now,
+      updatedAt: now,
+    },
+  });
+  return id;
+}
+
+/** 尺寸类的派单规则指向派单部门：派单不带 departmentId 时按它取。 */
+async function insertDimensionRoutingRule(server: TestApp): Promise<void> {
+  await server.connection.repository('fqcRoutingRules').createOne({
+    values: {
+      category: 'dimension',
+      departmentId: DISPATCH_DEPARTMENT_ID,
+      updatedAt: new Date(),
+      updatedBy: 'routing-rule-fixture',
+    },
+  });
 }
 
 /** 插一条客户消息，用来钉频道的显示名。 */
@@ -255,7 +289,7 @@ it('shows the new-feedback entry to a user with fqc.submit and never posts the d
   expect(paths(requests, '/api/quality/intake', 'POST')).toHaveLength(0);
 });
 
-it('confirms a needs-review row with an empty body and refetches the list', async () => {
+it('dispatches a needs-review row via confirm-and-dispatch and refetches the list', async () => {
   const user = userEvent.setup();
   const { beforeRequest, requests } = recordRequests();
   let screeningId = '';
@@ -266,6 +300,9 @@ it('confirms a needs-review row with an empty body and refetches the list', asyn
     grants: [fqcGrant('view', 'handle')],
     beforeRequest,
     prepare: async (server) => {
+      // 派单的服务端取值：责任部门按这一类的派单规则，所以先插部门与规则。
+      await insertDispatchDepartment(server);
+      await insertDimensionRoutingRule(server);
       screeningId = await insertScreening(
         server,
         'needs-review',
@@ -274,36 +311,40 @@ it('confirms a needs-review row with an empty body and refetches the list', asyn
     },
   });
 
-  const confirm = await screen.findByRole('button', {
-    name: enUS.quality.screenings.review,
-  });
+  const dispatchButton = await screen.findByTestId('dispatch-button');
   expect(
     await screen.findByText('A human has to look at this one'),
   ).toBeVisible();
   const readsBefore = paths(requests, '/api/quality/screenings', 'GET').length;
 
-  await user.click(confirm);
-  const reviewPath = `/api/quality/screenings/${screeningId}/review`;
-  await waitFor(() =>
-    expect(paths(requests, reviewPath, 'POST')).toHaveLength(1),
+  await user.click(dispatchButton);
+  const dialog = await screen.findByRole('dialog');
+  await user.click(
+    within(dialog).getByRole('button', { name: enUS.quality.dispatch.submit }),
   );
-  const review = paths(requests, reviewPath, 'POST')[0];
-  expect(review?.body, '确认的请求体是 {}').toBe('{}');
+  const dispatchPath = `/api/quality/screenings/${screeningId}/dispatch`;
+  await waitFor(() =>
+    expect(paths(requests, dispatchPath, 'POST')).toHaveLength(1),
+  );
+  const dispatch = paths(requests, dispatchPath, 'POST')[0];
+  // 表单预填了草稿的类别与严重度；责任部门留空 = 按派单规则（请求里没有这个键）。
+  expect(JSON.parse(dispatch!.body)).toEqual({
+    category: 'dimension',
+    severity: 'minor',
+  });
 
   await waitFor(() =>
     expect(
       paths(requests, '/api/quality/screenings', 'GET').length,
     ).toBeGreaterThan(readsBefore),
   );
-  // 复核后这一行不再是「待人工复核」，重新取到的列表里按钮消失。
+  // 派单之后这份草稿有工单了，重新取到的列表里派单按钮消失。
   await waitFor(() =>
-    expect(
-      screen.queryByRole('button', { name: enUS.quality.screenings.review }),
-    ).not.toBeInTheDocument(),
+    expect(screen.queryByTestId('dispatch-button')).not.toBeInTheDocument(),
   );
 });
 
-it('shows no confirm button for a row that is not awaiting review', async () => {
+it('shows no dispatch button for a draft that already has a ticket', async () => {
   const { beforeRequest, requests } = recordRequests();
   await renderAuthenticatedClient(<QualityPage />, {
     route: '/quality',
@@ -312,17 +353,20 @@ it('shows no confirm button for a row that is not awaiting review', async () => 
     grants: [fqcGrant('view', 'handle')],
     beforeRequest,
     prepare: async (server) => {
-      await insertScreening(server, 'auto', 'Routed without a human');
+      const screeningId = await insertScreening(
+        server,
+        'reviewed',
+        'Already dispatched draft',
+      );
+      await insertTicket(server, '2026-11-24T11:20:00.000Z', { screeningId });
     },
   });
-  expect(await screen.findByText('Routed without a human')).toBeVisible();
+  expect(await screen.findByText('Already dispatched draft')).toBeVisible();
   await waitForPermissions(requests);
-  expect(
-    screen.queryByRole('button', { name: enUS.quality.screenings.review }),
-  ).not.toBeInTheDocument();
+  expect(screen.queryByTestId('dispatch-button')).not.toBeInTheDocument();
 });
 
-it('shows no confirm button to a user without fqc.handle', async () => {
+it('shows no dispatch button to a user without fqc.handle', async () => {
   const { beforeRequest, requests } = recordRequests();
   await renderAuthenticatedClient(<QualityPage />, {
     route: '/quality',
@@ -342,9 +386,7 @@ it('shows no confirm button to a user without fqc.handle', async () => {
     await screen.findByText('Awaiting a reviewer who cannot act'),
   ).toBeVisible();
   await waitForPermissions(requests);
-  expect(
-    screen.queryByRole('button', { name: enUS.quality.screenings.review }),
-  ).not.toBeInTheDocument();
+  expect(screen.queryByTestId('dispatch-button')).not.toBeInTheDocument();
 });
 
 it('intake permission alone does not bring back the demo intake form', async () => {
@@ -458,9 +500,7 @@ it('keeps the feedback entry slot stable while permissions load', async () => {
     columnTitles.indexOf(enUS.quality.department.title),
   ).toBeLessThan(columnTitles.indexOf(enUS.quality.drafting.title));
   expect(document.querySelector('[data-slot="review-placeholder"]')).toBeNull();
-  expect(
-    await screen.findByRole('button', { name: enUS.quality.screenings.review }),
-  ).toBeVisible();
+  expect(await screen.findByTestId('dispatch-button')).toBeVisible();
   await waitForPermissions(requests);
 });
 
@@ -587,9 +627,7 @@ it('shows a prompt in the feedback entry slot and at the review button when perm
   expect(
     await screen.findByTestId('review-permission-error'),
   ).toHaveTextContent(enUS.quality.permissionFailed);
-  expect(
-    screen.queryByRole('button', { name: enUS.quality.screenings.review }),
-  ).not.toBeInTheDocument();
+  expect(screen.queryByTestId('dispatch-button')).not.toBeInTheDocument();
 });
 
 it('keeps the feedback entry regardless of the handle permission', async () => {
@@ -613,9 +651,7 @@ it('keeps the feedback entry regardless of the handle permission', async () => {
       within(entry).getByRole('button', { name: enUS.quality.newFeedback }),
     ).toBeVisible();
     expect(within(entry).queryByRole('alert')).not.toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: enUS.quality.screenings.review }),
-    ).toBeVisible();
+    expect(screen.getByTestId('dispatch-button')).toBeVisible();
   });
 });
 
@@ -822,38 +858,41 @@ it('keeps the draft untouched and records who confirmed what when (R-002 9, 17)'
     prepare: async (server, session) => {
       actorName = session.user.name;
       actorId = session.user.id;
+      // 派单的服务端取值：责任部门按这一类的派单规则。
+      await insertDispatchDepartment(server);
+      await insertDimensionRoutingRule(server);
       await insertScreening(server, 'needs-review', 'Draft that stays as it is', {
         degradeReason: 'model-disabled',
       });
     },
   });
   const summary = await screen.findByText('Draft that stays as it is');
-  const confirm = await screen.findByRole('button', {
-    name: enUS.quality.screenings.review,
-  });
+  const dispatchButton = await screen.findByTestId('dispatch-button');
   const rowBefore = summary.closest('li') as HTMLElement;
   expect(
     within(rowBefore).getByText(enUS.quality.screenings.engines.rules),
   ).toBeVisible();
-  // 确认之前这一行没有确认记录：「谁在何时确认成什么」只在确认之后多出来。
+  // 派单之前这一行没有确认记录：「谁在何时确认成什么」只在派单之后多出来。
   expect(
     within(rowBefore).queryByTestId('review-record'),
-    '确认之前不能已经显示确认记录',
+    '派单之前不能已经显示确认记录',
   ).toBeNull();
 
-  await user.click(confirm);
+  await user.click(dispatchButton);
+  const dialog = await screen.findByRole('dialog');
+  await user.click(
+    within(dialog).getByRole('button', { name: enUS.quality.dispatch.submit }),
+  );
   await waitFor(() =>
     expect(
       paths(requests, '/api/quality/screenings', 'GET').length,
     ).toBeGreaterThan(0),
   );
-  // 重取列表之后按钮消失（这一行不再是「待人工复核」）。
+  // 重取列表之后按钮消失（这一行已经有工单）。
   await waitFor(() =>
-    expect(
-      screen.queryByRole('button', { name: enUS.quality.screenings.review }),
-    ).not.toBeInTheDocument(),
+    expect(screen.queryByTestId('dispatch-button')).not.toBeInTheDocument(),
   );
-  // 草稿原样不动：摘要、类别、严重度与引擎徽章都还是确认前的值。
+  // 草稿原样不动：摘要、类别、严重度与引擎徽章都还是派单前的值。
   expect(screen.getByText('Draft that stays as it is')).toBeVisible();
   const rowAfter = screen
     .getByText('Draft that stays as it is')
@@ -877,10 +916,10 @@ it('keeps the draft untouched and records who confirmed what when (R-002 9, 17)'
   );
 });
 
-it('shows the confirmed name immediately, before the list refetch (R-002 17)', async () => {
+it('shows who dispatched only after the list refetch, never as a guess (R-002 17)', async () => {
   const user = userEvent.setup();
-  const summary = 'Name is present as soon as it is confirmed';
-  let confirmSent = false;
+  const summary = 'Name is present once the list brings it back';
+  let dispatchSent = false;
   let releaseList: () => void = () => {};
   const listGate = new Promise<void>((resolve) => {
     releaseList = resolve;
@@ -893,12 +932,12 @@ it('shows the confirmed name immediately, before the list refetch (R-002 17)', a
     grants: [fqcGrant('view', 'handle')],
     beforeRequest: async (request) => {
       const path = new URL(request.url).pathname;
-      if (path.endsWith('/review') && request.method === 'POST') {
-        confirmSent = true;
+      if (path.endsWith('/dispatch') && request.method === 'POST') {
+        dispatchSent = true;
       }
-      // 确认之后的列表重取先扣住：这段时间里显示的姓名只能来自确认端点响应。
+      // 派单之后的初筛列表重取先扣住：这段时间里页面不能编出一条确认记录。
       if (
-        confirmSent &&
+        dispatchSent &&
         path.endsWith('/api/quality/screenings') &&
         request.method === 'GET'
       ) {
@@ -907,14 +946,25 @@ it('shows the confirmed name immediately, before the list refetch (R-002 17)', a
       await beforeRequest(request);
     },
     prepare: async (server) => {
+      await insertDispatchDepartment(server);
+      await insertDimensionRoutingRule(server);
       await insertScreening(server, 'needs-review', summary);
     },
   });
   try {
-    const confirm = await screen.findByRole('button', {
-      name: enUS.quality.screenings.review,
-    });
-    await user.click(confirm);
+    await user.click(await screen.findByTestId('dispatch-button'));
+    await user.click(
+      await screen.findByRole('button', { name: enUS.quality.dispatch.submit }),
+    );
+    await waitFor(() => expect(dispatchSent).toBe(true));
+    // 对话框关闭说明派单成功、成功处理已经跑完；这时列表重取还被扣着，
+    // 页面上不能已经有一条确认记录 —— 它只能来自重取的列表响应。
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId('review-record')).toBeNull();
+
+    await act(async () => releaseList());
     const row = await screen
       .findByText(summary)
       .then((text) => text.closest('li') as HTMLElement);
@@ -923,8 +973,10 @@ it('shows the confirmed name immediately, before the list refetch (R-002 17)', a
       {},
       { timeout: 15_000 },
     );
-    expect(record, '确认当场的姓名不是空的').toHaveTextContent('Test member');
-    expect(record, '确认当场不能出现空姓名').not.toHaveTextContent(
+    expect(record, '重取回来的记录要带着确认人姓名').toHaveTextContent(
+      'Test member',
+    );
+    expect(record, '确认记录不能出现空姓名').not.toHaveTextContent(
       /Confirmed by\s+·/u,
     );
   } finally {
@@ -942,15 +994,18 @@ it('shows the review record from the list response after remounting (R-002 17)',
     member: true,
     grants: [fqcGrant('view', 'handle')],
     prepare: async (server) => {
+      await insertDispatchDepartment(server);
+      await insertDimensionRoutingRule(server);
       await insertScreening(server, 'needs-review', summary);
     },
   });
   const actorId = first.session.user.id;
   try {
-    const confirm = await screen.findByRole('button', {
-      name: enUS.quality.screenings.review,
-    });
-    await user.click(confirm);
+    await user.click(await screen.findByTestId('dispatch-button'));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(
+      within(dialog).getByRole('button', { name: enUS.quality.dispatch.submit }),
+    );
     // 先等到第一次挂载里确认记录真的出现，再进行刷新：否则可能还没写完就卸载。
     await waitFor(
       () => {

@@ -13,6 +13,7 @@ import {
   employees as employeesResource,
 } from '../employees-resources.js';
 import { FQC_COLLECTIONS, fqc } from '../fqc-resources.js';
+import { SHIFT_COLLECTIONS, shifts as shiftsResource } from '../shift-resources.js';
 import { departmentServiceToken } from './departments.js';
 
 /**
@@ -21,10 +22,10 @@ import { departmentServiceToken } from './departments.js';
  * 授权放在端点自己身上，seed 默认不给业务角色审批授权）。
  *
  * 声明在 server/fqc-resources.ts、server/department-resources.ts、
- * server/employees-resources.ts、server/approvals-resources.ts 与
- * server/department-record-access.ts，这里只做注册：
- * 三张 FQC 表、三张部门表、四张员工表、三张审批表、`fqc`、`departments` 与
- * `employees` 三个业务资源、两把部门范围键、工作区的分节与条目。
+ * server/employees-resources.ts、server/shift-resources.ts、
+ * server/approvals-resources.ts 与 server/department-record-access.ts，这里只做注册：
+ * 三张 FQC 表、三张部门表、四张员工表、一张班次表、三张审批表、`fqc`、`departments`、
+ * `employees` 与 `shifts` 四个业务资源、两把部门范围键、工作区的分节与条目。
  * 注册只描述能做什么，不给任何人授权；初始角色由 seed 建。
  */
 export default class AuthorizationResourcesProvider extends ServiceProvider<AppPluginApplication> {
@@ -45,6 +46,7 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
       ...DEPARTMENT_COLLECTIONS,
       ...EMPLOYEE_COLLECTIONS,
       ...APPROVAL_COLLECTIONS,
+      ...SHIFT_COLLECTIONS,
     ]) {
       authz.database.collections.add(collection);
     }
@@ -55,6 +57,7 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
     const employeesReference = authz.compositeResources.define(
       employeesResource,
     );
+    const shiftsReference = authz.compositeResources.define(shiftsResource);
     const departmentService = this.app.container.resolve(
       departmentServiceToken,
     );
@@ -74,6 +77,7 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
     authz.ui.place(reference, { section: 'quality' });
     authz.ui.place(departmentsReference, { section: 'organization' });
     authz.ui.place(employeesReference, { section: 'organization' });
+    authz.ui.place(shiftsReference, { section: 'organization' });
     this.registered = true;
     return Promise.resolve();
   }

@@ -79,6 +79,142 @@ const zhCN: AppResource = {
       empty: '暂无工单。新工单生成后会出现在这里。',
       department: '部门：{{department}}',
       state: '状态：{{state}}',
+      assignee: '经办人：{{name}}',
+      assigneeLabel: '经办人',
+      detail: '详情',
+      detailTitle: '工单 {{code}}',
+      filters: {
+        state: '状态',
+        all: '全部状态',
+        department: '责任部门',
+        departmentAll: '全部部门',
+        assignee: '经办人',
+        assigneeAll: '全部经办人',
+        q: '搜索',
+        // 搜索只按编号与标题匹配；提示照实说，不暗示能搜到正文。
+        qPlaceholder: '按编号或标题搜索',
+        clear: '清除筛选',
+      },
+      fields: {
+        department: '责任部门',
+        created: '创建时间',
+        closed: '关闭时间',
+        resolution: '处理说明',
+        reopenCount: '重开次数',
+      },
+      reviews: '确认记录',
+      reviewsEmpty: '暂无确认记录。',
+      reviewLine: '{{kind}} · {{actor}} · {{time}} · {{category}} / {{severity}}',
+      reviewKind: {
+        confirm: '确认',
+        dispatch: '派单',
+        rejudge: '改判',
+      },
+      transitions: '流转历史',
+      transitionsEmpty: '还没有流转。',
+      transitionLine: '{{name}}：{{from}} → {{to}} · {{actor}} · {{time}}',
+      actions: {
+        accept: '受理',
+        resolve: '解决',
+        close: '关闭',
+        reopen: '重开',
+        reassign: '转派',
+        changeAssignee: '改经办人',
+        rejudge: '改判',
+      },
+    },
+    // R-003 确认并派单：表单里留空的值由服务端按规则取。
+    dispatch: {
+      title: '确认并派单',
+      description:
+        '把这份草稿变成内部工单。留空的值按确认记录、派单规则的顺序取。',
+      category: '类别',
+      severity: '严重度',
+      department: '责任部门',
+      departmentByRule: '按派单规则',
+      departmentHint: '不在这里选责任部门时，按派单规则的配置取。',
+      assignee: '经办人',
+      unspecified: '请选择',
+      requiredValues: '请先选好类别与严重度再派单。',
+      submit: '确认并派单',
+      saved: '工单已创建',
+    },
+    accept: {
+      description: '受理后工单进入处理中。不选经办人就是自己认领。',
+      assignee: '经办人（可选）',
+      assigneeSelf: '留空表示自己认领。',
+    },
+    resolve: {
+      resolution: '处理说明',
+      resolutionRequired: '解决前请填写处理说明。',
+    },
+    close: {
+      note: '备注（可选）',
+    },
+    reopen: {
+      reason: '重开原因',
+      reasonRequired: '请填写重开的原因。',
+    },
+    reassign: {
+      department: '新责任部门',
+      departmentPlaceholder: '请选择部门',
+      departmentRequired: '请选择新的责任部门。',
+      assignee: '经办人（可选）',
+    },
+    changeAssignee: {
+      submit: '保存',
+      saved: '经办人已更新',
+    },
+    rejudge: {
+      title: '改判',
+      description: '改类别与严重度。改判记一行确认记录，流转历史不动。',
+      departmentHint: '换责任部门是转派，请用「转派」。',
+      submit: '改判',
+      saved: '工单已改判',
+    },
+    transitionsSaved: '已完成',
+    // R-003 帮手：相似的工单不带描述；处理建议等模型接入，没有就如实说。
+    assist: {
+      title: '帮手',
+      similar: '相似的工单',
+      similarEmpty: '没有相似的已解决或已关闭工单。',
+      suggestion: '处理建议',
+      suggestionPending: '聊天模型接入后会生成处理建议。',
+      closedAt: '关闭于 {{time}}',
+    },
+    routingRules: {
+      title: '派单规则',
+      description: '每个缺陷类别对应的责任部门，保存时一次写全。',
+      edit: '编辑',
+      save: '保存',
+      cancel: '取消',
+      unset: '不指派',
+      saved: '派单规则已保存',
+      failed: '派单规则读取失败。',
+      departmentColumn: '责任部门',
+    },
+    candidates: {
+      search: '搜索',
+      placeholder: '按姓名或用户名搜索',
+      needDepartment: '先选责任部门才能搜同事。',
+      empty: '没有匹配的同事。',
+      clear: '清除',
+      // 接口回标识、姓名、用户名三列，页面只显示姓名；姓名为空给占位。
+      noName: '未填写姓名',
+    },
+    departmentsUnavailable: '读不到部门清单。',
+    ticketErrors: {
+      INVALID_TRANSITION: '这个动作与工单当前的状态不符。请刷新后核对。',
+      ASSIGNED_TO_OTHER: '工单已指派给别人，只有那个人能操作。',
+      DEPARTMENT_OUT_OF_SCOPE: '目标部门不在你的工单范围里。',
+      DEPARTMENT_DISABLED: '目标部门已停用。',
+      ASSIGNEE_NOT_DEPARTMENT_MEMBER: '经办人不是那个部门的成员。',
+      TICKET_CLOSED: '工单已关闭，请先重开。',
+      SCREENING_ALREADY_DISPATCHED: '这份草稿已经有工单。',
+      USE_REASSIGN: '换责任部门是转派，请用「转派」。',
+      ROUTING_RULE_MISSING: '这一类还没有派单规则，请选择责任部门。',
+      forbidden: '你没有执行这个动作的权限。',
+      generic: '操作失败（{{reason}}）。',
     },
     channels: {
       wechat: '微信',
@@ -95,7 +231,8 @@ const zhCN: AppResource = {
       confidence: '置信 {{value}}',
       ownerAndModel: '建议归属：{{owner}} · 模型：{{model}}',
       empty: '暂无初筛记录',
-      review: '确认初筛',
+      // R-003：草稿唯一的动作「确认并派单」，表单里四项都能改；单独的「确认」没有入口。
+      reviewDispatch: '确认并派单',
       // R-002：每份草稿的出处 —— 哪个引擎出的，模型为什么没跑或回落。
       engines: {
         rules: '规则',
@@ -113,8 +250,6 @@ const zhCN: AppResource = {
       similarCases: '参考了 {{count}} 条相似案例',
     },
     review: {
-      saved: '初筛已确认',
-      failed: '复核失败',
       record: '确认人 {{actor}} · {{time}} · 确认成 {{category}} / {{severity}}',
     },
     // R-002：「代填效果」卡片，数据来自 GET /quality/drafting/stats。
@@ -156,10 +291,14 @@ const zhCN: AppResource = {
       open: '待处理',
       in_progress: '处理中',
       resolved: '已解决',
+      reopened: '已重开',
       closed: '已关闭',
     },
     outcomes: {
+      // `suggested` 取代了 `auto`（迁移把存量改了名）；`auto` 的词条留着，
+      // 存量行在严格 i18n 下渲染不缺键。
       auto: '自动派单',
+      suggested: '已建议',
       'needs-review': '待人工复核',
       reviewed: '已复核',
     },
@@ -274,6 +413,8 @@ const zhCN: AppResource = {
       network: '网络连接不上，请检查网络后再试。',
       attachmentNotFound: '这个附件不在这张反馈单上。',
       operationConflict: '这次操作与已有的改动冲突，请刷新后重试。',
+      feedbackConflict: '这张单已被别人修改，请刷新后再试。',
+      conflict: '这次操作与别人的改动冲突，请刷新后再试。',
       invalidMultipart: '上传请求格式不正确。',
       unsupportedMediaType: '不支持这种上传格式。',
     },
@@ -397,6 +538,28 @@ const zhCN: AppResource = {
       noConflict: '工号分配出现冲突，请重试。',
       noExhausted: '工号已用到 E999999，无法继续发号。',
       syntheticEmailReserved: '这个邮箱是留给没有邮箱的员工自动生成的地址，请换一个。',
+    },
+  },
+  // R-025：班次定义的服务端错误文案（页面文案在 S3 补）。
+  shifts: {
+    errors: {
+      denied: '你没有这项操作的权限。请管理员在角色里授予所需权限。',
+      session: '会话已过期，请重新登录。',
+      notFound: '这条班次不存在，请刷新后重试。',
+      codeExists: '这个班次编码已经被占用（停用过的也不再复用），请换一个。',
+      emptyRange: '班次的开始与结束不能相同。',
+      breakOutOfRange: '休息段要落在班次之内，且开始早于结束。',
+      fieldImmutable: '编码、起止时间与休息段不能改。请新建一条并停用这一条。',
+      invalidRequest: '有内容不合规，请检查编码、名称与时间。',
+      invalidCode: '编码要用 1–32 位大写字母、数字、连字符或下划线，且以字母或数字开头。',
+      invalidTitle: '名称要去掉首尾空白后 1–64 个字符。',
+      invalidMinute: '时间要写成 0–1439 的分钟数。',
+      invalidBreak: '休息段要开始与结束一起给。',
+      alreadyInactive: '这条班次已经停用。',
+      alreadyActive: '这条班次已经在用。',
+      conflict: '另一位操作员先改了这条班次，请刷新后重试。',
+      failed: '请求失败，请重试。',
+      generic: '操作失败（{{reason}}），请重试。',
     },
   },
   departments: {
@@ -571,6 +734,17 @@ const zhCN: AppResource = {
       actions: {
         view: '查看员工',
         manage: '管理员工',
+      },
+    },
+    // R-025：班次定义是独立业务资源，不是人员信息。
+    shifts: {
+      title: '班次定义',
+      tables: {
+        shifts: '班次',
+      },
+      actions: {
+        view: '查看班次',
+        manage: '管理班次',
       },
     },
     recordAccess: {
@@ -749,6 +923,42 @@ const zhCN: AppResource = {
    */
   overrides: {
     '@nocobase/app-plugin-users': { page: { roles: '角色' } },
+  },
+  ticketNotifications: {
+    contributor: '质量工单',
+    category: '质量工单',
+    businessRule: '只在流转提交之后发一次；重放同一个幂等键不重发。',
+    languagePolicy: '按应用默认语言发送一条。',
+    channel: '站内收件箱',
+    variables: {
+      code: '工单编号',
+      state: '工单状态',
+    },
+    dispatch: {
+      name: '派单通知',
+      trigger: '一份初筛被确认并派单之后。',
+      recipients: '责任部门负责人与经办人。',
+    },
+    reassign: {
+      name: '转派通知',
+      trigger: '一张工单被转派之后。',
+      recipients: '责任部门负责人、经办人与原来的经办人。',
+    },
+    resolve: {
+      name: '解决通知',
+      trigger: '一张工单被解决之后。',
+      recipients: '确认并派单的人。',
+    },
+    close: {
+      name: '关闭通知',
+      trigger: '一张工单被关闭之后。',
+      recipients: '经办人。',
+    },
+    reopen: {
+      name: '重开通知',
+      trigger: '一张工单被重开之后。',
+      recipients: '经办人与责任部门负责人。',
+    },
   },
 };
 

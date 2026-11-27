@@ -34,8 +34,55 @@ const enUS = {
       'employee-no-exhausted': 'All employee numbers up to E999999 are used; no more can be issued.',
     },
   },
+ ticketNotifications: {
+    contributor: 'Quality tickets',
+    category: 'Quality tickets',
+    businessRule: 'Sent once after the transition commits; replaying the same idempotency key does not resend.',
+    languagePolicy: 'One message in the application default language.',
+    channel: 'Inbox',
+    variables: {
+      code: 'Ticket code',
+      state: 'Ticket state',
+    },
+    dispatch: {
+      name: 'Ticket dispatched',
+      trigger: 'After a screening is confirmed and dispatched.',
+      recipients: 'The responsible department manager and the assignee.',
+      title: 'Ticket {{code}} dispatched',
+      body: 'Ticket {{code}} is now {{state}}.',
+    },
+    reassign: {
+      name: 'Ticket reassigned',
+      trigger: 'After a ticket is reassigned.',
+      recipients: 'The responsible department manager, the assignee and the previous assignee.',
+      title: 'Ticket {{code}} reassigned',
+      body: 'Ticket {{code}} is now {{state}}.',
+    },
+    resolve: {
+      name: 'Ticket resolved',
+      trigger: 'After a ticket is resolved.',
+      recipients: 'The person who confirmed and dispatched the ticket.',
+      title: 'Ticket {{code}} resolved',
+      body: 'Ticket {{code}} is now {{state}}.',
+    },
+    close: {
+      name: 'Ticket closed',
+      trigger: 'After a ticket is closed.',
+      recipients: 'The assignee.',
+      title: 'Ticket {{code}} closed',
+      body: 'Ticket {{code}} is now {{state}}.',
+    },
+    reopen: {
+      name: 'Ticket reopened',
+      trigger: 'After a ticket is reopened.',
+      recipients: 'The assignee and the responsible department manager.',
+      title: 'Ticket {{code}} reopened',
+      body: 'Ticket {{code}} is now {{state}}.',
+    },
+  },
 } as const;
 
 export type AppServerResource = LocaleResource<typeof enUS>;
+
 
 export default enUS;

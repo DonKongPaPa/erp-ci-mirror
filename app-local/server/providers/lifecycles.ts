@@ -17,6 +17,8 @@ import {
 import { fqcTicketsLifecycle } from '../lifecycles/fqc-tickets.js';
 import { departmentServiceToken } from './departments.js';
 import { ticketScopeFor } from '../ticket-scope.js';
+import { ticketNotifierToken } from '../ticket-notifications.js';
+import { activeMemberIdsOf } from '../active-users.js';
 
 /**
  * R-003 S5：应用唯一的 lifecycle 运行时（R-017 尚未落地，由本片带上）。
@@ -50,6 +52,9 @@ export default class LifecycleProvider extends ServiceProvider<Application> {
       authorizationToken,
     ) as Authorization;
     const departments = this.app.container.resolve(departmentServiceToken);
+    // S8：转派 guard 与 effect 拿到的 services 是两次不同的工厂调用，
+    // 用这个容器级的 Map 传递「流转前的经办人」；效果取走即清。
+    const previousAssignees = new Map<string, string | null>();
     const runtime = new LifecycleRuntime({
       store: createRepositoryLifecycleStore(database),
     });
@@ -59,7 +64,22 @@ export default class LifecycleProvider extends ServiceProvider<Application> {
         departmentActive: async (departmentId: string) =>
           (await departments.subtreeIds(departmentId)).length > 0,
         memberOf: async (departmentId: string, userId: string) =>
-          (await departments.memberIdsOf(departmentId)).includes(userId),
+          (
+            await activeMemberIdsOf(
+              database.connection(),
+              await departments.memberIdsOf(departmentId),
+            )
+          ).includes(userId),
+        capturePreviousAssignee: (ticketId: string, assigneeId: string | null) => {
+          previousAssignees.set(ticketId, assigneeId);
+        },
+        previousAssigneeOf: (ticketId: string) => {
+          const value = previousAssignees.get(ticketId) ?? null;
+          previousAssignees.delete(ticketId);
+          return value;
+        },
+        notifyTicket: (event) =>
+          this.app.container.resolve(ticketNotifierToken).notify(event),
       }),
     });
     this.runtime = runtime;

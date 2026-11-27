@@ -17,7 +17,8 @@ export const IngestMessageBody = z.object({
   productName: z.string().min(1).max(128).optional(),
   model: z.string().min(1).max(128).optional(),
   batchNo: z.string().min(1).max(64).optional(),
-  attachmentIds: z.array(z.string().min(1)).optional(),
+  // 与网页入口同一个上限；端点在校验器之前把它映射成 TOO_MANY_ATTACHMENTS。
+  attachmentIds: z.array(z.string().min(1)).max(10).optional(),
 });
 
 export type IngestMessageInput = z.infer<typeof IngestMessageBody>;
@@ -55,6 +56,11 @@ export const UpdateFeedbackBody = z.object({
   batchNo: nullableText(64),
   note: nullableText(2000),
   attachmentIds: z.array(z.string().min(1)).max(10).optional(),
+  /**
+   * 客户端加载表单时读到的附件标识（照仓库里的 `expectedRevision` 命名）。
+   * 带了就按集合与库里现值比对，不一致回 409 `FEEDBACK_CONFLICT`；不带就不比对。
+   */
+  expectedAttachmentIds: z.array(z.string().min(1)).max(10).optional(),
 });
 
 export type UpdateFeedbackInput = z.infer<typeof UpdateFeedbackBody>;
@@ -66,12 +72,20 @@ export const DiscardFeedbackBody = z.object({
 
 export type DiscardFeedbackInput = z.infer<typeof DiscardFeedbackBody>;
 
+/**
+ * 开关只认两个字面量：`z.coerce.boolean()` 会把 `'false'`、`'0'`、任意字符串都判成真，
+ * 与设计「只有 true 生效」相反。转布尔后再交给端点判断。
+ */
+const switchBoolean = z
+  .enum(['true', 'false'])
+  .transform((value) => value === 'true');
+
 /** 全部列表的查询参数。`pending` 与 `overdue` 只有 true 生效。 */
 export const ListFeedbackQuery = z.object({
   status: z.enum(['open', 'discarded']).optional(),
   channel: z.string().min(1).max(32).optional(),
-  pending: z.coerce.boolean().optional(),
-  overdue: z.coerce.boolean().optional(),
+  pending: switchBoolean.optional(),
+  overdue: switchBoolean.optional(),
   createdBefore: z.string().datetime({ offset: true }).optional(),
   createdAfter: z.string().datetime({ offset: true }).optional(),
   q: z.string().min(1).max(64).optional(),
@@ -239,20 +253,77 @@ export const TicketSchema = z.object({
   screeningId: z.string().nullable(),
   category: z.string().nullable(),
   severity: z.string(),
-  ownerDepartment: z.string().nullable(),
+  departmentId: z.string().nullable(),
+  departmentTitle: z.string().nullable(),
   assigneeId: z.string().nullable(),
+  assigneeName: z.string().nullable(),
   state: z.string(),
-  dueAt: z.string().nullable(),
   closedAt: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  statusChangedAt: z.string().nullable(),
+  lifecycleVersion: z.number().int(),
+  lifecycleDefinition: z.string().nullable(),
+  reopenCount: z.number().int(),
+  createdBy: z.string().nullable(),
+  resolution: z.string().nullable(),
+  /** 服务端按这一行的状态与调用者算好；只持「查看」时每行都是空数组。 */
+  canTransition: z.array(z.string()),
 });
 
 export const ListTicketsQuery = z.object({
   state: z.string().optional(),
-  ownerDepartment: z.string().optional(),
+  departmentId: z.string().optional(),
+  assigneeId: z.string().optional(),
+  /** 只匹配工单的编号与标题，不匹配描述（客户的正文）。 */
+  q: z.string().min(1).max(128).refine((value) => value.trim().length > 0).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+/** 详情：工单一行 + 确认记录 + 流转历史 + 算好的按钮。 */
+export const TicketDetailSchema = z.object({
+  ticket: TicketSchema,
+  reviews: z.array(z.unknown()),
+  transitions: z.array(z.unknown()),
+});
+
+/**
+ * 帮手的一行：编号、标题、类别、严重度、处理说明、关闭时间。
+ * 刻意不含 description / sourceMessageId / senderName / senderContact。
+ */
+export const TicketAssistRowSchema = z.object({
+  id: z.string(),
+  code: z.string(),
+  title: z.string(),
+  category: z.string().nullable(),
+  severity: z.string(),
+  resolution: z.string().nullable(),
+  closedAt: z.string().nullable(),
+});
+
+/** 开关关着或没有模型时 suggestion 是空形状，engine 是 none。 */
+export const TicketAssistSchema = z.object({
+  similar: z.array(TicketAssistRowSchema),
+  suggestion: z.object({ text: z.string(), source: z.string().nullable() }),
+  engine: z.enum(['none', 'model']),
+});
+
+/** 窄端点：只回在用部门的标识与名称，不回负责人、成员或其他部门信息。 */
+export const TicketDepartmentsSchema = z.object({
+  data: z.array(z.object({ id: z.string(), title: z.string() })),
+});
+
+/** 派单规则整体替换：空数组表示清空；departmentId 可为 null（还没配）。 */
+export const ReplaceRoutingRulesBody = z.object({
+  rules: z
+    .array(
+      z.object({
+        category: z.enum(DEFECT_CATEGORIES),
+        departmentId: z.string().min(1).max(64).nullable(),
+      }),
+    )
+    .max(64),
 });
 
 /**
@@ -274,12 +345,14 @@ export const SetAssigneeBody = z.strictObject({
  * R-003 搜同事：`departmentId` 与关键字都必填，关键字 1–64 字符。空串在 schema
  * 层就回 400；只回三列（标识、姓名、用户名），没有邮箱或手机号。
  */
-export const TicketCandidatesQuery = z.object({
-  departmentId: z.string().min(1).max(64),
-  q: z.string().min(1).max(64),
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(50).default(20),
-});
+export const TicketCandidatesQuery = z
+  .object({
+    departmentId: z.string().min(1).max(64),
+    // 纯空格不能当成「关键字」列出整个部门的成员（审计 B4）。
+    q: z.string().min(1).max(64).refine((value) => value.trim().length > 0),
+    page: z.coerce.number().int().min(1).default(1),
+    pageSize: z.coerce.number().int().min(1).max(50).default(20),
+  });
 
 export const TicketCandidateSchema = z.object({
   id: z.string(),
@@ -316,7 +389,7 @@ export const IngestResultSchema = z.object({
 export const ApproveScreeningBody = z.object({
   category: z.enum(DEFECT_CATEGORIES).optional(),
   severity: z.enum(['critical', 'major', 'minor', 'info']).optional(),
-  departmentId: z.string().max(64).optional(),
+  departmentId: z.string().min(1).max(64).optional(),
 });
 
 /**
@@ -352,6 +425,8 @@ export const DispatchedTicketSchema = z.object({
   lifecycleVersion: z.number().int(),
   lifecycleDefinition: z.string().nullable(),
   reopenCount: z.number().int(),
+  /** 这次派单刚写的确认记录，形状与确认端点的 review 一致（含 actorName）。 */
+  review: ScreeningReviewSchema,
 });
 
 /**
@@ -619,3 +694,66 @@ export const UpdateJobGradeBody = z.object({
   rank: z.number().int().min(-2147483648).max(2147483647).optional(),
   active: z.boolean().optional(),
 });
+
+// R-025 班次定义：时间都是零点起的整数分钟数，跨天由 end < start 推出，不放进响应。
+const shiftId = z
+  .string()
+  .trim()
+  .min(1)
+  .max(32)
+  .regex(/^[A-Z0-9][A-Z0-9_-]*$/u, 'Expected an uppercase shift code');
+const shiftMinute = z.number().int().min(0).max(1439);
+const shiftTitle = z.string().trim().min(1).max(64);
+
+export const ShiftSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  startMinute: z.number(),
+  endMinute: z.number(),
+  breakStartMinute: z.number().nullable(),
+  breakEndMinute: z.number().nullable(),
+  active: z.boolean(),
+  sortOrder: z.number(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const ShiftListQuery = z.object({
+  // 查询串里的 'false' 不能靠 z.coerce.boolean()（它会把任意非空串变成 true）。
+  includeInactive: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export const ShiftListSchema = z.object({
+  items: z.array(ShiftSchema),
+  total: z.number(),
+  page: z.number(),
+  pageSize: z.number(),
+});
+
+export const CreateShiftBody = z
+  .object({
+    id: shiftId,
+    title: shiftTitle,
+    startMinute: shiftMinute,
+    endMinute: shiftMinute,
+    breakStartMinute: shiftMinute.nullable().optional(),
+    breakEndMinute: shiftMinute.nullable().optional(),
+    sortOrder: z.number().int().optional(),
+  })
+  .strict();
+
+/**
+ * 不可改的键要交给端点自己映射成 422 SHIFT_FIELD_IMMUTABLE，不能在这里被 zod 拦成 400，
+ * 所以用 passthrough；空请求也留给端点（400），这样两种拒绝的理由各自明确。
+ */
+export const UpdateShiftBody = z
+  .object({
+    title: shiftTitle.optional(),
+    sortOrder: z.number().int().optional(),
+  })
+  .passthrough();

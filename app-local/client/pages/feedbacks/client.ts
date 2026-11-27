@@ -38,6 +38,8 @@ export interface FeedbackRow {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly submitterName: string | null;
+  /** 附件标识（含显示顺序）；编辑时作为「我以为的旧值」送回服务端做冲突判定。 */
+  readonly attachmentIds: readonly string[] | null;
   readonly attachments: readonly FeedbackAttachment[];
   /** 端点算好的行级能力：本行能不能改、能不能丢弃。 */
   readonly canEdit: boolean;
@@ -85,6 +87,8 @@ export interface UpdateFeedbackInput {
   readonly batchNo?: string | null;
   readonly note?: string | null;
   readonly attachmentIds?: readonly string[];
+  /** 加载表单时读到的附件标识；服务端按集合比对，不一致回 409 FEEDBACK_CONFLICT。 */
+  readonly expectedAttachmentIds?: readonly string[];
 }
 
 export type DiscardReason = 'not-defect' | 'duplicate' | 'other';

@@ -1,4 +1,4 @@
-import { useApiClient, useToaster } from '@nocobase/app-client';
+import { ApiClientError, useApiClient, useToaster } from '@nocobase/app-client';
 import { useCan } from '@nocobase/app-plugin-authorization/client';
 import { useLocale, useTranslation } from '@nocobase/i18n/client';
 import { AlertTriangle, Loader2 } from 'lucide-react';
@@ -48,6 +48,8 @@ function FeedbackDetailSheet(): ReactElement {
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  /** 详情每次真正换成新数据就自增；表单以它为 key，状态跟着新详情重建。 */
+  const [formVersion, setFormVersion] = useState(0);
 
   const load = useCallback(
     () => client.get(feedbackId),
@@ -59,7 +61,10 @@ function FeedbackDetailSheet(): ReactElement {
     let active = true;
     load().then(
       (result) => {
-        if (active) setItem(result);
+        if (active) {
+          setItem(result);
+          setFormVersion((value) => value + 1);
+        }
       },
       (next: unknown) => {
         if (active) setError(feedbackErrorText(next, t));
@@ -81,9 +86,21 @@ function FeedbackDetailSheet(): ReactElement {
         senderContact: _senderContact,
         ...update
       } = values;
-      const updated = await client.update(item.id, update);
+      // 带上表单加载时读到的附件旧值，服务端才认得出别人的改动；冲突后重新拉详情。
+      const updated = await client.update(item.id, {
+        ...update,
+        expectedAttachmentIds: item.attachmentIds ?? [],
+      });
       setItem(updated);
+      setError(undefined);
       toaster.show({ type: 'success', title: t('feedbacks.form.saved') });
+    } catch (error) {
+      if (error instanceof ApiClientError && error.reason === 'FEEDBACK_CONFLICT') {
+        // 表单会因 reloadToken 重建、丢掉自己的行内报错，把这句话提到页面层。
+        setError(feedbackErrorText(error, t));
+        setReloadToken((value) => value + 1);
+      }
+      throw error;
     } finally {
       setSaving(false);
     }
@@ -116,6 +133,12 @@ function FeedbackDetailSheet(): ReactElement {
         )
       ) : (
         <div className='flex flex-col gap-4'>
+          {error ? (
+            <Alert variant='destructive' role='alert'>
+              <AlertTriangle className='size-4' />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : null}
           <div className='flex flex-wrap items-center gap-2'>
             <StatusBadge tone={item.status === 'open' ? 'info' : 'neutral'} size='sm'>
               {t(`feedbacks.status.${item.status}`)}
@@ -167,6 +190,9 @@ function FeedbackDetailSheet(): ReactElement {
 
           {item.canEdit ? (
             <FeedbackSheetForm
+              // 冲突后详情换新数据，表单的附件/文本 state 都必须跟着重建；否则表单里
+              // 还是旧附件，却配上新版本发出去，别人刚加的附件会被静默解绑。
+              key={formVersion}
               mode='edit'
               client={client}
               feedback={item}

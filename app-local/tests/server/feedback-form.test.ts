@@ -25,7 +25,11 @@ import type { TestApp } from '@nocobase/app-testing/server';
 import type { DatabaseConnection } from '@nocobase/db';
 import { expect } from 'vitest';
 
-import { createAppTest } from '../helpers/test-app.js';
+import {
+  createAppTest,
+  openTestDatabaseAdmin,
+  testDatabaseSchemaNames,
+} from '../helpers/test-app.js';
 import { createApp } from '../../server/app.js';
 import {
   qualityModelGatewayToken,
@@ -44,7 +48,7 @@ import {
   qualityDraftingToken,
   upgradeScreeningDraft,
 } from '../../server/providers/quality-drafting.js';
-import { IngestResultSchema } from '../../server/routes/schemas.js';
+import { IngestMessageBody, IngestResultSchema } from '../../server/routes/schemas.js';
 
 /**
  * R-026 第三片：录入端点、共用录入函数与按列授权在端点上的真实行为。
@@ -256,6 +260,34 @@ const insertFile = async (
 
 const fileOf = async (connection: DatabaseConnection, id: string) =>
   connection.repository('fqcFeedbackFiles').findOne({ filter: { id } });
+
+/** 等第二个事务真的排在指定表的行锁上，再放行 —— 不靠固定睡眠猜它是否已经进入。 */
+const waitForLockWaiters = async (
+  app: TestApp,
+  table: string,
+  expected: number,
+): Promise<void> => {
+  const db = await openTestDatabaseAdmin(app);
+  try {
+    const deadline = Date.now() + 20_000;
+    let waiting = 0;
+    while (Date.now() < deadline) {
+      const result = (await db.client.raw(
+        `SELECT count(*)::int AS waiting FROM pg_stat_activity ` +
+          `WHERE state = 'active' AND wait_event_type = 'Lock' AND query ILIKE ?`,
+        [`%${table}%`],
+      )) as { rows?: { waiting: number }[] };
+      waiting = Number(result.rows?.[0]?.waiting ?? 0);
+      if (waiting >= expected) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(waiting, `等待 ${table} 行锁的事务数不足`).toBeGreaterThanOrEqual(expected);
+  } finally {
+    await db.close();
+  }
+};
 
 const intakeGrant = {
   resource: { type: 'composite', id: 'fqc' },
@@ -844,17 +876,47 @@ test('R-026 14: 维护反馈单可以按状态、渠道、时间与正文筛选'
     filter: { id: recent },
     values: { createdAt: new Date(Date.now() - 6 * 24 * 3600_000) },
   });
-  const known = [open, proxy, old, recent];
+  // 一张已丢弃、初筛仍是 needs-review 的老单：pending 与 overdue 都不能带出它。
+  const discardedOld = randomUUID();
+  await connection.repository('fqcMessages').createOne({
+    values: {
+      id: discardedOld,
+      channel: 'web',
+      externalId: null,
+      content: '八天前已丢弃',
+      rawContentType: 'text',
+      receivedAt: new Date(Date.now() - 8 * 24 * 3600_000),
+      status: 'discarded',
+      createdAt: new Date(Date.now() - 8 * 24 * 3600_000),
+      updatedAt: new Date(),
+    },
+  });
+  await connection.repository('fqcScreenings').createOne({
+    values: {
+      id: randomUUID(),
+      messageId: discardedOld,
+      outcome: 'needs-review',
+      createdAt: new Date(Date.now() - 8 * 24 * 3600_000),
+      updatedAt: new Date(),
+    },
+  });
+  const known = [open, proxy, old, recent, discardedOld];
   expect(ours(await idsOf('?overdue=true'), known)).toEqual([old]);
-  // 期望值从库里这批行的 outcome 算出来，筛选一放松（连已丢弃的也回来）就会红。
+  // 期望值同时看 status 与初筛 outcome：筛选一放松（连已丢弃的也回来）就会红。
   const expectedPending: string[] = [];
   for (const id of known) {
-    const screening = await screeningOf(connection, id);
-    if (screening && screening.outcome !== 'reviewed') {
+    const [message, screening] = await Promise.all([
+      messageOf(connection, id),
+      screeningOf(connection, id),
+    ]);
+    if (message?.status === 'open' && screening && screening.outcome !== 'reviewed') {
       expectedPending.push(id);
     }
   }
-  expect(ours(await idsOf('?pending=true'), known)).toEqual(expectedPending.sort());
+  const pendingIds = ours(await idsOf('?pending=true'), known);
+  expect(pendingIds).toEqual(expectedPending.sort());
+  expect(pendingIds).not.toContain(proxy);
+  expect(pendingIds).not.toContain(discardedOld);
   expect(ours(await idsOf('?createdBefore=2026-01-01T00:00:00%2B08:00'), known)).toEqual([]);
 });
 
@@ -1443,4 +1505,469 @@ test('R-026 附件并发（仅 Postgres）：同一附件被另一个事务先�
     release();
     await holder;
   }
+});
+
+test('R-026 审计 2: 列表开关只认 true/false 字面量，其余回 400', async ({ testApp }) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  await createUser(admin, 'r026s3-switch', { app: ['quality_manager'] });
+  const manager = await signInAs(testApp, 'r026s3-switch');
+  const mine = ((await expectJson(
+    await postFeedback(manager, { content: '开关查询钉住的单' }),
+    201,
+  )) as FeedbackBody).data.id;
+  const idsOf = async (query: string) =>
+    ((await expectJson(await getFeedbacks(manager, `${query}&pageSize=100`), 200)) as {
+      data: FeedbackRow[];
+    }).data.map((row) => row.id);
+
+  expect(await idsOf('?pending=true')).toContain(mine);
+  // false 是「开关关着」，与不带键同形，不能反过来只留未处理。
+  expect(await idsOf('?pending=false')).toContain(mine);
+  expect(await idsOf('?overdue=false')).toContain(mine);
+  for (const query of [
+    '?pending=0',
+    '?pending=1',
+    '?pending=x',
+    '?pending=TRUE',
+    '?overdue=0',
+    '?overdue=1',
+    '?overdue=x',
+  ]) {
+    await expectError(await getFeedbacks(manager, query), 400, 'INVALID_INPUT');
+  }
+});
+
+test('R-026 审计 4: 投递入口的附件上限与网页入口相同（11 个真实附件）', async ({
+  app,
+  testApp,
+  connection,
+}) => {
+  const account = await createIntakeAccount(app, 'intake-limit', false);
+  const ids = await Promise.all(
+    Array.from({ length: 11 }, () => insertFile(connection, account.id)),
+  );
+  // 上限写进 schema：把 .max(10) 去掉，这一条先红。
+  expect(
+    IngestMessageBody.safeParse({
+      channel: 'wechat',
+      content: '11 个附件',
+      attachmentIds: ids,
+    }).success,
+  ).toBe(false);
+  await expectError(
+    await postIntake(testApp, account.secret, {
+      channel: 'wechat',
+      content: '11 个附件',
+      attachmentIds: ids,
+    }),
+    400,
+    'TOO_MANY_ATTACHMENTS',
+  );
+  const rows = await Promise.all(ids.map((id) => fileOf(connection, id)));
+  expect(rows.every((row) => row?.feedbackId === null)).toBe(true);
+});
+
+test('R-026 审计 5: 同一创建时间的单跨页不重不漏、顺序稳定', async ({
+  testApp,
+  connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  await createUser(admin, 'r026s3-order', { app: ['quality_manager'] });
+  const manager = await signInAs(testApp, 'r026s3-order');
+  const marker = `次序-${randomUUID()}`;
+  const ids: string[] = [];
+  for (let i = 0; i < 6; i += 1) {
+    ids.push(
+      ((await expectJson(
+        await postFeedback(manager, { content: `${marker} 第 ${i} 张` }),
+        201,
+      )) as FeedbackBody).data.id,
+    );
+  }
+  // 六张单的 createdAt 完全相同，逼出没有次序键时会漂移的分页边界。
+  const sameTime = new Date('2026-01-02T00:00:00.000Z');
+  for (const id of ids) {
+    await connection.repository('fqcMessages').updateOne({
+      filter: { id },
+      values: { createdAt: sameTime } as never,
+    });
+  }
+  const pages: string[] = [];
+  for (let page = 1; page <= 3; page += 1) {
+    const rows = ((await expectJson(
+      await getFeedbacks(
+        manager,
+        `?q=${encodeURIComponent(marker)}&page=${page}&pageSize=2`,
+      ),
+      200,
+    )) as { data: FeedbackRow[] }).data;
+    pages.push(...rows.map((row) => row.id));
+  }
+  expect(pages.slice().sort()).toEqual(ids.slice().sort());
+  // 次序键取 (createdAt desc, id desc)：去掉 id，这个顺序就不成立。
+  expect(pages).toEqual(ids.slice().sort().reverse());
+
+  // 「我的反馈」同样按两个键定序；这个用户只有这一批单。
+  const minePages: string[] = [];
+  for (let page = 1; page <= 3; page += 1) {
+    const rows = ((await expectJson(
+      await getMine(manager, `?page=${page}&pageSize=2`),
+      200,
+    )) as { data: FeedbackRow[] }).data;
+    minePages.push(...rows.map((row) => row.id));
+  }
+  expect(minePages.slice().sort()).toEqual(ids.slice().sort());
+  expect(minePages).toEqual(ids.slice().sort().reverse());
+});
+
+test('R-026 审计 3（仅 Postgres）: PATCH 绑定被另一事务抢走时回 422 且不落半截', async ({
+  testApp,
+  connection,
+}) => {
+  if (connection.dialect !== 'postgres') {
+    return;
+  }
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const managerUser = await createUser(admin, 'r026s3-patch-race', {
+    app: ['quality_manager'],
+  });
+  const manager = await signInAs(testApp, 'r026s3-patch-race');
+  const id = ((await expectJson(
+    await postFeedback(manager, { content: 'PATCH 并发目标单' }),
+    201,
+  )) as FeedbackBody).data.id;
+  const fileId = await insertFile(connection, managerUser.id);
+
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let locked!: () => void;
+  const held = new Promise<void>((resolve) => {
+    locked = resolve;
+  });
+  const otherFeedback = randomUUID();
+  // 第一个真实事务先占住附件但扣住不提交。
+  const holder = (async () => {
+    await connection.transaction(async (transaction) => {
+      await transaction.repository('fqcFeedbackFiles').updateMany({
+        filter: { id: fileId },
+        values: { feedbackId: otherFeedback, updatedAt: new Date() } as never,
+      });
+      locked();
+      await gate;
+    });
+  })();
+  try {
+    await held;
+    // 第二个真实事务经 PATCH 预检（看到未占用），放行后绑定更新谓词重算匹配 0 行。
+    const pending = patchOne(manager, id, { attachmentIds: [fileId] });
+    await waitForLockWaiters(testApp, 'fqc_feedback_files', 1);
+    release();
+    await expectError(await pending, 422, 'ATTACHMENT_NOT_AVAILABLE');
+    expect(await messageOf(connection, id)).toMatchObject({ attachmentIds: [] });
+    expect((await fileOf(connection, fileId))?.feedbackId).toBe(otherFeedback);
+  } finally {
+    release();
+    await holder;
+  }
+});
+
+test('R-026 审计复查 3（仅 Postgres）: 拿掉附件时被另一事务改走回 422 且不落半截', async ({
+  testApp,
+  connection,
+}) => {
+  if (connection.dialect !== 'postgres') {
+    return;
+  }
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const managerUser = await createUser(admin, 'r026s3-unbind-race', {
+    app: ['quality_manager'],
+  });
+  const manager = await signInAs(testApp, 'r026s3-unbind-race');
+  const fileId = await insertFile(connection, managerUser.id);
+  const id = ((await expectJson(
+    await postFeedback(manager, {
+      content: '拿掉附件并发目标单',
+      attachmentIds: [fileId],
+    }),
+    201,
+  )) as FeedbackBody).data.id;
+  expect((await fileOf(connection, fileId))?.feedbackId).toBe(id);
+
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let locked!: () => void;
+  const held = new Promise<void>((resolve) => {
+    locked = resolve;
+  });
+  const otherFeedback = randomUUID();
+  // 第一个真实事务先把文件行改到别的单上并扣住不提交。
+  const holder = (async () => {
+    await connection.transaction(async (transaction) => {
+      await transaction.repository('fqcFeedbackFiles').updateMany({
+        filter: { id: fileId },
+        values: { feedbackId: otherFeedback, updatedAt: new Date() } as never,
+      });
+      locked();
+      await gate;
+    });
+  })();
+  try {
+    await held;
+    // 第二个真实事务的 PATCH 预检不查 removed，拿掉时谓词重算匹配 0 行。
+    const pending = patchOne(manager, id, { attachmentIds: [] });
+    await waitForLockWaiters(testApp, 'fqc_feedback_files', 1);
+    release();
+    await expectError(await pending, 422, 'ATTACHMENT_NOT_AVAILABLE');
+    expect(await messageOf(connection, id)).toMatchObject({ attachmentIds: [fileId] });
+    expect((await fileOf(connection, fileId))?.feedbackId).toBe(otherFeedback);
+  } finally {
+    release();
+    await holder;
+  }
+});
+
+test('R-026 审计复查 1（仅 Postgres）: 两个并发 PATCH 改同一张单不留孤儿附件', async ({
+  testApp,
+  connection,
+}) => {
+  if (connection.dialect !== 'postgres') {
+    return;
+  }
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const userA = await createUser(admin, 'r026s3-patch-cas-a', {
+    app: ['quality_manager'],
+  });
+  const userB = await createUser(admin, 'r026s3-patch-cas-b', {
+    app: ['quality_manager'],
+  });
+  const a = await signInAs(testApp, 'r026s3-patch-cas-a');
+  const b = await signInAs(testApp, 'r026s3-patch-cas-b');
+  const id = ((await expectJson(
+    await postFeedback(a, { content: '两个并发 PATCH 改同一张单' }),
+    201,
+  )) as FeedbackBody).data.id;
+  const x = await insertFile(connection, userA.id);
+  const y = await insertFile(connection, userB.id);
+
+  const [schema] = testDatabaseSchemaNames(testApp);
+  const db = await openTestDatabaseAdmin(testApp);
+  const lock = await db.client.transaction();
+  let released = false;
+  try {
+    // 外部事务锁住消息行，让两笔 PATCH 都读到同一份 attachmentIds=[]，再一起停在更新上。
+    await lock.raw(
+      `SELECT 1 FROM "${schema}"."fqc_messages" WHERE id = ? FOR UPDATE`,
+      [id],
+    );
+    const requests = [
+      patchOne(a, id, { attachmentIds: [x] }),
+      patchOne(b, id, { attachmentIds: [y] }),
+    ];
+    const deadline = Date.now() + 20_000;
+    let waiting = 0;
+    while (Date.now() < deadline) {
+      const result = (await db.client.raw(
+        `SELECT count(*)::int AS waiting FROM pg_stat_activity ` +
+          `WHERE state = 'active' AND wait_event_type = 'Lock' ` +
+          `AND query ILIKE '%fqc_messages%'`,
+      )) as { rows?: { waiting: number }[] };
+      waiting = Number(result.rows?.[0]?.waiting ?? 0);
+      if (waiting >= 2) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(waiting, '两个 PATCH 必须真的都排在消息行的行锁上').toBeGreaterThanOrEqual(2);
+    await lock.commit();
+    released = true;
+
+    const responses = await Promise.all(requests);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    const loser = responses.find((response) => response.status === 409)!;
+    expect((await expectJson(loser, 409) as ApiErrorBody).error.reason).toBe(
+      'FEEDBACK_CONFLICT',
+    );
+    const winner = responses.find((response) => response.status === 200)!;
+    await expectJson(winner, 200);
+
+    // 赢家的标识与文件行一致；输家的文件行已随事务回滚，不成孤儿。
+    const stored = await messageOf(connection, id);
+    const listed = ((stored?.attachmentIds as string[] | null) ?? []).slice().sort();
+    expect(listed).toHaveLength(1);
+    const [fileX, fileY] = await Promise.all([fileOf(connection, x), fileOf(connection, y)]);
+    const boundIds = [x, y].filter((fileId, i) => [fileX, fileY][i]?.feedbackId === id);
+    expect(boundIds).toEqual(listed);
+    expect([fileX?.feedbackId, fileY?.feedbackId].filter((value) => value === null)).toHaveLength(1);
+  } finally {
+    if (!released) {
+      await lock.rollback().catch(() => undefined);
+    }
+    await db.close();
+  }
+});
+
+test('R-026 附件审计 A1: 同一个标识带两次，录入与 PATCH 都回 422 且不留两份', async ({
+  testApp,
+  connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const user = await createUser(admin, 'r026s3-dup-file', { app: ['quality_manager'] });
+  const manager = await signInAs(testApp, 'r026s3-dup-file');
+  const ingestFile = await insertFile(connection, user.id);
+  await expectError(
+    await postFeedback(manager, {
+      content: '录入重复标识',
+      attachmentIds: [ingestFile, ingestFile],
+    }),
+    422,
+    'ATTACHMENT_NOT_AVAILABLE',
+  );
+  expect((await fileOf(connection, ingestFile))?.feedbackId).toBeNull();
+  expect(
+    await connection.repository('fqcMessages').count({ filter: { content: '录入重复标识' } }),
+  ).toBe(0);
+
+  const patchFile = await insertFile(connection, user.id);
+  const id = ((await expectJson(
+    await postFeedback(manager, { content: 'PATCH 重复标识的靶单' }),
+    201,
+  )) as FeedbackBody).data.id;
+  await expectError(
+    await patchOne(manager, id, { attachmentIds: [patchFile, patchFile] }),
+    422,
+    'ATTACHMENT_NOT_AVAILABLE',
+  );
+  expect(await messageOf(connection, id)).toMatchObject({ attachmentIds: [] });
+  expect((await fileOf(connection, patchFile))?.feedbackId).toBeNull();
+});
+
+test('R-026 附件审计 A1（仅 Postgres）: 两张单同时 PATCH 同一个附件，输家回 422', async ({
+  testApp,
+  connection,
+}) => {
+  if (connection.dialect !== 'postgres') {
+    return;
+  }
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const user = await createUser(admin, 'r026s3-shared-file', {
+    app: ['quality_manager'],
+  });
+  const manager = await signInAs(testApp, 'r026s3-shared-file');
+  const firstId = ((await expectJson(
+    await postFeedback(manager, { content: '共享附件靶单一' }),
+    201,
+  )) as FeedbackBody).data.id;
+  const secondId = ((await expectJson(
+    await postFeedback(manager, { content: '共享附件靶单二' }),
+    201,
+  )) as FeedbackBody).data.id;
+  const fileId = await insertFile(connection, user.id);
+
+  const [schema] = testDatabaseSchemaNames(testApp);
+  const db = await openTestDatabaseAdmin(testApp);
+  const lock = await db.client.transaction();
+  let released = false;
+  try {
+    // 外部事务锁住文件行，让两个 PATCH 的前置核对都看到 feedbackId 为空。
+    await lock.raw(
+      `SELECT 1 FROM "${schema}"."fqc_feedback_files" WHERE id = ? FOR UPDATE`,
+      [fileId],
+    );
+    const requests = [
+      patchOne(manager, firstId, { attachmentIds: [fileId] }),
+      patchOne(manager, secondId, { attachmentIds: [fileId] }),
+    ];
+    const deadline = Date.now() + 20_000;
+    let waiting = 0;
+    while (Date.now() < deadline) {
+      const result = (await db.client.raw(
+        `SELECT count(*)::int AS waiting FROM pg_stat_activity ` +
+          `WHERE state = 'active' AND wait_event_type = 'Lock' ` +
+          `AND query ILIKE '%fqc_feedback_files%'`,
+      )) as { rows?: { waiting: number }[] };
+      waiting = Number(result.rows?.[0]?.waiting ?? 0);
+      if (waiting >= 2) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(waiting, '两个 PATCH 必须真的都排在文件行的行锁上').toBeGreaterThanOrEqual(2);
+    await lock.commit();
+    released = true;
+
+    const responses = await Promise.all(requests);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 422]);
+    const loser = responses.find((response) => response.status === 422)!;
+    expect((await expectJson(loser, 422) as ApiErrorBody).error.reason).toBe(
+      'ATTACHMENT_NOT_AVAILABLE',
+    );
+    const winnerIndex = responses.findIndex((response) => response.status === 200);
+    const winnerId = winnerIndex === 0 ? firstId : secondId;
+    const loserId = winnerIndex === 0 ? secondId : firstId;
+    expect((await fileOf(connection, fileId))?.feedbackId).toBe(winnerId);
+    expect(await messageOf(connection, winnerId)).toMatchObject({ attachmentIds: [fileId] });
+    expect(await messageOf(connection, loserId)).toMatchObject({ attachmentIds: [] });
+  } finally {
+    if (!released) {
+      await lock.rollback().catch(() => undefined);
+    }
+    await db.close();
+  }
+});
+
+test('R-026 陈旧表单带上读到的附件旧值保存时回 409，库里附件不变', async ({
+  testApp,
+  connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const user = await createUser(admin, 'r026s3-stale-form', {
+    app: ['quality_manager'],
+  });
+  const manager = await signInAs(testApp, 'r026s3-stale-form');
+  const x = await insertFile(connection, user.id);
+  const y = await insertFile(connection, user.id);
+  const id = ((await expectJson(
+    await postFeedback(manager, { content: '陈旧表单靶单' }),
+    201,
+  )) as FeedbackBody).data.id;
+
+  // A 先把附件改成 [X]；B 仍拿着表单加载时的 [] 来保存 [Y]。
+  await expectJson(await patchOne(manager, id, { attachmentIds: [x] }), 200);
+  await expectError(
+    await patchOne(manager, id, {
+      attachmentIds: [y],
+      expectedAttachmentIds: [],
+    }),
+    409,
+    'FEEDBACK_CONFLICT',
+  );
+  expect(await messageOf(connection, id)).toMatchObject({ attachmentIds: [x] });
+  expect((await fileOf(connection, x))?.feedbackId).toBe(id);
+  expect((await fileOf(connection, y))?.feedbackId).toBeNull();
+
+  // 不带旧值的调用方（只改别的字段）照常通过。
+  await expectJson(await patchOne(manager, id, { customerName: '仅改文本' }), 200);
+});
+
+test('R-026 投递守卫排在授权之后：无投递资格带 11 个标识回 403', async ({ testApp }) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  await createUser(admin, 'r026s3-intake-noauth', { app: ['quality_manager'] });
+  const manager = await signInAs(testApp, 'r026s3-intake-noauth');
+  await expectError(
+    await manager.fetch('/quality/intake', {
+      method: 'POST',
+      headers: jsonHeaders(operationKey()),
+      body: JSON.stringify({
+        channel: 'wechat',
+        content: '无投递资格',
+        attachmentIds: Array.from({ length: 11 }, () => randomUUID()),
+      }),
+    }),
+    403,
+    'AUTHORIZATION_DENIED',
+  );
 });

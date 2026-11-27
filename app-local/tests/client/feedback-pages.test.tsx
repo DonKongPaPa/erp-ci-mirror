@@ -299,6 +299,73 @@ describe('R-026 新建与编辑的门槛', () => {
     )![0].json as Record<string, unknown>;
     expect(patch).not.toHaveProperty('channel');
     expect(patch).not.toHaveProperty('content');
+    // 客户端总是带上加载表单时读到的附件旧值，服务端才认得出陈旧表单。
+    expect(patch).toMatchObject({ expectedAttachmentIds: [] });
+  });
+
+  it('冲突后表单跟着新详情重建：再保存发出的是新附件配新版本', async () => {
+    permissions = fqcGrant('maintain');
+    let detailLoads = 0;
+    let patchCount = 0;
+    const fresh = {
+      attachmentIds: ['file-9'],
+      attachments: [
+        {
+          id: 'file-9',
+          filename: 'other.png',
+          mimeType: 'image/png',
+          size: 3,
+          url: '/api/quality/feedbacks/f-1/attachments/file-9',
+        },
+      ],
+    };
+    answer = (call) => {
+      if (call.path === 'authorization/permissions') return { data: permissions };
+      if (call.path === 'quality/feedbacks/f-1' && call.method === 'PATCH') {
+        patchCount += 1;
+        // 第一次撞冲突；重建后的表单再保存应当带着新附件成功。
+        return patchCount === 1
+          ? errorResponse(409, 'FEEDBACK_CONFLICT')
+          : { data: row(fresh) };
+      }
+      if (call.path === 'quality/feedbacks/f-1') {
+        detailLoads += 1;
+        return { data: row(detailLoads > 1 ? fresh : {}) };
+      }
+      return new Response(null, { status: 404 });
+    };
+    await renderAt('/feedbacks/f-1');
+    const dialog = await screen.findByRole('dialog', {
+      name: enUS.feedbacks.form.titleEdit,
+    });
+    await userEvent.click(
+      await within(dialog).findByRole('button', { name: enUS.feedbacks.form.save }),
+    );
+
+    await waitFor(() =>
+      expect(
+        within(dialog)
+          .getAllByRole('alert')
+          .some((node) => node.textContent?.includes(enUS.feedbacks.errors.feedbackConflict)),
+      ).toBe(true),
+    );
+    await waitFor(() => expect(detailLoads).toBeGreaterThanOrEqual(2));
+
+    // 关键：查表单自己的附件列表，不是包住整页的对话框（那里还有详情列表）。
+    const formList = within(dialog).getByTestId('feedback-attachment-list');
+    expect(await within(formList).findByText('other.png')).toBeVisible();
+
+    await userEvent.click(
+      await within(dialog).getByRole('button', { name: enUS.feedbacks.form.save }),
+    );
+    await waitFor(() => expect(patchCount).toBe(2));
+    const second = api.mock.calls.filter(
+      ([call]) => call.method === 'PATCH' && call.path === 'quality/feedbacks/f-1',
+    )[1]![0].json as Record<string, unknown>;
+    expect(second).toMatchObject({
+      attachmentIds: ['file-9'],
+      expectedAttachmentIds: ['file-9'],
+    });
   });
 
   it.each([
@@ -398,10 +465,11 @@ describe('R-026 提交', () => {
     expect(await screen.findByText(enUS.feedbacks.errors.customerRequired)).toBeVisible();
   });
 
-  it('认不出的原因码给通用提示并保留原因码', async () => {
+  it('认不出的原因码按状态码兜底，不把英文原因码端给用户', async () => {
     answer = (call) => {
       if (call.path === 'authorization/permissions') return { data: permissions };
       if (call.path === 'quality/feedbacks' && call.method === 'POST')
+        // 原因码认不出时按 409 状态兜底，不再把英文原因码端给用户。
         return errorResponse(409, 'SOMETHING_NEW');
       return new Response(null, { status: 404 });
     };
@@ -411,8 +479,8 @@ describe('R-026 提交', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: enUS.feedbacks.form.submit }));
 
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent(enUS.feedbacks.errors.generic.replace('{{reason}}', 'SOMETHING_NEW'));
-    expect(alert).toHaveTextContent('SOMETHING_NEW');
+    expect(alert).toHaveTextContent(enUS.feedbacks.errors.conflict);
+    expect(alert).not.toHaveTextContent('SOMETHING_NEW');
   });
 
   it('401 说会话已过期，不带原因码', async () => {
@@ -1035,6 +1103,24 @@ describe('R-026 失败提示按状态码给话', () => {
     const text = feedbackErrorText(new TypeError('Failed to fetch'), translate);
     expect(text).toBe(enUS.feedbacks.errors.network);
     expect(text).not.toContain('Failed to fetch');
+  });
+
+  it('FEEDBACK_CONFLICT 与 409 兜底各有一句，且都说刷新后再试', () => {
+    const specific = new ApiClientError('Conflict', {
+      status: 409,
+      reason: 'FEEDBACK_CONFLICT',
+      payload: { error: { reason: 'FEEDBACK_CONFLICT' } },
+    });
+    expect(feedbackErrorText(specific, translate)).toBe(
+      enUS.feedbacks.errors.feedbackConflict,
+    );
+    const generic = new ApiClientError('Conflict', {
+      status: 409,
+      reason: 'SOMETHING_ELSE',
+      payload: { error: { reason: 'SOMETHING_ELSE' } },
+    });
+    expect(feedbackErrorText(generic, translate)).toBe(enUS.feedbacks.errors.conflict);
+    expect(enUS.feedbacks.errors.feedbackConflict).not.toBe(enUS.feedbacks.errors.conflict);
   });
 
   it('其余没认出的失败仍保留原因码，用户能据此报错', () => {

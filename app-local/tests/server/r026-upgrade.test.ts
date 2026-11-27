@@ -16,13 +16,18 @@ import {
   userManagementServiceToken,
   type UserManagementService,
 } from '@nocobase/app-plugin-users/server/tokens';
-import type { DatabaseConnection } from '@nocobase/db';
+import { bindAppCommand, runAppCommand } from '@nocobase/app-testing/cli';
+import {
+  databaseManagerToken,
+  type DatabaseConnection,
+} from '@nocobase/db';
 import { expect, vi } from 'vitest';
 
-import {
+import AuthzUpgradeR026, {
   FEEDBACK_PAGE_ID,
   assertStaffAssignmentsSucceeded,
   upgradeR026,
+  type R026UpgradeReport,
   type R026UpgradeServices,
 } from '../../cli/authz/upgrade-r026.js';
 import { assignStaffBaseline } from '../../server/providers/staff-baseline.js';
@@ -173,6 +178,31 @@ const services = (
   authorization: app.container.resolve(authorizationToken),
   connection,
 });
+
+/** 部署脚本看退出码：命令里的两个 token 分别解析到测试应用的 authz 与连接。 */
+const runUpgradeCommand = (
+  authz: AppAuthorization,
+  connection: DatabaseConnection,
+) => {
+  const Bound = bindAppCommand(AuthzUpgradeR026, {
+    rootDir: appRoot,
+    id: 'authz:upgrade-r026',
+    loadRuntime: async () =>
+      ({ env: {}, scope: { destroy: async () => undefined } }) as never,
+    createApp: () =>
+      ({
+        start: async () => undefined,
+        shutdown: async () => undefined,
+        container: {
+          resolve: (token: unknown) =>
+            token === databaseManagerToken
+              ? { connection: () => connection }
+              : authz,
+        },
+      }) as never,
+  });
+  return runAppCommand(Bound, []);
+};
 
 const contextFor = (authz: AppAuthorization, userId: string) =>
   authz.for({ principal: { type: 'user', id: userId } });
@@ -898,3 +928,103 @@ test('R-026 升级：跨 100 一页的边界不漏账号', async ({ app, connect
     expect(await staffAssignmentCount(authz, id), `${id} 漏了`).toBe(1);
   }
 }, 180_000);
+
+test('R-026 升级：角色缺失时加法没做成，命令非零退出且报告先打印完', async ({
+  app,
+  connection,
+}) => {
+  const authz = app.container.resolve(authorizationToken);
+  await connection.query
+    .deleteFrom('authorizationPermissionSets')
+    .where('key', '=', 'quality_inspector')
+    .execute();
+  expect(
+    await authz.permissionSets.get('quality_inspector'),
+    '前置条件：角色确实不存在',
+  ).toBeUndefined();
+
+  const command = await runUpgradeCommand(authz, connection);
+  expect(
+    command.exitCode ?? 0,
+    '加法没做成时命令必须非零退出，部署脚本才能发现',
+  ).toBeGreaterThan(0);
+  const error = String(command.error ?? '');
+  expect(error).toMatch(/role grants/u);
+  expect(error).toMatch(/quality_inspector/u);
+  expect(error).toMatch(/rerun/u);
+  expect(command.stdout).toContain(
+    '[r026] quality_inspector: not found; skipped',
+  );
+  expect(command.stdout, '退出前报告要打印完，包括最后的汇总行').toContain(
+    '[r026] skipped (already current):',
+  );
+  expect(command.stdout).toContain('[r026-staff] === staff assignments ===');
+});
+
+test('R-026 升级：声明对不上时加法没做成，命令非零退出且报告先打印完', async ({
+  app,
+  connection,
+}) => {
+  const authz = app.container.resolve(authorizationToken);
+  const realGetAction = authz.compositeResources.getAction.bind(
+    authz.compositeResources,
+  );
+  // 只让「提交反馈」的声明消失：加法因声明对不上而跳过、一行都不写。
+  const spy = vi
+    .spyOn(authz.compositeResources, 'getAction')
+    .mockImplementation((id, action) =>
+      action === 'submit' ? undefined : realGetAction(id, action),
+    );
+  try {
+    const command = await runUpgradeCommand(authz, connection);
+    expect(
+      command.exitCode ?? 0,
+      '加法因声明对不上而没做成时命令必须非零退出',
+    ).toBeGreaterThan(0);
+    const error = String(command.error ?? '');
+    expect(error).toMatch(/role grants/u);
+    expect(error).toMatch(/declaration mismatch/u);
+    expect(error).toMatch(/rerun/u);
+    expect(command.stdout).toContain(
+      '[r026] staff: declaration mismatch:',
+    );
+    expect(command.stdout, '退出前报告要打印完').toContain(
+      '[r026] skipped (already current):',
+    );
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test('R-026 升级：加法都做成、重跑本来就齐时命令以 0 退出', async ({
+  app,
+  connection,
+}) => {
+  const authz = app.container.resolve(authorizationToken);
+  // seed 环境下本来就齐：一次都不写，也要以 0 退出。
+  const current = await runUpgradeCommand(authz, connection);
+  expect(
+    current.error,
+    `本来就齐时不该报错：${String(current.error)}`,
+  ).toBeUndefined();
+  expect(current.exitCode ?? 0).toBe(0);
+
+  for (const key of TARGETS) {
+    await makeOld(connection, authz, key, 'strip');
+  }
+  const first = await runUpgradeCommand(authz, connection);
+  expect(first.error, `命令不该报错：${String(first.error)}`).toBeUndefined();
+  expect(first.exitCode ?? 0, '全部补上时以 0 退出').toBe(0);
+  const report = first.result as R026UpgradeReport | undefined;
+  expect(report?.grants.changed.sort()).toEqual([...TARGETS].sort());
+  expect(report?.grants.missing).toEqual([]);
+  expect(report?.grants.invalid).toEqual([]);
+  expect(report?.staff.failed).toEqual([]);
+
+  const second = await runUpgradeCommand(authz, connection);
+  expect(second.error, `重跑不该报错：${String(second.error)}`).toBeUndefined();
+  expect(second.exitCode ?? 0, '重跑本来就齐时以 0 退出').toBe(0);
+  const again = second.result as R026UpgradeReport | undefined;
+  expect(again?.grants.changed).toEqual([]);
+  expect(again?.grants.unchanged.sort()).toEqual([...TARGETS].sort());
+});

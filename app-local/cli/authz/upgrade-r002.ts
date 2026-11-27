@@ -1,5 +1,5 @@
 import type { AppAuthorization } from '@nocobase/app-plugin-authorization';
-import { AppCommand } from '@nocobase/app-cli';
+import { AppCommand, CommandError } from '@nocobase/app-cli';
 import {
   PermissionSetConflictError,
   type CreatePermissionSetInput,
@@ -30,6 +30,14 @@ import {
  */
 const REVIEW_TABLE = 'fqcScreeningReviews';
 const ALL_RECORDS = 'allRecords';
+/**
+ * 声明里带确认记录表的只有这两个动作（见 server/fqc-resources.ts 的 fqc 声明）。
+ * 它们的授权形状对不上就算加法没做成；ticket/configure/intake/submit/maintain 本来
+ * 就不带这张表，跳过它们不是失败，否则本来已经齐的环境也会非零退出。
+ */
+const REVIEW_ACTIONS = ['view', 'handle'] as const;
+const isReviewAction = (action: string): boolean =>
+  (REVIEW_ACTIONS as readonly string[]).includes(action);
 /** 只补这两个角色：其余角色按「没配就是拒绝」。 */
 const TARGET_ROLES = ['quality_manager', 'quality_inspector'] as const;
 type TargetRole = (typeof TARGET_ROLES)[number];
@@ -55,6 +63,8 @@ export interface ReviewScopeUpgradeReport {
   readonly unchanged: readonly string[];
   /** 库里没有这个角色。 */
   readonly missing: readonly string[];
+  /** 声明形状对不上、没法补的动作，逐条写「角色/fqc.动作: 原因」。 */
+  readonly invalid: readonly string[];
 }
 
 type UpgradeAuthorization = Pick<
@@ -147,6 +157,7 @@ export async function upgradeR002ReviewScope(
   const changed: string[] = [];
   const unchanged: string[] = [];
   const missing: string[] = [];
+  const invalid: string[] = [];
 
   for (const key of TARGET_ROLES) {
     const set = sets.find((entry) => entry.key === key);
@@ -169,6 +180,14 @@ export async function upgradeR002ReviewScope(
           action.policy?.type !== 'composite' ||
           action.policy.scopes === undefined
         ) {
+          // 本该带确认记录表的动作没有复合范围，硬塞一个范围键会被启动扫描拒掉。
+          if (isReviewAction(action.action)) {
+            const entry = `${key}/fqc.${action.action}: action has no composite policy with data scopes`;
+            invalid.push(entry);
+            logger.info(
+              `[r002-review-scope] ${key}: declaration mismatch: ${entry}; nothing written`,
+            );
+          }
           continue;
         }
         if (Object.hasOwn(action.policy.scopes, REVIEW_TABLE)) {
@@ -183,6 +202,13 @@ export async function upgradeR002ReviewScope(
         if (
           !definition?.dataScopes?.some((scope) => scope.key === REVIEW_TABLE)
         ) {
+          if (isReviewAction(action.action)) {
+            const entry = `${key}/fqc.${action.action}: fqc.${action.action} has no data scope ${REVIEW_TABLE} in the current declaration`;
+            invalid.push(entry);
+            logger.info(
+              `[r002-review-scope] ${key}: declaration mismatch: ${entry}; nothing written`,
+            );
+          }
           continue;
         }
         action.policy.scopes[REVIEW_TABLE] = ALL_RECORDS;
@@ -218,9 +244,10 @@ export async function upgradeR002ReviewScope(
   logger.info(
     `[r002-review-scope] changed: ${changed.join(',') || '(none)'}; ` +
       `already current: ${unchanged.join(',') || '(none)'}; ` +
-      `missing: ${missing.join(',') || '(none)'}`,
+      `missing: ${missing.join(',') || '(none)'}; ` +
+      `invalid: ${invalid.join(',') || '(none)'}`,
   );
-  return { targets: [...TARGET_ROLES], changed, unchanged, missing };
+  return { targets: [...TARGET_ROLES], changed, unchanged, missing, invalid };
 }
 
 interface KnowledgeActionLike {
@@ -364,6 +391,46 @@ export interface R002UpgradeReport {
   readonly knowledgeAccess: KnowledgeAccessUpgradeReport;
 }
 
+/**
+ * 加法只要有一条没做成就非零退出。报告在 `upgradeR002` 里已经打印完，前面生效的
+ * 授权保持原样；角色不存在、`view` / `handle` 的声明形状对不上都是加法失败，
+ * 「本来就已经有了」不是。部署脚本按退出码
+ * 判断升级是否完成，静默跳过会让它以为升级成功，而两个质量角色仍然 403。
+ */
+export function assertR002AdditionsSucceeded(report: R002UpgradeReport): void {
+  const failed: string[] = [];
+  if (report.reviewScope.missing.length > 0) {
+    failed.push(`review scope: missing ${report.reviewScope.missing.join(', ')}`);
+  }
+  if (report.reviewScope.invalid.length > 0) {
+    failed.push(
+      `review scope: declaration mismatch ${report.reviewScope.invalid.join(', ')}`,
+    );
+  }
+  if (report.knowledgeAccess.missing.length > 0) {
+    failed.push(
+      `knowledge access: missing ${report.knowledgeAccess.missing.join(', ')}`,
+    );
+  }
+  if (failed.length === 0) {
+    return;
+  }
+  throw new CommandError(
+    `R-002: additions failed for ${failed.join(' and ')}; see the [r002-review-scope] not found / declaration mismatch lines above (each names the fqc action and why). Fix the named role or action declaration, reload and rerun pnpm nocobase authz upgrade-r002.`,
+    {
+      code: 'R002_ADDITIONS_FAILED',
+      suggestions: ['Reload and rerun pnpm nocobase authz upgrade-r002'],
+      details: {
+        reviewScope: {
+          missing: [...report.reviewScope.missing],
+          invalid: [...report.reviewScope.invalid],
+        },
+        knowledgeAccess: [...report.knowledgeAccess.missing],
+      },
+    },
+  );
+}
+
 /** `authz upgrade-r002` 的完整步骤：先补确认记录的范围，再补知识库页面与档位。 */
 export async function upgradeR002(
   authz: UpgradeAuthorization,
@@ -394,9 +461,12 @@ export default class AuthzUpgradeR002 extends AppCommand {
       const authz = app.container.resolve(
         authorizationToken,
       ) as unknown as UpgradeAuthorization;
-      return upgradeR002(authz, {
+      const report = await upgradeR002(authz, {
         info: (message) => this.log(message),
       });
+      // 报告已打印完；加法没做成时非零退出，别让部署脚本把静默跳过当成成功。
+      assertR002AdditionsSucceeded(report);
+      return report;
     });
   }
 }

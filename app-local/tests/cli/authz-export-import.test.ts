@@ -8,6 +8,7 @@ import { expect, test, vi } from 'vitest';
 import AuthzExport from '../../cli/authz/export.js';
 import AuthzImport from '../../cli/authz/import.js';
 import AuthzUpgradeR002 from '../../cli/authz/upgrade-r002.js';
+import AuthzUpgradeR025 from '../../cli/authz/upgrade-r025.js';
 import AuthzUpgradeR026 from '../../cli/authz/upgrade-r026.js';
 import cliPlugins from '../../cli/plugins.js';
 import {
@@ -32,6 +33,7 @@ test('R-013: the authz commands are registered under their own topic', () => {
     'import',
     'upgrade-r002',
     'upgrade-r003',
+    'upgrade-r025',
     'upgrade-r026',
   ]);
   expect(plugin!.commands.export).toBe(AuthzExport);
@@ -42,6 +44,9 @@ test('R-013: the authz commands are registered under their own topic', () => {
   // R-026 的升级步骤：合并之后在已有环境里跑一次，补三个角色的反馈单页与两个新动作。
   expect(plugin!.commands['upgrade-r026']).toBe(AuthzUpgradeR026);
   expect(AuthzUpgradeR026.description).toContain('feedback page');
+  // R-025 的升级步骤：给已有环境的 staff 补班次只读授权，可单独跑、可重跑。
+  expect(plugin!.commands['upgrade-r025']).toBe(AuthzUpgradeR025);
+  expect(AuthzUpgradeR025.description).toContain('shifts.view');
 });
 
 test('R-013: the import help explains how to unblock rules that exchange resources', () => {

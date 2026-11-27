@@ -834,6 +834,9 @@ test('R-003 S2: the view reads the seven new ticket columns but never the two st
         'statusChangedAt',
         'lifecycleVersion',
         'lifecycleDefinition',
+        'departmentTitle',
+        'assigneeName',
+        'canTransition',
       ].sort(),
     );
     for (const field of ['ownerDepartment', 'dueAt']) {

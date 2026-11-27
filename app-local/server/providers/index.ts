@@ -12,8 +12,10 @@ import NotificationManagementProvider from './notification-management.js';
 import QualityDraftingProvider from './quality-drafting.js';
 import QualityModelGatewayProvider from './quality-model-gateway.js';
 import QualityScreeningProvider from './quality-screening.js';
+import ShiftsProvider from './shifts.js';
 import StaffBaselineProvider from './staff-baseline.js';
 import SubmissionProvider from './submission.js';
+import TicketNotificationsProvider from './ticket-notifications.js';
 import type { ApplicationServiceProviderConstructor } from '@nocobase/app-server/application';
 
 const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
@@ -25,6 +27,8 @@ const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
   // R-011：读服务、内部服务与写服务。放在用户管理服务之后由容器按需解析，顺序无关。
   EmployeesProvider,
   EmployeeMutationsProvider,
+  // R-025：内部只读服务、HTTP 读服务与写服务。无调用方时也能被容器解析。
+  ShiftsProvider,
   AuthorizationResourcesProvider,
   NotificationManagementProvider,
   QualityScreeningProvider,
@@ -35,6 +39,8 @@ const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
   KnowledgeAccessProvider,
   // R-003 S5：唯一的 lifecycle 运行时（R-017 未落地，由本片带上）。
   LifecycleProvider,
+  // R-003 S8：五张站内通知模板，效果在流转/派单提交之后才发。
+  TicketNotificationsProvider,
   // R-026：建「人」的账号时指派基线角色 staff。放在建演示账户之前：它们也是建人。
   StaffBaselineProvider,
   DevAccountSwitcherProvider,

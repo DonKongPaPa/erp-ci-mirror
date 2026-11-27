@@ -754,3 +754,99 @@ test('R-003 升级：两处收窄都做成时命令以 0 退出', async ({ app }
     ),
   ).toEqual({ fqcTickets: 'org.myDepartmentsAndBelow' });
 });
+
+test('R-003 升级：角色缺失时加法没做成，命令非零退出且报告先打印完', async ({
+  app,
+  connection,
+}) => {
+  const authz = app.container.resolve(authorizationToken);
+  await connection.query
+    .deleteFrom('authorizationPermissionSets')
+    .where('key', '=', 'quality_inspector')
+    .execute();
+  expect(
+    await authz.permissionSets.get('quality_inspector'),
+    '前置条件：角色确实不存在',
+  ).toBeUndefined();
+
+  const command = await runUpgradeCommand(authz);
+  expect(
+    command.exitCode ?? 0,
+    '加法没做成时命令必须非零退出，部署脚本才能发现',
+  ).toBeGreaterThan(0);
+  const error = String(command.error ?? '');
+  expect(error).toMatch(/role grants/u);
+  expect(error).toMatch(/quality_inspector/u);
+  expect(error).toMatch(/rerun/u);
+  expect(command.stdout).toContain('[r003] quality_inspector: not found; skipped');
+  expect(command.stdout, '退出前加法报告要打印完').toContain('[r003] added:');
+  expect(command.stdout).toContain('[r003] skipped (already current):');
+  expect(command.stdout).toContain('[r003-handle] added:');
+});
+
+test('R-003 升级：声明对不上时加法没做成，命令非零退出且报告先打印完', async ({
+  app,
+}) => {
+  const authz = app.container.resolve(authorizationToken);
+  const realGetAction = authz.compositeResources.getAction.bind(
+    authz.compositeResources,
+  );
+  // 只让「处理工单」的声明消失：加法因声明对不上而跳过；收窄用的动作声明不动。
+  const spy = vi
+    .spyOn(authz.compositeResources, 'getAction')
+    .mockImplementation((id, action) =>
+      action === 'ticket' ? undefined : realGetAction(id, action),
+    );
+  try {
+    const command = await runUpgradeCommand(authz);
+    expect(
+      command.exitCode ?? 0,
+      '加法因声明对不上而没做成时命令必须非零退出',
+    ).toBeGreaterThan(0);
+    const error = String(command.error ?? '');
+    expect(error).toMatch(/role grants/u);
+    expect(error).toMatch(/declaration mismatch/u);
+    expect(error).toMatch(/rerun/u);
+    expect(command.stdout).toContain(
+      '[r003] quality_manager: declaration mismatch:',
+    );
+    expect(command.stdout, '退出前加法报告要打印完').toContain('[r003] added:');
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test('R-003 升级：加法都做成、重跑本来就齐时命令以 0 退出', async ({ app }) => {
+  const authz = app.container.resolve(authorizationToken);
+  for (const key of QUALITY) {
+    await stripNewActions(authz, key);
+  }
+  await stripHandleRouting(authz);
+
+  const first = await runUpgradeCommand(authz);
+  expect(first.error, `命令不该报错：${String(first.error)}`).toBeUndefined();
+  expect(first.exitCode ?? 0, '全部补上时以 0 退出').toBe(0);
+  const report = first.result as R003UpgradeReport | undefined;
+  expect(report?.grants.changed.sort()).toEqual([...QUALITY].sort());
+  expect(report?.handleRouting.changed.sort()).toEqual([...QUALITY].sort());
+  expect(report?.grants.missing).toEqual([]);
+  expect(report?.grants.invalid).toEqual([]);
+  expect(report?.handleRouting.invalid).toEqual([]);
+
+  const revisions = await Promise.all(
+    QUALITY.map(async (key) => (await authz.permissionSets.get(key))?.revision),
+  );
+  const second = await runUpgradeCommand(authz);
+  expect(second.error, `重跑不该报错：${String(second.error)}`).toBeUndefined();
+  expect(second.exitCode ?? 0, '本来就齐时以 0 退出').toBe(0);
+  const again = second.result as R003UpgradeReport | undefined;
+  expect(again?.grants.changed).toEqual([]);
+  expect(again?.grants.unchanged.sort()).toEqual([...QUALITY].sort());
+  expect(again?.handleRouting.unchanged.sort()).toEqual([...QUALITY].sort());
+  expect(
+    await Promise.all(
+      QUALITY.map(async (key) => (await authz.permissionSets.get(key))?.revision),
+    ),
+    '重跑不该改版本号',
+  ).toEqual(revisions);
+});
