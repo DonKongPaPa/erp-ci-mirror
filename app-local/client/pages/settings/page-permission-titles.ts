@@ -33,4 +33,8 @@ export const pagePermissionTitles: PagePermissionTitles = {
   unitNew: 'items.units.newTitle',
   unitEdit: 'items.units.editTitle',
   categoryNew: 'items.categories.newTitle',
-  categoryEdit: 'items.categories.editTitle',};
+  categoryEdit: 'items.categories.editTitle',
+  // R-021 / R-022：采购订单、销售订单的子页与对话框继承列表页的页面授权，权限清单里要有可读的名字。
+  purchaseOrderReceipt: 'purchaseOrders.receiptTitle',
+  salesOrderIssue: 'salesOrders.receiptTitle',
+};

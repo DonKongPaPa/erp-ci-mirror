@@ -188,6 +188,20 @@ const itemsPage = {
   resource: { type: 'page', id: 'items' },
   actions: [{ action: 'access' }],
 };
+/**
+ * R-021 / R-022 页面片（《基座ERP前端设计》1.3）：采购订单、销售订单各一个页面授权 id。
+ * 采购只进采购订单、销售只进销售订单（两边互不相通是授权事实）；页面 id 与路由的 `authz.resource.id`
+ * 由守门测试钉在一起。存量环境跑 `pnpm nocobase authz upgrade-r021-page`。
+ */
+const purchaseOrdersPage = {
+  resource: { type: 'page', id: 'purchaseOrders' },
+  actions: [{ action: 'access' }],
+};
+const salesOrdersPage = {
+  resource: { type: 'page', id: 'salesOrders' },
+  actions: [{ action: 'access' }],
+};
+
 
 /**
  * R-021/R-022：订单六个动作各成一条授权；没有删除。采购另拿物料与仓库只读，
@@ -276,6 +290,7 @@ export const businessPermissionSets: readonly PermissionSet[] = [
   definePermissionSet('sales')
     .title({ key: 'permissionSets.business.sales', ns: NAMESPACE })
     .grant(partnersPage)
+    .grant(salesOrdersPage)
     .grant(warehousesPage)
     .grant(partnerGrant('customers'))
     .grant(salesOrderGrant)
@@ -286,6 +301,7 @@ export const businessPermissionSets: readonly PermissionSet[] = [
   definePermissionSet('purchase')
     .title({ key: 'permissionSets.business.purchase', ns: NAMESPACE })
     .grant(partnersPage)
+    .grant(purchaseOrdersPage)
     .grant(warehousesPage)
     .grant(partnerGrant('suppliers'))
     .grant(purchaseOrderGrant)

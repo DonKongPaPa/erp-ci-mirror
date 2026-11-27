@@ -33,7 +33,10 @@ const enUS = {
     stock: 'Stock',
     inboundOrders: 'Inbound orders',
     outboundOrders: 'Outbound orders',
-    warehouses: 'Warehouses',  },
+    warehouses: 'Warehouses',
+    purchaseOrders: 'Purchase orders',
+    salesOrders: 'Sales orders',
+  },
   settings: {
     ...systemEnUS.settings,
     // The three child routes that inherit their parent's page grant still need permission titles.
@@ -845,6 +848,180 @@ const enUS = {
       },
     },
   },
+  // R-021 / R-022: copy shared by the purchase and sales order pages (ERP front-end design 2.4, 3.4, 3.5).
+  orderDocs: {
+    fields: {
+      orderNo: 'Order number',
+      orderDate: 'Order date',
+      submittedAt: 'Submitted at',
+      item: 'Item',
+      itemInLine: 'Item, line {{row}}',
+      unit: 'Unit',
+      price: 'Unit price',
+      priceInLine: 'Unit price, line {{row}}',
+      qty: 'Quantity',
+      qtyInLine: 'Quantity, line {{row}}',
+      amount: 'Amount',
+      totalAmount: 'Total amount',
+      lines: 'Lines',
+      lineCount: '{{count}} lines',
+      warehouse: 'Warehouse',
+    },
+    actions: {
+      cancelOrder: 'Cancel order',
+      addLine: 'Add line',
+      removeLine: 'Remove line {{row}}',
+      saveDraft: 'Save draft',
+      generate: 'Generate',
+    },
+    filters: {
+      status: 'Status',
+      createdFrom: 'Created from',
+      createdTo: 'Created to',
+      datePlaceholder: 'YYYY-MM-DD',
+    },
+    form: {
+      header: 'Header',
+      choose: 'Select',
+      dateHint: 'Write it as YYYY-MM-DD, for example 2026-11-27.',
+      linesHint:
+        'Choosing an item fills in its unit. The price is optional. An item can appear on only one line.',
+      linesEmpty: 'No lines yet. Select "Add line" to add one.',
+      inactiveItem: 'Deactivated',
+      notDraft: 'This order is no longer a draft, so it cannot be changed.',
+    },
+    receipt: { nothingLeft: 'No line has any quantity left to generate.' },
+    errors: {
+      partnerRequired: 'Choose a {{partner}}.',
+      dateRequired: 'Fill in the order date.',
+      dateInvalid: 'Write the date as YYYY-MM-DD, for example 2026-11-27.',
+      linesRequired: 'Add at least one line.',
+      itemRequired: 'Choose an item.',
+      itemDuplicated: 'An item can appear on only one line.',
+      qtyRequired: 'Fill in the quantity.',
+      qtyInvalid:
+        'The quantity must be greater than 0, with at most four decimals.',
+      priceInvalid: 'The price cannot be negative, with at most four decimals.',
+      warehouseRequired: 'Choose a warehouse.',
+      receiptRequired: 'At least one line needs a quantity greater than 0.',
+      receiptInvalid:
+        'Enter 0 or a positive quantity, with at most four decimals.',
+      receiptExceeds: 'The quantity cannot exceed what is not yet {{done}}.',
+    },
+    money: '¥{{amount}}',
+  },
+  // R-021: the purchase order pages (ERP front-end design 3.4).
+  purchaseOrders: {
+    title: 'Purchase orders',
+    description:
+      'Place purchase orders with suppliers. When the goods arrive the order creates an inbound document; stock changes only when that document is posted.',
+    newTitle: 'New purchase order',
+    newDescription:
+      'Place a purchase order with a supplier. Saving keeps it a draft and does not touch stock.',
+    editTitle: 'Edit purchase order',
+    editDescription:
+      '{{orderNo}} · Only a draft can be changed; it stays a draft after saving.',
+    detailTitle: 'Purchase order details',
+    receiptTitle: 'Create inbound document',
+    receiptDescription:
+      'Create a draft inbound document from the quantity not yet received against "{{orderNo}}". The warehouse keeper posts it on the inbound document.',
+    receiptLineTitle: 'Quantity to receive',
+    receiptHint:
+      'The quantity cannot exceed what is outstanding; lines left at 0 are not generated.',
+    searchLabel: 'Search by order number, note or supplier name',
+    empty: 'No purchase orders yet',
+    partnerLabel: 'Supplier',
+    status: {
+      draft: 'Draft',
+      ordered: 'Ordered',
+      partial: 'Partially received',
+      done: 'Received',
+      cancelled: 'Cancelled',
+    },
+    actions: {
+      submit: 'Place order',
+      make: 'Create inbound document',
+      done: 'Received',
+      remaining: 'Outstanding',
+      doneWord: 'received',
+    },
+    statusBar: {
+      draft:
+        'Draft. The lines can still be changed. They lock once the order is placed; only then can an inbound document be created.',
+      ordered:
+        'Ordered. When the goods arrive, create the inbound document. Stock changes only when it is posted.',
+      issued: 'An inbound document has been created and is not posted yet.',
+      partial:
+        '{{done}} of {{total}} lines received; {{remaining}} still outstanding.',
+      done: 'All {{total}} lines received.',
+      cancelled:
+        'This order was cancelled. Nothing more can be received against it.',
+    },
+    createdToast: 'Created purchase order "{{name}}"',
+    savedToast: 'Saved purchase order "{{name}}"',
+    submittedToast: 'Purchase order "{{name}}" placed',
+    cancelledToast: 'Cancelled purchase order "{{name}}"',
+    madeToast: 'Created inbound document "{{name}}" (draft)',
+    cancelTitle: 'Cancel purchase order "{{name}}"?',
+    cancelDescription:
+      'Nothing more can be received against it. An order that already has an inbound document cannot be cancelled.',
+  },
+  // R-022: the sales order pages (ERP front-end design 3.5); the same frame as purchase orders.
+  salesOrders: {
+    title: 'Sales orders',
+    description:
+      'Enter sales orders for customers. When the goods ship the order creates an outbound document; stock changes only when that document is posted.',
+    newTitle: 'New sales order',
+    newDescription:
+      'Enter a sales order for a customer. Saving keeps it a draft and does not touch stock.',
+    editTitle: 'Edit sales order',
+    editDescription:
+      '{{orderNo}} · Only a draft can be changed; it stays a draft after saving.',
+    detailTitle: 'Sales order details',
+    receiptTitle: 'Create outbound document',
+    receiptDescription:
+      'Create a draft outbound document from the quantity not yet shipped against "{{orderNo}}". The warehouse keeper posts it on the outbound document.',
+    receiptLineTitle: 'Quantity to ship',
+    receiptHint:
+      'The quantity cannot exceed what is not yet shipped; lines left at 0 are not generated.',
+    searchLabel: 'Search by order number, note or customer name',
+    empty: 'No sales orders yet',
+    partnerLabel: 'Customer',
+    status: {
+      draft: 'Draft',
+      ordered: 'Confirmed',
+      partial: 'Partially shipped',
+      done: 'Shipped',
+      cancelled: 'Cancelled',
+    },
+    actions: {
+      submit: 'Confirm',
+      make: 'Create outbound document',
+      done: 'Shipped',
+      remaining: 'Not shipped',
+      doneWord: 'shipped',
+    },
+    statusBar: {
+      draft:
+        'Draft. The lines can still be changed. They lock once the order is confirmed; only then can an outbound document be created.',
+      ordered:
+        'Confirmed. When the goods ship, create the outbound document. Stock changes only when it is posted.',
+      issued: 'An outbound document has been created and is not posted yet.',
+      partial:
+        '{{done}} of {{total}} lines shipped; {{remaining}} not shipped yet.',
+      done: 'All {{total}} lines shipped.',
+      cancelled:
+        'This order was cancelled. Nothing more can be shipped against it.',
+    },
+    createdToast: 'Created sales order "{{name}}"',
+    savedToast: 'Saved sales order "{{name}}"',
+    submittedToast: 'Sales order "{{name}}" confirmed',
+    cancelledToast: 'Cancelled sales order "{{name}}"',
+    madeToast: 'Created outbound document "{{name}}" (draft)',
+    cancelTitle: 'Cancel sales order "{{name}}"?',
+    cancelDescription:
+      'Nothing more can be shipped against it. An order that already has an outbound document cannot be cancelled.',
+  },
   // R-012: the department maintenance page. Rejections say what to do next, not just what failed.
   // R-020 仓库页（《基座ERP前端设计》3.3）。仓库不设详情：字段太少，列表里已经看全。
   warehouses: {
@@ -979,7 +1156,8 @@ const enUS = {
         'Stock increases only when an inbound order is posted. Types: purchase receipt (generated from a purchase order) and other inbound (entered by hand).',
       newTitle: 'New inbound order',
       editTitle: 'Edit inbound order',
-      formDescription: 'Saving keeps it a draft; stock does not change until it is posted.',
+      formDescription:
+        'Saving keeps it a draft; stock does not change until it is posted.',
       formHint:
         'Quantities are in the item’s base unit, with at most four decimals. Leave the batch empty if there is none.',
       draftStatus: 'This is a draft. Stock increases only when it is posted.',
@@ -998,7 +1176,8 @@ const enUS = {
         'Stock decreases only when an outbound order is posted. No line may exceed the on-hand quantity of its warehouse.',
       newTitle: 'New outbound order',
       editTitle: 'Edit outbound order',
-      formDescription: 'Saving keeps it a draft; stock does not change until it is posted.',
+      formDescription:
+        'Saving keeps it a draft; stock does not change until it is posted.',
       formHint:
         'When posted, no line may exceed the on-hand quantity of its warehouse; a line that does is marked in red and the document cannot be posted.',
       draftStatus: 'This is a draft. Stock decreases only when it is posted.',

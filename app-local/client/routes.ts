@@ -4,6 +4,8 @@ import { readAppClientRuntimeConfig } from '@nocobase/app-client/runtime';
 import { includeNotificationTemplateRoutes } from './pages/settings/notification-routes.js';
 import notificationLogRoutes from './pages/settings/notification-log-routes.js';
 import { ITEMS_PAGE_ID } from './pages/items/page-id.js';
+import { PURCHASE_ORDERS_PAGE_ID } from './pages/purchase-orders/page-id.js';
+import { SALES_ORDERS_PAGE_ID } from './pages/sales-orders/page-id.js';
 import { PARTNERS_PAGE_ID } from './pages/partners/page-id.js';
 import { SHIFTS_PAGE_ID } from './pages/shifts/page-id.js';
 import {
@@ -26,7 +28,9 @@ import {
   MessageSquareWarning,
   MonitorSmartphone,
   Package,
+  ReceiptText,
   ShieldAlert,
+  ShoppingCart,
   Users,
   Warehouse,
   Wrench,
@@ -199,7 +203,10 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
         breadcrumb: { title: 'navigation.inboundOrders' },
         componentLoader: () => import('./pages/inbound-orders/index.js'),
         name: 'inboundOrders',
-        navigation: { title: 'navigation.inboundOrders', icon: ArrowDownToLine },
+        navigation: {
+          title: 'navigation.inboundOrders',
+          icon: ArrowDownToLine,
+        },
         path: '/inbound-orders',
         // 新建、详情、编辑都是盖在列表上的子页，从这一页继承授权。
         children: [
@@ -259,7 +266,8 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
             presentation: { kind: 'child-page' },
             children: [
               {
-                componentLoader: () => import('./pages/outbound-orders/edit.js'),
+                componentLoader: () =>
+                  import('./pages/outbound-orders/edit.js'),
                 name: 'outboundOrderEdit',
                 path: 'edit',
                 breadcrumb: { title: 'stockDocs.out.editTitle' },
@@ -293,7 +301,10 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
             componentLoader: () => import('./pages/warehouses/edit.js'),
             name: 'warehouseEdit',
             path: ':warehouseId/edit',
-            presentation: { kind: 'dialog', title: 'warehouses.form.editTitle' },
+            presentation: {
+              kind: 'dialog',
+              title: 'warehouses.form.editTitle',
+            },
           },
         ],
       },
@@ -364,7 +375,106 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
             presentation: {
               kind: 'dialog',
               title: 'items.categories.editTitle',
-            },          },
+            },
+          },
+        ],
+      },
+    ],
+  },
+  {
+    // R-021 采购订单：一页，入口直接进页面（《基座ERP前端设计》1.1）。页面授权 `purchaseOrders` 只给采购与 root；
+    // 打开之后读、写再分 `purchaseOrders` 资源的各动作。另一类订单的角色一个动作都没有，也进不了这一页。
+    auth: 'required',
+    authz: {
+      resource: { type: 'page', id: PURCHASE_ORDERS_PAGE_ID },
+      action: 'access',
+    },
+    breadcrumb: { title: 'navigation.purchaseOrders' },
+    componentLoader: () => import('./pages/purchase-orders/index.js'),
+    name: 'purchaseOrders',
+    navigation: { title: 'navigation.purchaseOrders', icon: ShoppingCart },
+    path: '/purchase-orders',
+    children: [
+      {
+        // 新建是盖在列表上的子页。
+        name: 'purchaseOrderNew',
+        path: 'new',
+        breadcrumb: { title: 'purchaseOrders.newTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/purchase-orders/new.js'),
+      },
+      {
+        // 一张单的子页；编辑的子页与「生成入库单」的对话框叠在它上面，都从这一页继承授权。
+        name: 'purchaseOrder',
+        path: ':purchaseOrderId',
+        breadcrumb: { title: 'purchaseOrders.detailTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () =>
+          import('./pages/purchase-orders/detail/index.js'),
+        children: [
+          {
+            name: 'purchaseOrderEdit',
+            path: 'edit',
+            breadcrumb: { title: 'purchaseOrders.editTitle' },
+            presentation: { kind: 'child-page' },
+            componentLoader: () => import('./pages/purchase-orders/edit.js'),
+          },
+          {
+            name: 'purchaseOrderReceipt',
+            path: 'create-receipt',
+            presentation: {
+              kind: 'dialog',
+              title: 'purchaseOrders.receiptTitle',
+            },
+            componentLoader: () => import('./pages/purchase-orders/receipt.js'),
+          },
+        ],
+      },
+    ],
+  },
+  {
+    // R-022 销售订单：一页，入口直接进页面（《基座ERP前端设计》1.1）。页面授权 `salesOrders` 只给销售与 root；
+    // 打开之后读、写再分 `salesOrders` 资源的各动作。另一类订单的角色一个动作都没有，也进不了这一页。
+    auth: 'required',
+    authz: {
+      resource: { type: 'page', id: SALES_ORDERS_PAGE_ID },
+      action: 'access',
+    },
+    breadcrumb: { title: 'navigation.salesOrders' },
+    componentLoader: () => import('./pages/sales-orders/index.js'),
+    name: 'salesOrders',
+    navigation: { title: 'navigation.salesOrders', icon: ReceiptText },
+    path: '/sales-orders',
+    children: [
+      {
+        // 新建是盖在列表上的子页。
+        name: 'salesOrderNew',
+        path: 'new',
+        breadcrumb: { title: 'salesOrders.newTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/sales-orders/new.js'),
+      },
+      {
+        // 一张单的子页；编辑的子页与「生成出库单」的对话框叠在它上面，都从这一页继承授权。
+        name: 'salesOrder',
+        path: ':salesOrderId',
+        breadcrumb: { title: 'salesOrders.detailTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/sales-orders/detail/index.js'),
+        children: [
+          {
+            name: 'salesOrderEdit',
+            path: 'edit',
+            breadcrumb: { title: 'salesOrders.editTitle' },
+            presentation: { kind: 'child-page' },
+            componentLoader: () => import('./pages/sales-orders/edit.js'),
+          },
+          {
+            name: 'salesOrderIssue',
+            path: 'create-issue',
+            presentation: { kind: 'dialog', title: 'salesOrders.receiptTitle' },
+            componentLoader: () => import('./pages/sales-orders/receipt.js'),
+          },
         ],
       },
     ],

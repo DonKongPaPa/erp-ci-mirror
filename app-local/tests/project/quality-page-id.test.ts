@@ -8,6 +8,8 @@ import { FEEDBACK_PAGE_ID } from '../../client/pages/feedbacks/page-id.js';
 import { businessPermissionSets } from '../../database/main/seeds/202611240001_seed_business_permission_sets.js';
 
 import { ITEMS_PAGE_ID } from '../../client/pages/items/page-id.js';
+import { PURCHASE_ORDERS_PAGE_ID } from '../../client/pages/purchase-orders/page-id.js';
+import { SALES_ORDERS_PAGE_ID } from '../../client/pages/sales-orders/page-id.js';
 import { PARTNERS_PAGE_ID } from '../../client/pages/partners/page-id.js';
 import { SHIFTS_PAGE_ID } from '../../client/pages/shifts/page-id.js';
 
@@ -26,6 +28,11 @@ import {
 } from '../../client/pages/stock-docs/page-id.js';
 import { WAREHOUSES_PAGE_ID } from '../../client/pages/warehouses/page-id.js';
 import { ITEMS_PAGE_ID as COMMAND_ITEMS_PAGE_ID } from '../../cli/authz/upgrade-r019-page.js';
+import {
+  PURCHASE_ORDERS_PAGE_ID as COMMAND_PURCHASE_ORDERS_PAGE_ID,
+  SALES_ORDERS_PAGE_ID as COMMAND_SALES_ORDERS_PAGE_ID,
+} from '../../cli/authz/upgrade-r021-page.js';
+
 const appRoot = path.resolve(
   fileURLToPath(new URL('.', import.meta.url)),
   '../..',
@@ -69,10 +76,11 @@ describe('R-013 质量页的授权 id', () => {
       ),
     );
     // 质量页一条（R-013），知识库页一条（R-002），反馈单页一条（R-026），客户与供应商页一条字面量（R-014；
-    // 销售与采购各引用它一次，下面按解析后的结构数人头），物料与库存五页各一条（R-019 物料、R-020 四页）。
+    // 销售与采购各引用它一次，下面按解析后的结构数人头），物料与库存五页各一条（R-019 物料、R-020 四页），
+    // 采购订单页、销售订单页各一条（R-021 / R-022）。
     expect(
       seedPageIds.sort(),
-      'seed 里的页面授权应当有质量页、知识库页、反馈单页、客户与供应商页与物料与库存五页',
+      'seed 里的页面授权应当有质量页、知识库页、反馈单页、客户与供应商页、物料与库存五页、采购订单页与销售订单页',
     ).toEqual([
       'feedback',
       'inboundOrders',
@@ -80,10 +88,13 @@ describe('R-013 质量页的授权 id', () => {
       'knowledge',
       'outboundOrders',
       'partners',
+      'purchaseOrders',
       'quality',
+      'salesOrders',
       'stock',
       'warehouses',
     ]);
+
     const routePageIds = pageGrantIds(read('client', 'routes.ts'));
     expect(
       routePageIds,
@@ -133,7 +144,10 @@ describe('R-011 员工页的授权 id', () => {
         'outboundOrders',
         'warehouses',
         'items',
-      ]),    );
+        'purchaseOrders',
+        'salesOrders',
+      ]),
+    );
     expect(
       pageGrants.map(({ id }) => id),
       '员工页默认只有 root 能进：业务角色的 seed 不能给它授权',
@@ -246,5 +260,41 @@ describe('R-019 页面片的授权 id', () => {
         .map(() => set.key),
     );
     expect(writers).toEqual([]);
+  });
+});
+
+describe('R-021 / R-022 页面片的授权 id', () => {
+  it('采购订单、销售订单：路由、seed、升级命令三处是同一个 id，采购只进采购订单、销售只进销售订单', () => {
+    expect(PURCHASE_ORDERS_PAGE_ID).toBe('purchaseOrders');
+    expect(SALES_ORDERS_PAGE_ID).toBe('salesOrders');
+    expect(
+      COMMAND_PURCHASE_ORDERS_PAGE_ID,
+      '升级命令里的采购订单页 id 与页面不是同一个',
+    ).toBe(PURCHASE_ORDERS_PAGE_ID);
+    expect(
+      COMMAND_SALES_ORDERS_PAGE_ID,
+      '升级命令里的销售订单页 id 与页面不是同一个',
+    ).toBe(SALES_ORDERS_PAGE_ID);
+    const routes = read('client', 'routes.ts');
+    expect(routes, '采购订单路由没有用共享的页面 id 常量').toContain(
+      'id: PURCHASE_ORDERS_PAGE_ID',
+    );
+    expect(routes, '销售订单路由没有用共享的页面 id 常量').toContain(
+      'id: SALES_ORDERS_PAGE_ID',
+    );
+    const holders = businessPermissionSets.flatMap((set) =>
+      set.grants
+        .filter((grant) => grant.resource.type === 'page')
+        .filter((grant) => grant.resource.id === PURCHASE_ORDERS_PAGE_ID)
+        .map(() => set.key),
+    );
+    expect(holders.sort()).toEqual(['purchase']);
+    const salesHolders = businessPermissionSets.flatMap((set) =>
+      set.grants
+        .filter((grant) => grant.resource.type === 'page')
+        .filter((grant) => grant.resource.id === SALES_ORDERS_PAGE_ID)
+        .map(() => set.key),
+    );
+    expect(salesHolders.sort()).toEqual(['sales']);
   });
 });

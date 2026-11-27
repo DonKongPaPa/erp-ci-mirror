@@ -82,6 +82,16 @@ const itemsPageGrant = {
   resource: { type: 'page', id: 'items' },
   actions: [{ action: 'access' }],
 };
+/** R-021 / R-022 页面片：采购只进采购订单页，销售只进销售订单页。 */
+const purchaseOrdersPageGrant = {
+  resource: { type: 'page', id: 'purchaseOrders' },
+  actions: [{ action: 'access' }],
+};
+const salesOrdersPageGrant = {
+  resource: { type: 'page', id: 'salesOrders' },
+  actions: [{ action: 'access' }],
+};
+
 /** R-002：知识库的业务键是 `{ type: 'kb', id: 'kb.knowledge' }`，动作名带档位。 */
 const knowledgeGrant = (action: 'manage.related' | 'propose.related') => ({
   resource: { type: 'kb', id: 'kb.knowledge' },
@@ -278,21 +288,27 @@ const expectedRoles = {
     title: { key: 'permissionSets.business.sales', ns: 'app-local' },
     grants: [
       partnersPageGrant,
-      warehousesPageGrant,      customerGrant,
+      salesOrdersPageGrant,
+      warehousesPageGrant,
+      customerGrant,
       salesOrderGrant,
       orderItemRead,
       orderWarehouseRead,
-      itemsPageGrant,    ],
+      itemsPageGrant,
+    ],
   },
   purchase: {
     title: { key: 'permissionSets.business.purchase', ns: 'app-local' },
     grants: [
       partnersPageGrant,
-      warehousesPageGrant,      supplierGrant,
+      purchaseOrdersPageGrant,
+      warehousesPageGrant,
+      supplierGrant,
       purchaseOrderGrant,
       orderItemRead,
       orderWarehouseRead,
-      itemsPageGrant,    ],
+      itemsPageGrant,
+    ],
   },
 } as const;
 
@@ -374,12 +390,10 @@ test('R-017 S1: with the seed applied, staff and a roleless user are denied on a
   await authz.permissionSets.revoke(`user:${nobody}:staff`);
 
   const decision = (userId: string, table: string, action: string) =>
-    authz
-      .for({ principal: { type: 'user', id: userId } })
-      .authorize({
-        resource: { type: 'database.collection', id: table },
-        action,
-      });
+    authz.for({ principal: { type: 'user', id: userId } }).authorize({
+      resource: { type: 'database.collection', id: table },
+      action,
+    });
   const codes = (d: { reasons: readonly { code: string }[] }) =>
     d.reasons.map((reason) => reason.code);
 
