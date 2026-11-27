@@ -147,8 +147,8 @@ jobs:
     needs: changes
     # 只改了文档的推送走文档快道，单测线不启动。
     if: needs.changes.outputs.docs_only != 'true'
-    # 实测 7.5 分钟。给 3 倍余量，挂死时快速失败而不是白等 30 分钟。
-    timeout-minutes: 20
+    # 2026-11-27：并入基座 ERP 的 MVP 片之后，单测线在 4 核 runner 上超过 20 分钟（上一次全绿是 17.4 分钟），20 分钟的上限把作业掐成「取消」。提到 35 分钟；把单测线压回 15 分钟以内是 R-058 的活。
+    timeout-minutes: 35
     services:
       postgres:
         image: postgres:16
