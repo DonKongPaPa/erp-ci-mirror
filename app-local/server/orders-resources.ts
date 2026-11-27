@@ -28,7 +28,10 @@ const headerRead = (kind: 'purchase' | 'sales') => [
   'orderDate', 'status', 'remark', 'submittedAt', 'createdAt', 'updatedAt',
   'warehouseId', 'contactName', 'contactPhone', 'deliveryAddress',
   'settlementCode', 'projectCode', 'handlerUserId', 'totalQty', 'latestDeliveryDate',
-  ...(kind === 'sales' ? ['customerOrderNo'] : []),
+  // R-021 波 1 加片：请购单回链只在采购订单详情多这一列，可空。
+  ...(kind === 'purchase' ? ['purchaseRequestId'] : []),
+  // R-022 复刻波 1：报价转出的订单多一个来源列；只是追加，老客户端行为不变。
+  ...(kind === 'sales' ? ['customerOrderNo', 'quotationId'] : []),
 ] as const;
 /** 价格管控动作单独隔出来的列：没有它这些键在响应里不出现。 */
 const headerPriceRead = [
@@ -42,7 +45,7 @@ const headerUpdate = (kind: 'purchase' | 'sales') => [
   'orderDate', 'remark', 'status', 'submittedAt', 'updatedAt',
   'warehouseId', 'contactName', 'contactPhone', 'deliveryAddress',
   'settlementCode', 'projectCode', 'handlerUserId', 'discountAmount',
-  ...(kind === 'sales' ? ['customerOrderNo'] : []),
+  ...(kind === 'sales' ? ['customerOrderNo', 'quotationId'] : []),
 ] as const;
 const headerPriceWrite = [
   'discountAmount', 'totalQty', 'taxIncludedTotal', 'taxExcludedTotal', 'taxTotal', 'payableTotal',

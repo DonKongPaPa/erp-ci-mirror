@@ -16,6 +16,7 @@ import {
   DEPARTMENT_COLLECTIONS,
   departments as departmentsResource,
 } from '../department-resources.js';
+import { DOC_PRINT_RESOURCES } from '../doc-print-resources.js';
 import { DOC_FILE_COLLECTIONS } from '../doc-files-resources.js';
 import {
   expenses as expenseRecordsResource,
@@ -44,10 +45,27 @@ import {
   salesOrders as salesOrdersResource,
 } from '../orders-resources.js';
 import {
+  QUOTATION_COLLECTIONS,
+  quotations as quotationsResource,
+} from '../quotation-resources.js';
+import {
   ORDER_REVIEW_COLLECTIONS,
   orderReviews as orderReviewsResource,
 } from '../order-review-resources.js';
 import { SHIFT_COLLECTIONS, shifts as shiftsResource } from '../shift-resources.js';
+import {
+  STOCKTAKING_COLLECTIONS,
+  stocktakings as stocktakingsResource,
+} from '../stocktaking-resources.js';
+import {
+  TRANSFER_COLLECTIONS,
+  transfers as transfersResource,
+} from '../transfer-resources.js';
+import {
+  PURCHASE_REQUEST_COLLECTIONS,
+  purchaseRequests as purchaseRequestsResource,
+} from '../purchase-request-resources.js';
+import { PURCHASE_REQUEST_RECORD_ACCESS } from '../purchase-request-record-access.js';
 import { departmentServiceToken } from './departments.js';
 
 /**
@@ -87,10 +105,15 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
       ...ITEM_COLLECTIONS,
       ...INVENTORY_COLLECTIONS,
       ...ORDER_COLLECTIONS,
+      // R-022 复刻波 1：报价单头与明细两张表。
+      ...QUOTATION_COLLECTIONS,
       ...DOC_FILE_COLLECTIONS,
       ...FINANCE_COLLECTIONS,
       ...BIZ_DICT_COLLECTIONS,
       ...ORDER_REVIEW_COLLECTIONS,
+      ...STOCKTAKING_COLLECTIONS,
+      ...TRANSFER_COLLECTIONS,
+      ...PURCHASE_REQUEST_COLLECTIONS,
     ]) {
       authz.database.collections.add(collection);
     }
@@ -110,6 +133,8 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
     // R-021/R-022：采购与销售订单各一份资源，同样不做页面目录。
     authz.compositeResources.define(purchaseOrdersResource);
     authz.compositeResources.define(salesOrdersResource);
+    // R-022 复刻波 1：报价单资源六个动作，只声明、不做页面目录。
+    authz.compositeResources.define(quotationsResource);
     // R-072：字典与两个收窄的选项资源只声明，不做 ui.place —— 本片没有页面。
     authz.compositeResources.define(bizDictResource);
     authz.compositeResources.define(bizOptionsResource);
@@ -121,6 +146,14 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
     // R-064：评审资源只声明，不做 ui.place —— 本片没有页面；销售订单的 ledgerView
     // 动作已在 orders-resources.ts 的销售资源上追加。
     authz.compositeResources.define(orderReviewsResource);
+    // R-020 波 1：盘点与调拨只声明资源与动作，不做页面目录（页面随波 2）。
+    authz.compositeResources.define(stocktakingsResource);
+    authz.compositeResources.define(transfersResource);
+    // R-021 波 1 加片：请购单资源只声明、不 ui.place；staff 通过「仅本人」范围键收窄。
+    authz.compositeResources.define(purchaseRequestsResource);
+    // R-076：三类打印单据各两个动作（print / printPrice）；表沿用 inventory 已登记的
+    // stockDocs / stockDocLines，不重复登记，也不做页面目录（打印视图按 docType 自检动作）。
+    for (const resource of DOC_PRINT_RESOURCES) authz.compositeResources.define(resource);
     const departmentService = this.app.container.resolve(
       departmentServiceToken,
     );
@@ -128,6 +161,9 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
       authz.recordAccess.define(access);
     }
     for (const access of APPROVAL_RECORD_ACCESS) {
+      authz.recordAccess.define(access);
+    }
+    for (const access of PURCHASE_REQUEST_RECORD_ACCESS) {
       authz.recordAccess.define(access);
     }
     authz.ui.sections.add({

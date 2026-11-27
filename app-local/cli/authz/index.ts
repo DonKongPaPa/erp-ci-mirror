@@ -10,15 +10,19 @@ import AuthzUpgradeR019Page from './upgrade-r019-page.js';
 import AuthzUpgradeR019Price from './upgrade-r019-price.js';
 import AuthzUpgradeR020 from './upgrade-r020.js';
 import AuthzUpgradeR020Receive from './upgrade-r020-receive.js';
+import AuthzUpgradeR020Stocktake from './upgrade-r020-stocktake.js';
 import AuthzUpgradeR020Page from './upgrade-r020-page.js';
 import AuthzUpgradeR021 from './upgrade-r021.js';
 import AuthzUpgradeR021Price from './upgrade-r021-price.js';
 import AuthzUpgradeR021Page from './upgrade-r021-page.js';
+import AuthzUpgradeR021PurchaseRequest from './upgrade-r021-purchase-request.js';
+import AuthzUpgradeR022Quotation from './upgrade-r022-quotation.js';
 import AuthzUpgradeR026 from './upgrade-r026.js';
 import AuthzUpgradeR065 from './upgrade-r065.js';
 import AuthzUpgradeR064 from './upgrade-r064.js';
 import AuthzUpgradeR072 from './upgrade-r072.js';
 import AuthzUpgradeR025 from './upgrade-r025.js';
+import AuthzUpgradeR076 from './upgrade-r076.js';
 
 /**
  * `authz export` / `authz import`（R-013 验收第 8 条）。
@@ -54,6 +58,8 @@ const authzCli = defineCliPlugin({
     'upgrade-r020': AuthzUpgradeR020,
     // R-020 加片：给已有环境的仓管补收货/发货与库存价格只读动作。可单独跑、可重跑。
     'upgrade-r020-receive': AuthzUpgradeR020Receive,
+    // R-020 波 1：给仓管补盘点与调拨授权，给财务补监盘与盘点只读。
+    'upgrade-r020-stocktake': AuthzUpgradeR020Stocktake,
     // R-020 页面片：给已有环境的仓管补库存查询、入库单、出库单、仓库四页，给销售/采购补仓库页（先补业务授权）。可单独跑、可重跑。
     'upgrade-r020-page': AuthzUpgradeR020Page,
     // R-021/R-022：给已有环境的 purchase / sales 补订单授权与只读引用。可单独跑、可重跑。
@@ -68,6 +74,12 @@ const authzCli = defineCliPlugin({
     'upgrade-r072': AuthzUpgradeR072,
     // R-021 / R-022 页面片：给已有环境的采购/销售补订单页的页面授权（先补业务授权）。可单独跑、可重跑。
     'upgrade-r021-page': AuthzUpgradeR021Page,
+    // R-021 波 1 加片：给三个现成角色补请购单动作，可单独跑、可重跑。
+    'upgrade-r021-purchase-request': AuthzUpgradeR021PurchaseRequest,
+    // R-022 复刻波 1：给已有环境的 sales 补报价单六个动作，可单独跑、可重跑。
+    'upgrade-r022-quotation': AuthzUpgradeR022Quotation,
+    // R-076：给已有环境的仓管、采购、销售补三类单据的打印授权（仓管不给价格）。可单独跑、可重跑。
+    'upgrade-r076': AuthzUpgradeR076,
   },
 });
 

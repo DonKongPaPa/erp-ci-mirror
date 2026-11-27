@@ -242,6 +242,7 @@ export interface PartnerMutations {
     input: CreatePartnerInput,
     sides: readonly PartnerSide[],
     actorId?: string,
+    transaction?: DatabaseConnection,
   ): Promise<PartnerView>;
   update(
     id: string,
@@ -252,6 +253,7 @@ export interface PartnerMutations {
   createContact(
     partnerId: string,
     input: CreateContactInput,
+    transaction?: DatabaseConnection,
   ): Promise<ContactRecord>;
   updateContact(
     partnerId: string,
@@ -528,12 +530,21 @@ export class DatabasePartnerMutations implements PartnerMutations {
     }
   }
 
+  private async inTransaction<T>(
+    transaction: DatabaseConnection | undefined,
+    work: (tx: DatabaseConnection) => Promise<T>,
+  ): Promise<T> {
+    if (transaction !== undefined) return await work(transaction);
+    return await this.database.transaction(work);
+  }
+
   public async create(
     input: CreatePartnerInput,
     sides: readonly PartnerSide[],
     actorId?: string,
+    transaction?: DatabaseConnection,
   ): Promise<PartnerView> {
-    return await this.database.transaction(async (tx) => {
+    return await this.inTransaction(transaction, async (tx) => {
       if (!input.isCustomer && !input.isSupplier) {
         return fail('kind-required');
       }
@@ -674,16 +685,15 @@ export class DatabasePartnerMutations implements PartnerMutations {
         .updateOne({ filter: { id }, values });
       return project(view(record), sides, await names(record));
     };
-    return transaction === undefined
-      ? await this.database.transaction(work)
-      : await work(transaction);
+    return await this.inTransaction(transaction, work);
   }
 
   public async createContact(
     partnerId: string,
     input: CreateContactInput,
+    transaction?: DatabaseConnection,
   ): Promise<ContactRecord> {
-    return await this.database.transaction(async (tx) => {
+    return await this.inTransaction(transaction, async (tx) => {
       await this.requireActive(tx, partnerId);
       if (input.isPrimary === true) {
         await this.clearPrimary(tx, partnerId);

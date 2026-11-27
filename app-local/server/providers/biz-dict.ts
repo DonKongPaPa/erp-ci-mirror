@@ -322,22 +322,31 @@ export class DatabaseBizDictReader implements BizDictReader {
     return row === undefined ? undefined : view(row);
   }
 
+  private async inTransaction<T>(
+    transaction: DatabaseConnection | undefined,
+    work: (tx: DatabaseConnection) => Promise<T>,
+  ): Promise<T> {
+    if (transaction !== undefined) return await work(transaction);
+    return await this.database.transaction(work);
+  }
+
   public async create(
     input: BizDictCreateInput,
     actorId: string,
+    transaction?: DatabaseConnection,
   ): Promise<BizDictEntry> {
     const dictType = assertDictType(input.dictType);
     assertApplicableFields(dictType, input);
     assertEntryValues(input);
-    const existing = await this.database
-      .repository<StoredEntry>('bizDictEntries')
-      .findOne({ filter: { dictType, code: input.code } });
-    if (existing !== undefined) {
-      fail('code-taken', input.code);
-    }
     const now = new Date().toISOString();
     try {
-      return await this.database.transaction(async (tx) => {
+      return await this.inTransaction(transaction, async (tx) => {
+        const existing = await tx
+          .repository<StoredEntry>('bizDictEntries')
+          .findOne({ filter: { dictType, code: input.code } });
+        if (existing !== undefined) {
+          fail('code-taken', input.code);
+        }
         await this.clearDefault(tx, dictType);
         const values = {
           id: randomUUID(),
@@ -371,12 +380,13 @@ export class DatabaseBizDictReader implements BizDictReader {
   public async update(
     id: string,
     patch: BizDictUpdateInput,
+    transaction?: DatabaseConnection,
   ): Promise<BizDictEntry> {
     const keys = Object.keys(patch) as readonly (keyof BizDictUpdateInput)[];
     if (keys.length === 0) {
       fail('empty-patch');
     }
-    return await this.database.transaction(async (tx) => {
+    return await this.inTransaction(transaction, async (tx) => {
       const repo = tx.repository<StoredEntry>('bizDictEntries');
       const row = await repo.findOne({ filter: { id } });
       if (row === undefined) {

@@ -19,6 +19,17 @@ const EXECUTED_SEED_HASHES: Readonly<Record<string, string>> = {
     '915cd1f645c8dacd2d2a3c427b72cc259f49868856dd42044f373e8536c87e43',
   '202611280003_seed_order_review_grants.ts':
     '63aa0da7404fd9a724142198eec68772ef524feed7d2d8b3ab426299624bc4fc',
+  '202611280004_seed_finance_page_grants.ts':
+    'dc602bb042b79ef1795f6dd4f5c3958b62ed6c25e5744b0c50be57f7abf2cc6a',
+  '202611280006_seed_doc_print_grants.ts':
+    '772a744596e1a05ce1121e958aa82f55f3c4d713f36e8e0d004737fb1e9e1304',
+  '202611280007_seed_purchase_request_grants.ts':
+    'e2dece0caef2aa018bbb6a99639e0116b2ef5447e31f523dbdf63385bc3d3f34',
+  // R-022 复刻波 1：报价授权新种子，随本片入库后同样不可改。
+  '202611280009_seed_quotation_grants.ts':
+    'cceff5aba936d20bd9d6876ce417de8dea25538ad041ee3ce711140c998de0b3',
+  '202611280010_seed_stocktaking_transfer_grants.ts':
+    '4e6cca552126636f55e0081ed53df61ca205c787ee0b907727dbeab0ac0edcea',
 };
 
 const RULE =

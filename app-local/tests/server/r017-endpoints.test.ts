@@ -359,6 +359,122 @@ test('候选人：只有本任务审批人能调，只回三列，转交与加�
   expect(String(second!.id)).not.toBe('');
 }, TIMEOUT);
 
+const REVIEWER_ACTIONS = ['approve', 'reject', 'return', 'delegate', 'add-sign'];
+
+test('审批人能读有本人任务的详情；处理后仍能读，但五个可用动作不再列出', async ({
+  testApp,
+  app,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const applicant = await makeUser(admin, testApp, app, 'staff');
+  const approver = await makeUser(admin, testApp, app, 'staff');
+  const created = await createApproval(applicant.session, [approver.id]);
+  const id = String(created.id);
+
+  const asApprover = await expectStatus(
+    await approver.session.fetch(`/approvals/${id}`, read()),
+    200,
+  );
+  const detail = (asApprover.data ?? {}) as Row;
+  expect(detail.id).toBe(id);
+  expect(new Set(detail.available)).toEqual(new Set(REVIEWER_ACTIONS));
+  expect((detail.available as string[]).filter((name) => name === 'withdraw' || name === 'abort')).toHaveLength(0);
+  const rounds = (detail.rounds ?? []) as Row[];
+  const records = (detail.records ?? []) as Row[];
+  expect(records.length).toBeGreaterThan(0);
+  expect(new Set(records.map((row) => row.roundId))).toEqual(new Set(rounds.map((row) => row.id)));
+
+  const asApplicant = await expectStatus(
+    await applicant.session.fetch(`/approvals/${id}`, read()),
+    200,
+  );
+  const applicantAvailable = ((asApplicant.data as Row).available ?? []) as string[];
+  expect(applicantAvailable).toContain('withdraw');
+  expect(applicantAvailable).toContain('abort');
+  for (const name of REVIEWER_ACTIONS) expect(applicantAvailable).not.toContain(name);
+
+  const [task] = await tasksOf(approver.session);
+  await expectStatus(
+    await approver.session.fetch(`/approvals/tasks/${String(task!.id)}/approve`, init({ comment: '同意' })),
+    200,
+  );
+  const after = await expectStatus(
+    await approver.session.fetch(`/approvals/${id}`, read()),
+    200,
+  );
+  expect(((after.data as Row).available ?? []) as string[]).toEqual([]);
+}, TIMEOUT);
+
+test('单据不在进行中时，审批人仍能读但五个可用动作不列出', async ({
+  testApp,
+  app,
+  connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const applicant = await makeUser(admin, testApp, app, 'staff');
+  const approver = await makeUser(admin, testApp, app, 'staff');
+  const created = await createApproval(applicant.session, [approver.id]);
+  const id = String(created.id);
+  await connection.query
+    .updateTable('approvals')
+    .set({ status: 'aborted' })
+    .where('id', '=', id)
+    .execute();
+  const detail = await expectStatus(
+    await approver.session.fetch(`/approvals/${id}`, read()),
+    200,
+  );
+  for (const name of REVIEWER_ACTIONS)
+    expect(((detail.data as Row).available ?? []) as string[]).not.toContain(name);
+}, TIMEOUT);
+
+test('既非申请人也无任务的人读详情 404，与不存在的编号同形', async ({
+  testApp,
+  app,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const applicant = await makeUser(admin, testApp, app, 'staff');
+  const approver = await makeUser(admin, testApp, app, 'staff');
+  const outsider = await makeUser(admin, testApp, app, 'staff');
+  const nobody = await makeUser(admin, testApp, app, 'none');
+  const created = await createApproval(applicant.session, [approver.id]);
+  const id = String(created.id);
+  const missingId = `no-such-id-${marker()}`;
+  for (const who of [outsider, nobody]) {
+    const missingResponse = await who.session.fetch(`/approvals/${missingId}`, read());
+    const foreignResponse = await who.session.fetch(`/approvals/${id}`, read());
+    expect(foreignResponse.status).toBe(404);
+    expect(missingResponse.status).toBe(404);
+    const missing = await bodyOf(missingResponse);
+    const foreign = await bodyOf(foreignResponse);
+    expect(foreign._text).toBe(missing._text);
+  }
+}, TIMEOUT);
+
+test('既是申请人又是审批人时取并集，记录只多 roundId 一列', async ({
+  testApp,
+  app,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const applicant = await makeUser(admin, testApp, app, 'staff');
+  const created = await createApproval(applicant.session, [applicant.id]);
+  const id = String(created.id);
+  const detail = await expectStatus(
+    await applicant.session.fetch(`/approvals/${id}`, read()),
+    200,
+  );
+  const data = (detail.data ?? {}) as Row;
+  const available = (data.available ?? []) as string[];
+  for (const name of [...REVIEWER_ACTIONS, 'withdraw', 'abort']) expect(available).toContain(name);
+  const records = (data.records ?? []) as Row[];
+  expect(records.length).toBeGreaterThan(0);
+  for (const record of records) {
+    expect(Object.keys(record)).toContain('roundId');
+    expect(Object.keys(record)).not.toContain('assigneeId');
+    expect(typeof record.roundId).toBe('string');
+  }
+}, TIMEOUT);
+
 test('并发：两个审批人同时处理同一任务，只有一个成功', async ({
   testApp,
   app,

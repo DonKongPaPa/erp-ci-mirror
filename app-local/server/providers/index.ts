@@ -6,6 +6,7 @@ import AuthorizationResourcesProvider from './authorization-resources.js';
 import BizDictProvider from './biz-dict.js';
 import CodesProvider from './codes.js';
 import DocFilesProvider from './doc-files.js';
+import DocPrintProvider from './doc-print.js';
 import DepartmentMutationsProvider from './department-mutations.js';
 import DepartmentProvider from './departments.js';
 import DevToolsGuardProvider from './dev-tools-guard.js';
@@ -13,12 +14,15 @@ import EmployeesProvider from './employee-service.js';
 import FinanceProvider from './finance.js';
 import EmployeeMutationsProvider from './employees.js';
 import FeedbackReminderProvider from './feedback-reminder.js';
+import ImportToolProvider from './import-tool.js';
 import InventoryProvider from './inventory.js';
 import ItemsProvider from './items.js';
 import KnowledgeAccessProvider from './knowledge-access.js';
 import LifecycleProvider from './lifecycles.js';
 import NotificationManagementProvider from './notification-management.js';
 import OrdersProvider from './orders.js';
+import PurchaseRequestsProvider from './purchase-requests.js';
+import QuotationsProvider from './quotations.js';
 import OrderLedgerProvider from './order-ledger.js';
 import OrderReviewsProvider from './order-reviews.js';
 import PartnersProvider from './partners.js';
@@ -27,6 +31,8 @@ import QualityModelGatewayProvider from './quality-model-gateway.js';
 import QualityScreeningProvider from './quality-screening.js';
 import ShiftsProvider from './shifts.js';
 import StaffBaselineProvider from './staff-baseline.js';
+import StocktakingProvider from './stocktaking.js';
+import TransferProvider from './transfer.js';
 import SubmissionProvider from './submission.js';
 import TicketNotificationsProvider from './ticket-notifications.js';
 import type { ApplicationServiceProviderConstructor } from '@nocobase/app-server/application';
@@ -40,6 +46,8 @@ const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
   CodesProvider,
   // R-021 加片：单据附件的盘存储与绑定服务；无调用方时也能被容器解析。
   DocFilesProvider,
+  // R-076：打印数据与痕迹的只读/追加服务；无调用方时也能被容器解析。
+  DocPrintProvider,
   // R-026：七天提醒，进程内每天一次的扫单任务。
   FeedbackReminderProvider,
   DepartmentProvider,
@@ -57,8 +65,17 @@ const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
   ItemsProvider,
   // R-020：仓库、单据、现存量与流水的读服务与写服务；过账在写服务里取行锁。
   InventoryProvider,
+  // R-020 波 1：盘点与调拨复用库存过账，登记顺序无关。
+  StocktakingProvider,
+  TransferProvider,
+  // R-068：导入工具，进程内令牌 + 三步端点共用的写服务；无页面资源、无种子。
+  ImportToolProvider,
   // R-021/R-022：订单读写服务；生成单据复用库存写服务，回写由 order-progress 挂在过账事务里。
   OrdersProvider,
+  // R-021 波 1 加片：请购单读写服务；submit 建审批单，终态回写挂在 lifecycle 回调上。
+  PurchaseRequestsProvider,
+  // R-022 复刻波 1：报价单读写服务；转单复用 OrdersProvider 的建单服务。顺序无关。
+  QuotationsProvider,
   // R-072：业务字典的读服务与写服务；assertActiveCodes 供各单据片共用。无调用方时也可解析。
   BizDictProvider,
   // R-064：订单评审的读写服务与总台账的只读投影；无调用方时也能被容器解析。

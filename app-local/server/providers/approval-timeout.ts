@@ -1,6 +1,7 @@
 import type { Application } from '@nocobase/app-server/application';
 import { jobExecutorServiceToken } from '@nocobase/app-server/jobs';
 import { loggingToken } from '@nocobase/app-server/logging';
+import { notificationServiceToken } from '@nocobase/app-plugin-notification/server';
 import { databaseManagerToken } from '@nocobase/db';
 import type { ScheduleExecutor } from '@nocobase/jobs';
 import { ServiceProvider } from '@nocobase/service-provider';
@@ -31,6 +32,8 @@ export default class ApprovalTimeoutProvider extends ServiceProvider<Application
       !container.has(databaseManagerToken) ||
       !container.has(jobExecutorServiceToken) ||
       !container.has(approvalNotifierToken) ||
+      // 没有通知插件的应用（例如最小运行时）发不出提醒，安静跳过。
+      !container.has(notificationServiceToken) ||
       !container.has(lifecycleRuntimeToken)
     ) {
       return;
@@ -57,9 +60,13 @@ export default class ApprovalTimeoutProvider extends ServiceProvider<Application
       payload: {},
       execute: async () => {
         try {
+          const connection = database.connection();
+          // 没有审批表的应用按小时扫只会反复报 RepositoryError；开扫前查一次，
+          // 不在注册表里就整趟跳过，也不告警。
+          if (!(await connection.collections.get('approvals'))) return;
           await runtime.runTriggers();
           await scanApprovalTimeouts({
-            connection: database.connection(),
+            connection,
             notifier,
             now: new Date(),
             log,

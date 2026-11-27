@@ -169,6 +169,35 @@ export interface CandidateRow {
   readonly username: string | null;
 }
 
+/**
+ * 详情里的五个审批人动作名，与写端点的路径同名（页面据此显隐按钮）。
+ * 审批单 lifecycle 里这些转移是系统转移，不出现在 runtime.available() 里。
+ */
+export const REVIEWER_ACTIONS = [
+  'approve',
+  'reject',
+  'return',
+  'delegate',
+  'add-sign',
+] as const;
+
+/**
+ * 审批动作的同一套 guard：写的端点校验与详情 available 都问它。
+ * 只判业务前置条件（本人任务待处理、单据在进行中），不代替端点授权与行级资格。
+ */
+export function reviewerActionGuard(
+  task: Pick<ApprovalRecordLike, 'status'> | undefined,
+  approval: Pick<ApprovalRow, 'status'>,
+): { readonly allowed: boolean; readonly reason?: 'TASK_ALREADY_ACTED' | 'APPROVAL_NOT_IN_PROGRESS' } {
+  if (task === undefined || task.status !== 'pending') {
+    return { allowed: false, reason: 'TASK_ALREADY_ACTED' };
+  }
+  if (approval.status !== 'submitted' && approval.status !== 'processing') {
+    return { allowed: false, reason: 'APPROVAL_NOT_IN_PROGRESS' };
+  }
+  return { allowed: true };
+}
+
 export class ApprovalsService {
   public constructor(
     private readonly database: DatabaseManager,
@@ -180,8 +209,16 @@ export class ApprovalsService {
     return this.database.connection();
   }
 
-  /** 详情：审批记录只回姓名（由端点裁列），不带邮箱手机号。 */
-  async detail(approval: ApprovalRow, actor: ApprovalActor): Promise<ApprovalDetail> {
+  /**
+   * 详情：审批记录只回姓名（由端点裁列），不带邮箱手机号。
+   * `reviewerTasks` 是端点用 review 的「仅本人」范围取到的、属于这张单的任务；
+   * 只有这些任务上的动作才能进 available，申请人侧的动作仍限申请人本人。
+   */
+  async detail(
+    approval: ApprovalRow,
+    actor: ApprovalActor,
+    reviewerTasks: readonly RecordRow[] = [],
+  ): Promise<ApprovalDetail> {
     const rounds = await this.connection()
       .repository<RoundRow>('approvalRounds')
       .findMany({ filter: { approvalId: approval.id } });
@@ -217,9 +254,16 @@ export class ApprovalsService {
         ...record,
         assigneeName: names.get(record.assigneeId ?? '') ?? null,
       })),
-      available: available
-        .filter((entry) => entry.allowed)
-        .map((entry) => entry.name),
+      available: [
+        ...new Set([
+          ...(approval.applicantId === actor.id
+            ? available.filter((entry) => entry.allowed).map((entry) => entry.name)
+            : []),
+          ...(reviewerTasks.some((task) => reviewerActionGuard(task, approval).allowed)
+            ? REVIEWER_ACTIONS
+            : []),
+        ]),
+      ],
     };
   }
 
@@ -231,6 +275,8 @@ export class ApprovalsService {
     input: CreateApprovalInput,
     actor: ApprovalActor,
     policy: RepositoryPolicy,
+    /** 业务单据片传入自己的事务，让审批单与业务状态在同一事务里落库。 */
+    connection?: DatabaseConnection,
   ): Promise<ApprovalRow> {
     const workflow = workflowOf(input.workflowKey);
     if (!workflow) {
@@ -238,31 +284,34 @@ export class ApprovalsService {
     }
     const id = randomUUID();
     const now = new Date();
+    const work = async (tx: DatabaseConnection): Promise<ApprovalRow> => {
+      const created = await tx
+        .repository<ApprovalRow>('approvals')
+        .withPolicy(policy)
+        .createOne({
+          values: {
+            id,
+            collectionName: input.collectionName,
+            dataKey: input.dataKey,
+            workflowKey: input.workflowKey,
+            // 初始草稿的状态与定义名由建单人写；之后的每次状态变化都只经 lifecycle。
+            status: 'draft',
+            lifecycleDefinition: 'approvals',
+            applicantId: actor.id,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+      if (input.submit) {
+        await this.openRound(tx, created.record as ApprovalRow, input.data, 1, workflow);
+        await this.fire(tx, id, 'submit', actor, { data: input.data });
+      }
+      return await this.readApproval(tx, id);
+    };
     try {
-      return await this.connection().transaction(async (tx) => {
-        const created = await tx
-          .repository<ApprovalRow>('approvals')
-          .withPolicy(policy)
-          .createOne({
-            values: {
-              id,
-              collectionName: input.collectionName,
-              dataKey: input.dataKey,
-              workflowKey: input.workflowKey,
-              // 初始草稿的状态与定义名由建单人写；之后的每次状态变化都只经 lifecycle。
-              status: 'draft',
-              lifecycleDefinition: 'approvals',
-              applicantId: actor.id,
-              createdAt: now,
-              updatedAt: now,
-            },
-          });
-        if (input.submit) {
-          await this.openRound(tx, created.record as ApprovalRow, input.data, 1, workflow);
-          await this.fire(tx, id, 'submit', actor, { data: input.data });
-        }
-        return await this.readApproval(tx, id);
-      });
+      return connection === undefined
+        ? await this.connection().transaction(work)
+        : await work(connection);
     } catch (error) {
       throw approvalLifecycleError(error);
     }
@@ -273,34 +322,38 @@ export class ApprovalsService {
     approval: ApprovalRow,
     input: { readonly data?: Record<string, unknown>; readonly submit: boolean },
     actor: ApprovalActor,
+    connection?: DatabaseConnection,
   ): Promise<ApprovalRow> {
     if (approval.status !== 'draft' && approval.status !== 'returned') {
       throw approvalError('FAILED_PRECONDITION', 'APPROVAL_NOT_EDITABLE', 'Only a draft or returned approval can be edited.', 422);
     }
-    try {
-      return await this.connection().transaction(async (tx) => {
-        await tx
-          .repository('approvals')
-          .updateOne({
-            filter: { id: approval.id },
-            values: {
-              collectionName: approval.collectionName,
-              dataKey: approval.dataKey,
-              workflowKey: approval.workflowKey,
-              updatedAt: new Date(),
-            },
-          });
-        if (input.submit) {
-          const data = input.data ?? {};
-          const workflow = workflowOf(approval.workflowKey);
-          if (!workflow) {
-            throw approvalError('INVALID_ARGUMENT', 'WORKFLOW_NOT_FOUND', 'Unknown workflowKey.', 422);
-          }
-          await this.openRound(tx, approval, data, approval.currentRound + 1, workflow);
-          await this.fire(tx, approval.id, 'submit', actor, { data });
+    const work = async (tx: DatabaseConnection): Promise<ApprovalRow> => {
+      await tx
+        .repository('approvals')
+        .updateOne({
+          filter: { id: approval.id },
+          values: {
+            collectionName: approval.collectionName,
+            dataKey: approval.dataKey,
+            workflowKey: approval.workflowKey,
+            updatedAt: new Date(),
+          },
+        });
+      if (input.submit) {
+        const data = input.data ?? {};
+        const workflow = workflowOf(approval.workflowKey);
+        if (!workflow) {
+          throw approvalError('INVALID_ARGUMENT', 'WORKFLOW_NOT_FOUND', 'Unknown workflowKey.', 422);
         }
-        return await this.readApproval(tx, approval.id);
-      });
+        await this.openRound(tx, approval, data, approval.currentRound + 1, workflow);
+        await this.fire(tx, approval.id, 'submit', actor, { data });
+      }
+      return await this.readApproval(tx, approval.id);
+    };
+    try {
+      return connection === undefined
+        ? await this.connection().transaction(work)
+        : await work(connection);
     } catch (error) {
       throw approvalLifecycleError(error);
     }
@@ -356,11 +409,12 @@ export class ApprovalsService {
     input: ActionInput,
     actor: ApprovalActor,
   ): Promise<ApprovalRow> {
-    // 同一任务重复提交先按抢占失败处理（验收 C7 的 409），不是状态前置条件。
-    if (task.status !== 'pending') {
-      throw approvalError('ABORTED', 'TASK_ALREADY_ACTED', 'This task has already been handled.');
-    }
-    if (approval.status !== 'submitted' && approval.status !== 'processing') {
+    // 与详情 available 同一套 guard；顺序保留抢占优先于状态前置条件（验收 C7 的 409）。
+    const verdict = reviewerActionGuard(task, approval);
+    if (!verdict.allowed) {
+      if (verdict.reason === 'TASK_ALREADY_ACTED') {
+        throw approvalError('ABORTED', 'TASK_ALREADY_ACTED', 'This task has already been handled.');
+      }
       throw approvalError('FAILED_PRECONDITION', 'APPROVAL_NOT_IN_PROGRESS', 'The approval is not in progress.', 422);
     }
     const round = await this.roundOf(task.roundId);

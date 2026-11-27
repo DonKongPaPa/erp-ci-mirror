@@ -32,6 +32,8 @@ export const CODE_PREFIXES = {
   // R-065：支出单号与到票编号的占位前缀（待 R-016 待裁 a 一并定）。
   expense: 'EXP',
   invoiceReceipt: 'RCV',
+  // R-021 波 1 加片：请购单号的占位前缀（设计列为待补查，随 R-016 待裁一并定）。
+  purchaseRequest: 'QG',
 } as const;
 
 /** 计数器行的周期：按日重置存 yyyymmdd（列宽 8 正好），不带日期存空串。 */

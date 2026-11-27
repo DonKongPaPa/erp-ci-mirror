@@ -182,6 +182,16 @@ export function OrderListPage({
         ),
       },
       {
+        id: 'latestDeliveryDate',
+        header: t('orderDocs.fields.latestDeliveryDate'),
+        cell: ({ row }) => row.original.latestDeliveryDate ?? <Dash />,
+      },
+      {
+        id: 'project',
+        header: t('orderDocs.fields.project'),
+        cell: ({ row }) => row.original.projectLabel ?? row.original.projectCode ?? <Dash />,
+      },
+      {
         id: 'status',
         header: t('erp.fields.status'),
         cell: ({ row }) => <OrderStatusBadge def={def} order={row.original} />,

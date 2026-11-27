@@ -213,8 +213,16 @@ export interface ItemsReader {
 }
 
 export interface ItemsMutations {
-  create(input: CreateItemInput, actorId: string): Promise<ItemRecord>;
-  update(id: string, input: UpdateItemInput): Promise<ItemRecord>;
+  create(
+    input: CreateItemInput,
+    actorId: string,
+    transaction?: DatabaseConnection,
+  ): Promise<ItemRecord>;
+  update(
+    id: string,
+    input: UpdateItemInput,
+    transaction?: DatabaseConnection,
+  ): Promise<ItemRecord>;
   createUnit(input: CreateUnitInput): Promise<UnitRecord>;
   updateUnit(code: string, input: UpdateUnitInput): Promise<UnitRecord>;
   createCategory(input: CreateCategoryInput): Promise<CategoryRecord>;
@@ -563,8 +571,9 @@ export class DatabaseItemsMutations implements ItemsMutations {
   public async create(
     input: CreateItemInput,
     actorId: string,
+    transaction?: DatabaseConnection,
   ): Promise<ItemRecord> {
-    return await this.inTransaction(async (tx) => {
+    return await this.inTransaction(transaction, async (tx) => {
       await this.lockStructure(tx);
       const name = text(input.name, 'name', 128, true)!;
       const type = itemType(input.itemType)!;
@@ -638,8 +647,9 @@ export class DatabaseItemsMutations implements ItemsMutations {
   public async update(
     id: string,
     input: UpdateItemInput,
+    transaction?: DatabaseConnection,
   ): Promise<ItemRecord> {
-    return await this.inTransaction(async (tx) => {
+    return await this.inTransaction(transaction, async (tx) => {
       await this.lockStructure(tx);
       const current = await this.requireItem(tx, id);
       if (current.status === 'inactive' && input.status !== 'active') {
@@ -730,7 +740,7 @@ export class DatabaseItemsMutations implements ItemsMutations {
   }
 
   public async createUnit(input: CreateUnitInput): Promise<UnitRecord> {
-    return await this.inTransaction(async (tx) => {
+    return await this.inTransaction(undefined, async (tx) => {
       await this.lockStructure(tx);
       const code = text(input.code, 'code', 16, true)!;
       const name = text(input.name, 'name', 64, true)!;
@@ -756,7 +766,7 @@ export class DatabaseItemsMutations implements ItemsMutations {
     code: string,
     input: UpdateUnitInput,
   ): Promise<UnitRecord> {
-    return await this.inTransaction(async (tx) => {
+    return await this.inTransaction(undefined, async (tx) => {
       await this.lockStructure(tx);
       const current = await this.requireUnit(tx, code);
       const nextStatus = status(input.status, 'status');
@@ -802,7 +812,7 @@ export class DatabaseItemsMutations implements ItemsMutations {
   public async createCategory(
     input: CreateCategoryInput,
   ): Promise<CategoryRecord> {
-    return await this.inTransaction(async (tx) => {
+    return await this.inTransaction(undefined, async (tx) => {
       await this.lockStructure(tx);
       const id = text(input.id, 'id', 64, true)!;
       const code = text(input.code, 'code', 32, true)!;
@@ -834,7 +844,7 @@ export class DatabaseItemsMutations implements ItemsMutations {
     id: string,
     input: UpdateCategoryInput,
   ): Promise<CategoryRecord> {
-    return await this.inTransaction(async (tx) => {
+    return await this.inTransaction(undefined, async (tx) => {
       await this.lockStructure(tx);
       await this.requireCategoryById(tx, id);
       const parentId =
@@ -874,7 +884,11 @@ export class DatabaseItemsMutations implements ItemsMutations {
     });
   }
 
-  private async inTransaction<T>(work: (tx: DatabaseConnection) => Promise<T>): Promise<T> {
+  private async inTransaction<T>(
+    transaction: DatabaseConnection | undefined,
+    work: (tx: DatabaseConnection) => Promise<T>,
+  ): Promise<T> {
+    if (transaction !== undefined) return await work(transaction);
     return await this.database.transaction(work);
   }
 

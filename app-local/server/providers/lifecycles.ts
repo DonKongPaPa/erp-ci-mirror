@@ -66,6 +66,11 @@ export default class LifecycleProvider extends ServiceProvider<Application> {
       services: () => ({
         notifyApproval: (event) =>
           this.app.container.resolve(approvalNotifierToken).notify(event),
+        // R-021 波 1 加片：审批终态回写在转移事务内完成；延迟 import 避开与审批服务的模块环。
+        syncPurchaseRequest: async (event) => {
+          const { purchaseRequestsServiceToken } = await import('./purchase-requests.js');
+          await this.app.container.resolve(purchaseRequestsServiceToken).onApprovalFinal(event);
+        },
       }),
     });
     runtime.register(fqcTicketsLifecycle, {

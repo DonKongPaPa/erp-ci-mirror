@@ -159,6 +159,9 @@ export interface StockDocRecord {
   readonly taxExcludedTotal?: number | null;
   readonly taxTotal?: number | null;
   readonly payableTotal?: number | null;
+  /** 回链列只在生成单据上出现；普通单据的响应与波 0 加片前一致。 */
+  readonly stocktakingId?: string;
+  readonly transferDocId?: string;
   readonly files?: readonly DocFileView[];
   readonly lines: readonly StockDocLineRecord[];
 }
@@ -204,6 +207,8 @@ export interface DocListQuery extends PageQuery {
   readonly projectCode?: string;
   readonly handlerUserId?: string;
   readonly takerDepartmentId?: string;
+  readonly stocktakingId?: string;
+  readonly transferDocId?: string;
 }
 export interface BalanceListQuery extends PageQuery {
   readonly itemId?: string;
@@ -257,6 +262,8 @@ interface DocExtraInput {
   readonly takerUserId?: string | null;
   readonly discountAmount?: number;
   readonly fileIds?: readonly string[];
+  readonly stocktakingId?: string;
+  readonly transferDocId?: string;
 }
 export interface CreateDocInput extends DocExtraInput {
   readonly docType: DocType;
@@ -284,8 +291,15 @@ export interface StockReader {
 }
 
 export interface StockMutations {
-  createWarehouse(input: CreateWarehouseInput): Promise<WarehouseRecord>;
-  updateWarehouse(id: string, input: UpdateWarehouseInput): Promise<WarehouseRecord>;
+  createWarehouse(
+    input: CreateWarehouseInput,
+    transaction?: DatabaseConnection,
+  ): Promise<WarehouseRecord>;
+  updateWarehouse(
+    id: string,
+    input: UpdateWarehouseInput,
+    transaction?: DatabaseConnection,
+  ): Promise<WarehouseRecord>;
   createDoc(
     input: CreateDocInput,
     byUserId: string,
@@ -366,6 +380,8 @@ interface DocRow {
   tax_excluded_total: string | number | null;
   tax_total: string | number | null;
   payable_total: string | number | null;
+  stocktaking_id: string | null;
+  transfer_doc_id: string | null;
 }
 interface LineRow {
   id: string;
@@ -517,6 +533,8 @@ function docView(
     takerDepartment: refs.departments.get(row.taker_department_id ?? '') ?? null,
     partner: refs.partners.get(row.partner_id ?? '') ?? null,
     totalQty: nullableNum(row.total_qty),
+    ...(row.stocktaking_id === null ? {} : { stocktakingId: row.stocktaking_id }),
+    ...(row.transfer_doc_id === null ? {} : { transferDocId: row.transfer_doc_id }),
     ...(withPrice
       ? {
           discountAmount: num(row.discount_amount ?? 0),
@@ -841,6 +859,8 @@ export class DatabaseStockReader implements StockReader {
       if (query.projectCode !== undefined) void builder.where('project_code', query.projectCode);
       if (query.handlerUserId !== undefined) void builder.where('handler_user_id', query.handlerUserId);
       if (query.takerDepartmentId !== undefined) void builder.where('taker_department_id', query.takerDepartmentId);
+      if (query.stocktakingId !== undefined) void builder.where('stocktaking_id', query.stocktakingId);
+      if (query.transferDocId !== undefined) void builder.where('transfer_doc_id', query.transferDocId);
     });
     const total = await countOf(base);
     const rows = (await base
@@ -921,14 +941,18 @@ export class DatabaseStockMutations implements StockMutations {
     return await this.database.transaction(work);
   }
 
-  public async createWarehouse(input: CreateWarehouseInput): Promise<WarehouseRecord> {
+  public async createWarehouse(
+    input: CreateWarehouseInput,
+    transaction?: DatabaseConnection,
+  ): Promise<WarehouseRecord> {
     const code = validateWarehouseCode(input.code);
     const name = validateWarehouseName(input.name);
     const status = validateWarehouseStatus(input.status);
     const note = validateNote(input.note);
     const now = new Date();
+    const connection = transaction ?? this.database.connection();
     try {
-      await this.database.connection().query
+      await connection.query
         .insertInto('warehouses')
         .values({ id: randomUUID(), code, name, status, note, createdAt: now, updatedAt: now })
         .execute();
@@ -936,19 +960,23 @@ export class DatabaseStockMutations implements StockMutations {
       if (isUniqueConstraintViolation(error)) return fail('warehouse-code-exists');
       throw error;
     }
-    const knex = await this.knex();
+    const knex = await this.knex(transaction);
     const row = await knex<WarehouseRow>('warehouses').where({ code }).first();
     return warehouseView(row!);
   }
 
-  public async updateWarehouse(id: string, input: UpdateWarehouseInput): Promise<WarehouseRecord> {
+  public async updateWarehouse(
+    id: string,
+    input: UpdateWarehouseInput,
+    transaction?: DatabaseConnection,
+  ): Promise<WarehouseRecord> {
     if (input.name === undefined && input.status === undefined && input.note === undefined) {
       return fail('empty-update');
     }
     if (input.name !== undefined) validateWarehouseName(input.name);
     if (input.status !== undefined) validateWarehouseStatus(input.status);
     if (input.note !== undefined) validateNote(input.note);
-    const knex = await this.knex();
+    const knex = await this.knex(transaction);
     const result = await knex<WarehouseRow>('warehouses').where({ id }).update({
       ...(input.name === undefined ? {} : { name: input.name.trim() }),
       ...(input.status === undefined ? {} : { status: input.status }),
@@ -1030,6 +1058,8 @@ export class DatabaseStockMutations implements StockMutations {
         tax_excluded_total: totals.taxExcludedTotal,
         tax_total: totals.taxTotal,
         payable_total: totals.payableTotal,
+        stocktaking_id: input.stocktakingId ?? null,
+        transfer_doc_id: input.transferDocId ?? null,
         created_at: now,
         updated_at: now,
       });

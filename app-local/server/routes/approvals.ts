@@ -86,6 +86,24 @@ async function authorizeApproval(
   return decision;
 }
 
+/**
+ * 详情端点要给申请人与审批人两类调用者：两个业务动作各问一次，各拿各的范围。
+ * 没有对应范围就当作没有这项业务授权，统一落到 404，不用 403 暴露编号是否存在。
+ */
+async function optionalApprovalDecision(
+  context: ApprovalContext,
+  action: 'submit' | 'review',
+  collection: string,
+): Promise<Decision | undefined> {
+  const decision = await context.get('authz').authorize({
+    resource: { type: 'composite', id: 'approval' },
+    action,
+  });
+  return decision.effect !== 'deny' && decision.conditions?.database?.[collection]
+    ? decision
+    : undefined;
+}
+
 function policyOf(decision: Decision, collection: string): RepositoryPolicy {
   const policy = decision.conditions?.database?.[collection];
   if (!policy) throw new AuthorizationDeniedError(decision);
@@ -357,23 +375,64 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes((
     }),
     apiValidator('param', ApprovalIdParam),
     async (context) => {
-      const decision = await authorizeApproval(context, 'submit');
+      // 两个动作都在读内容之前授权；没有范围的人连审批单编号都读不到。
+      const submitDecision = await optionalApprovalDecision(context, 'submit', 'approvals');
+      const reviewDecision = await optionalApprovalDecision(context, 'review', 'approvalRecords');
       const actor = actorOf(context);
       const { id } = context.req.valid('param');
-      const approval = await database
-        .connection()
-        .repository<ApprovalRow>('approvals')
-        .withPolicy(policyOf(decision, 'approvals'))
-        .findOne({ filter: { id } });
-      const foundApproval = fullApproval(approval);
+      let foundApproval: ApprovalRow | undefined;
+      if (submitDecision) {
+        const approval = await database
+          .connection()
+          .repository<ApprovalRow>('approvals')
+          .withPolicy(policyOf(submitDecision, 'approvals'))
+          .findOne({ filter: { id } });
+        foundApproval = fullApproval(approval);
+      }
+      const reviewerTasks: RecordRow[] = [];
+      // 双重身份也要取任务：available 是申请人动作与审批人动作的并集。
+      if (reviewDecision) {
+        // 先用 review 的「仅本人」范围取本人任务，再按轮次认领这张单；已处理的任务也算。
+        const ownRecords = await database
+          .connection()
+          .repository<RecordRow>('approvalRecords')
+          .withPolicy(policyOf(reviewDecision, 'approvalRecords'))
+          .findMany({ filter: { assigneeId: actor.id } });
+        if (ownRecords.length > 0) {
+          const rounds = await database
+            .connection()
+            .repository<{ id: string; approvalId: string }>('approvalRounds')
+            .findMany({
+              filter: (filter) =>
+                filter.or(
+                  ownRecords.map((row) => filter.string('id').eq(String(row.roundId ?? ''))),
+                ),
+            });
+          const ownRoundIds = new Set(
+            rounds.filter((round) => round.approvalId === id).map((round) => String(round.id ?? '')),
+          );
+          if (ownRoundIds.size > 0) {
+            for (const row of ownRecords) {
+              const task = fullTask(row);
+              if (task && ownRoundIds.has(task.roundId)) reviewerTasks.push(task);
+            }
+            const approval = await database
+              .connection()
+              .repository<ApprovalRow>('approvals')
+              .findOne({ filter: { id } });
+            foundApproval = fullApproval(approval);
+          }
+        }
+      }
       if (!foundApproval) throw notFoundError('APPROVAL');
-      const detail = await service.detail(foundApproval, actor);
+      const detail = await service.detail(foundApproval, actor, reviewerTasks);
       // 审批人只回姓名：详情里的记录不带姓名以外的用户资料，更没有邮箱、手机号。
       return context.json({
         data: {
           ...detail,
           records: detail.records.map((record) => ({
             id: record.id,
+            roundId: record.roundId,
             nodeKey: record.nodeKey,
             status: record.status,
             seq: record.seq,

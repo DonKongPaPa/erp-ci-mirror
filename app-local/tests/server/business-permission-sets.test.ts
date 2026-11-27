@@ -21,6 +21,31 @@ import orderReviewGrantsSeed, {
   planningPermissionSet,
   salesReviewPermissionSet,
 } from '../../database/main/seeds/202611280003_seed_order_review_grants.js';
+import docPrintSeed, {
+  docPrintPermissionSets,
+  persistDocPrintGrants,
+  purchaseDocPrintGrants,
+  salesDocPrintGrants,
+  warehouseDocPrintGrants,
+} from '../../database/main/seeds/202611280006_seed_doc_print_grants.js';
+import { financePageGrants as expectedFinancePageGrants } from '../../database/main/seeds/202611280004_seed_finance_page_grants.js';
+import purchaseRequestGrantsSeed, {
+  planningPurchaseRequestGrant,
+  purchasePurchaseRequestGrant,
+  purchaseRequestPermissionSets,
+  staffPurchaseRequestGrant,
+} from '../../database/main/seeds/202611280007_seed_purchase_request_grants.js';
+import stocktakingTransferSeed, {
+  financeStocktakingGrant,
+  persistStocktakingTransferGrants,
+  stocktakingTransferPermissionSets,
+  warehouseStocktakingTransferGrants,
+} from '../../database/main/seeds/202611280010_seed_stocktaking_transfer_grants.js';
+import quotationGrantsSeed, {
+  persistQuotationGrants,
+  salesQuotationGrant,
+  salesQuotationPermissionSet,
+} from '../../database/main/seeds/202611280009_seed_quotation_grants.js';
 import { createStandaloneServer } from '../../server/standalone.js';
 
 /**
@@ -417,6 +442,28 @@ const expectedNewRoles = {
 } as const;
 const expectedSalesAdditions = [reviewViewGrant, ledgerViewGrant] as const;
 
+/** R-021 波 1 加片：新种子给三个现成角色各追加一条请购单授权。 */
+const expectedPurchaseRequestAdditions = {
+  planning: [planningPurchaseRequestGrant],
+  staff: [staffPurchaseRequestGrant],
+  purchase: [purchasePurchaseRequestGrant],
+} as const;
+/** R-076：三颗打印补丁按角色钉住；仓管只有 print，没有 printPrice。 */
+const expectedDocPrintGrants = {
+  warehouse: warehouseDocPrintGrants,
+  purchase: purchaseDocPrintGrants,
+  sales: salesDocPrintGrants,
+} as const;
+
+/** R-020 波 1：盘点与调拨授权只在补丁种子里声明，原种子一份都不带。 */
+const warehouseStocktakingGrants = warehouseStocktakingTransferGrants;
+const expectedStocktakingGrantsByRole = {
+  warehouse: warehouseStocktakingGrants,
+  finance: [financeStocktakingGrant],
+} as const;
+/** R-022 复刻波 1：报价六个动作只追加给 sales，别的角色一份没有。 */
+const expectedQuotationGrants = [salesQuotationGrant] as const;
+
 const roleKeys = Object.keys(expectedRoles);
 const newRoleKeys = Object.keys(expectedNewRoles);
 const allRoleKeys = [...roleKeys, ...newRoleKeys];
@@ -463,6 +510,32 @@ test('R-064: the new seed declares planning and the sales additions', () => {
   }
 });
 
+test('R-021 波 1：新种子只声明三个角色的请购单授权，staff 按建单人收窄', () => {
+  expect(purchaseRequestGrantsSeed.name).toBe('202611280007_seed_purchase_request_grants');
+  expect(purchaseRequestPermissionSets.map((set) => set.key)).toEqual([
+    'planning', 'staff', 'purchase',
+  ]);
+  expect(purchaseRequestPermissionSets.map((set) => set.grants)).toEqual([
+    [planningPurchaseRequestGrant],
+    [staffPurchaseRequestGrant],
+    [purchasePurchaseRequestGrant],
+  ]);
+  expect(planningPurchaseRequestGrant.actions.map((entry) => entry.action)).toEqual([
+    'view', 'create', 'update', 'submit', 'void',
+  ]);
+  expect(staffPurchaseRequestGrant.actions.map((entry) => entry.action)).toEqual([
+    'view', 'create', 'update', 'submit', 'void',
+  ]);
+  expect(
+    staffPurchaseRequestGrant.actions.every(
+      (entry) => entry.policy?.scopes?.purchaseRequests === 'purchaseRequest.creatorOwn',
+    ),
+  ).toBe(true);
+  expect(purchasePurchaseRequestGrant.actions.map((entry) => entry.action)).toEqual([
+    'view', 'convert',
+  ]);
+});
+
 test('R-013: the seed creates the designed roles', async ({ app }) => {
   const sets = app.container.resolve(authorizationToken).permissionSets;
   const stored = await sets.list();
@@ -470,11 +543,19 @@ test('R-013: the seed creates the designed roles', async ({ app }) => {
     const set = stored.find((entry) => entry.key === key);
     expect(set, `seed 没有建出角色 ${key}`).toBeDefined();
     expect(set?.title).toEqual(expected.title);
-    // 三颗种子都跑过：staff 在 M3 补了审批的两个仅本人动作；sales 多出 R-064 的两条只读授权。
+    // 几颗种子都跑过：staff 在 M3 补了审批的两个仅本人动作；sales 在原种子的授权后面
+    // 多出 R-064 的两条只读授权；warehouse / purchase / sales 再按 R-076 各补一份打印授权；
+    // finance 再按 R-065 的页面片补两条页面授权（支出与到票两个页面）；
+    // planning / staff / purchase 最后按 R-021 波 1 各补一条请购单授权。
     expect(set?.grants).toEqual([
       ...expected.grants,
       ...(key === 'staff' ? [APPROVAL_GRANT] : []),
       ...(key === 'sales' ? expectedSalesAdditions : []),
+      ...(key === 'finance' ? expectedFinancePageGrants : []),
+      ...(expectedDocPrintGrants[key as keyof typeof expectedDocPrintGrants] ?? []),
+      ...(expectedPurchaseRequestAdditions[key as keyof typeof expectedPurchaseRequestAdditions] ?? []),
+      ...(expectedStocktakingGrantsByRole[key as keyof typeof expectedStocktakingGrantsByRole] ?? []),
+      ...(key === 'sales' ? expectedQuotationGrants : []),
     ]);
   }
 });
@@ -489,18 +570,106 @@ test('R-064: the new seed creates planning and adds the two sales grants on a fr
   const planning = stored.find((entry) => entry.key === 'planning');
   expect(planning, '新种子没有建出 planning').toBeDefined();
   expect(planning?.title).toEqual(expectedNewRoles.planning.title);
-  expect(planning?.grants).toEqual(expectedNewRoles.planning.grants);
+  expect(planning?.grants).toEqual([
+    ...expectedNewRoles.planning.grants,
+    ...expectedPurchaseRequestAdditions.planning,
+  ]);
 
   const sales = stored.find((entry) => entry.key === 'sales');
   expect(sales?.grants).toEqual([
     ...expectedRoles.sales.grants,
     ...expectedSalesAdditions,
+    ...salesDocPrintGrants,
+    ...expectedQuotationGrants,
   ]);
 
   // 重跑什么都不写：角色与授权都已经存在。
   expect(await persistOrderReviewGrants(connection.query)).toEqual({
     created: [],
     granted: [],
+  });
+});
+
+/** R-076：打印授权只在补丁种子里声明，原种子一份都不带。 */
+test('R-076: the new seed declares three roles print grants and the base seed has none', () => {
+  expect(docPrintSeed.name).toBe('202611280006_seed_doc_print_grants');
+  expect(docPrintPermissionSets.map((set) => set.key)).toEqual([
+    'warehouse',
+    'purchase',
+    'sales',
+  ]);
+  for (const set of docPrintPermissionSets) {
+    expect(set.grants).toEqual(
+      expectedDocPrintGrants[set.key as keyof typeof expectedDocPrintGrants],
+    );
+  }
+  for (const set of businessPermissionSets) {
+    for (const grant of set.grants) {
+      expect(grant.resource.id, `${set.key} 不该在原种子拿到打印授权`).not.toMatch(
+        /^docPrint/u,
+      );
+    }
+  }
+});
+
+/** 全新库三份都补上；管理员改过的角色整条跳过，重跑不写。 */
+test('R-076: fresh database gets the print grants, a changed role is never overwritten', async ({
+  app,
+  connection,
+}) => {
+  const sets = app.container.resolve(authorizationToken).permissionSets;
+  for (const [key, expected] of Object.entries(expectedDocPrintGrants)) {
+    const stored = (await sets.get(key))?.grants ?? [];
+    for (const grant of expected) {
+      expect(stored, `${key} 缺少打印授权`).toContainEqual(grant);
+    }
+  }
+  expect(await persistDocPrintGrants(connection.query)).toEqual({
+    created: [],
+    granted: [],
+    skipped: ['warehouse', 'purchase', 'sales'],
+  });
+
+  const changedGrants = [
+    {
+      resource: { type: 'page', id: 'quality' },
+      actions: [{ action: 'access' }],
+    },
+  ];
+  await sets.update('warehouse', { key: 'warehouse', grants: changedGrants });
+  expect(await persistDocPrintGrants(connection.query)).toEqual({
+    created: [],
+    granted: [],
+    skipped: ['warehouse', 'purchase', 'sales'],
+  });
+  expect((await sets.get('warehouse'))?.grants, '管理员改过的仓管不被覆盖').toEqual(
+    changedGrants,
+  );
+});
+
+/** R-022 复刻波 1：新种子只声明 sales 的六个报价动作，原种子一份不带。 */
+test('R-022: the quotation seed declares six actions for sales only and is idempotent', async ({
+  app,
+  connection,
+}) => {
+  expect(quotationGrantsSeed.name).toBe('202611280009_seed_quotation_grants');
+  expect(salesQuotationPermissionSet.key).toBe('sales');
+  expect(salesQuotationPermissionSet.grants).toEqual(expectedQuotationGrants);
+  for (const set of businessPermissionSets) {
+    for (const grant of set.grants) {
+      expect(grant.resource.id, `${set.key} 不该在原种子拿到报价授权`).not.toBe('quotations');
+    }
+  }
+  const sets = app.container.resolve(authorizationToken).permissionSets;
+  const sales = (await sets.get('sales'))?.grants ?? [];
+  expect(sales).toContainEqual(salesQuotationGrant);
+  for (const key of ['purchase', 'warehouse', 'finance', 'staff']) {
+    expect((await sets.get(key))?.grants ?? [], `${key} 不该拿到报价授权`).not.toContainEqual(
+      salesQuotationGrant,
+    );
+  }
+  expect(await persistQuotationGrants(connection.query)).toEqual({
+    created: [], granted: [], skipped: ['sales'],
   });
 });
 
@@ -956,4 +1125,43 @@ test('R-075: catchup rebuilds missing sets and keeps administrator changes', asy
   expect(after.get('sales')?.grants).toEqual(changedGrants);
   expect(after.get('warehouse')?.grants).toEqual(expectedRoles.warehouse.grants);
   expect(after.get('finance')?.grants).toEqual(expectedRoles.finance.grants);
+});
+
+
+test('R-020 波 1: the new seed declares only the warehouse and finance stocktaking grants', () => {
+  expect(stocktakingTransferSeed.name).toBe('202611280010_seed_stocktaking_transfer_grants');
+  expect(stocktakingTransferPermissionSets.map((set) => set.key)).toEqual(['warehouse', 'finance']);
+  expect(stocktakingTransferPermissionSets[0]?.grants).toEqual(warehouseStocktakingGrants);
+  expect(stocktakingTransferPermissionSets[1]?.grants).toEqual(expectedStocktakingGrantsByRole.finance);
+  for (const set of businessPermissionSets) {
+    for (const grant of set.grants) {
+      expect(grant.resource.id, `${set.key} 不该在原种子拿到盘点或调拨授权`).not.toMatch(
+        /^(stocktakings|transfers)$/u,
+      );
+    }
+  }
+});
+
+test('R-020 波 1: fresh database gets the stocktaking grants; a changed role is never overwritten', async ({
+  app, connection,
+}) => {
+  const sets = app.container.resolve(authorizationToken).permissionSets;
+  // 同文件前面的用例删掉并重建过 warehouse/finance，所以这里先跑一次 apply 补出授权。
+  await persistStocktakingTransferGrants(connection.query);
+  for (const [key, expected] of Object.entries(expectedStocktakingGrantsByRole)) {
+    const stored = (await sets.get(key))?.grants ?? [];
+    for (const grant of expected) expect(stored, `${key} 缺少盘点/调拨授权`).toContainEqual(grant);
+  }
+  expect(await persistStocktakingTransferGrants(connection.query)).toEqual({
+    created: [], granted: [], skipped: ['warehouse', 'finance'],
+  });
+
+  const changedGrants = [
+    { resource: { type: 'page', id: 'quality' }, actions: [{ action: 'access' }] },
+  ];
+  await sets.update('finance', { key: 'finance', grants: changedGrants });
+  expect(await persistStocktakingTransferGrants(connection.query)).toEqual({
+    created: [], granted: [], skipped: ['warehouse', 'finance'],
+  });
+  expect((await sets.get('finance'))?.grants, '管理员改过的财务角色不被覆盖').toEqual(changedGrants);
 });

@@ -63,6 +63,22 @@ const zhCN: AppServerResource = {
       personInvalid: '经办人不是在职员工。',
     },
   },
+  // R-022 复刻波 1：报价单规则码文案；端点在缺键时用 defaultValue 兜底。
+  quotations: {
+    errors: {
+      quotationNotFound: '这张报价单不存在。',
+      notDraft: '只有草稿报价单可以修改。',
+      notConfirmed: '这张报价单还没确定，不能转销售订单。',
+      converted: '这张报价单已经转过销售订单，不能转第二次。',
+      empty: '报价单没有明细行，不能确定。',
+      validityInvalid: '报价有效期至不能早于报价日期。',
+      discountInvalid: '优惠金额不合法（不能为负，也不能大于含税总金额）。',
+      lineInvalid: '报价明细或单价不合法。',
+      customerInvalid: '客户不存在、不是客户或已停用。',
+      dictCodeInvalid: '项目或结算方式的码不在字典里，或已经停用。',
+      personInvalid: '销售员不是在职员工。',
+    },
+  },
   employees: {
     errors: {
       'target-user-not-found': '这个账号不存在。',
@@ -130,6 +146,40 @@ const zhCN: AppServerResource = {
       discountInvalid: '优惠金额不能为负，也不能大于含税总金额。',
       dictCodeInvalid: '项目的码不在字典里，或已经停用。',
       personInvalid: '经办人、领用人不是在职员工，或领用部门不在用。',
+    },
+  },
+  // R-020 波 1：盘点与调拨规则码文案。
+  stocktaking: {
+    errors: {
+      stocktakingNotFound: '这张盘点单不存在。',
+      stocktakingNotStaging: '只有暂存的盘点单可以改、结束或作废。',
+      actualRequired: '结束盘点前每一行都要填实盘数量。',
+      supervisorRequired: '结束盘点必须填监盘人。',
+      duplicateItem: '同一物品在盘点单里只能加一行。',
+      warehouseNotFound: '仓库不存在。',
+      warehouseInactive: '仓库已经停用。',
+      itemNotFound: '物料不存在。',
+      itemInactive: '物料已经停用。',
+      personInvalid: '经办人或监盘人不是在职员工。',
+      lineInvalid: '盘点行的内容不合法。',
+      emptyUpdate: '请至少填写一项要改的内容。',
+      insufficient: '现存量不够，盘亏出库没有过账。',
+    },
+  },
+  transfer: {
+    errors: {
+      transferNotFound: '这张调拨单不存在。',
+      transferNotDraft: '只有草稿调拨单可以改、过账或作废。',
+      transferQtyInvalid: '数量必须为正，调拨数量不能大于申请数量。',
+      transferInsufficient: '调出仓现存量不够，整张调拨单没有过账。',
+      transferSameWarehouse: '调入仓与调出仓不能相同。',
+      warehouseNotFound: '仓库不存在。',
+      warehouseInactive: '仓库已经停用。',
+      itemNotFound: '物料不存在。',
+      itemInactive: '物料已经停用。',
+      personInvalid: '经办人不是在职员工。',
+      lineInvalid: '调拨行的内容不合法。',
+      emptyUpdate: '请至少填写一项要改的内容。',
     },
   },
   // R-064：订单评审规则码文案；端点在缺键时用 defaultValue 兜底。
@@ -236,6 +286,24 @@ const zhCN: AppServerResource = {
       recipients: '过期任务的审批人。',
       title: '{{workflowKey}} 仍待处理',
       body: '{{applicantName}} 提交的 {{workflowKey}} 审批单 {{approvalId}} 仍等待你处理。',
+    },
+  },
+  purchaseRequest: {
+    errors: {
+      notFound: '这张请购单不存在。',
+      notEditable: '只有草稿或被驳回的请购单可以修改。',
+      noLines: '请购单至少要有一行明细才能提交。',
+      notApproved: '只有审批通过的请购单才能转采购订单。',
+      converted: '这张请购单已经转过采购订单。',
+      emptyPatch: '至少要给一项要改的内容。',
+      lineInvalid: '请购明细不合法。',
+      itemNotFound: '这条物料不存在。',
+      itemInactive: '这条物料已经停用，请换一个。',
+      departmentNotFound: '这个部门不存在。',
+      departmentInactive: '这个部门已经停用，请换一个。',
+      dictCodeInvalid: '项目的码不在字典里，或已经停用：{{reason}}。',
+      personInvalid: '请购人不是在职员工：{{reason}}。',
+      approvalFailed: '建审批单失败：{{reason}}。',
     },
   },
 

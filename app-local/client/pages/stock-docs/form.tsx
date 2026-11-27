@@ -22,7 +22,20 @@ import {
   DocumentSection,
   DocumentStatusBar,
 } from '#components/erp/document';
+import { DocFilesPanel } from '#components/erp/doc-files-panel';
 import { errorText } from '#components/erp/messages';
+import {
+  defaultDictCode,
+  departmentChoices,
+  dictChoices,
+  personChoices,
+  useDepartmentOptions,
+  useDictEntries,
+  usePersonOptions,
+  type DictEntry,
+  type DepartmentOption,
+  type PersonOption,
+} from '#components/erp/options';
 import type { FieldErrors } from '#components/erp/form-dialog';
 import { useRecord } from '#components/erp/record';
 import { FeedbackForm } from '#components/feedback-form';
@@ -63,7 +76,13 @@ import {
 } from '../stock/lookup.js';
 import { INVENTORY_RESOURCE } from '../warehouses/page-id.js';
 
+import type { NarrowOrder } from '../orders/client.js';
+import {
+  PURCHASE,
+  SALES,
+} from '../orders/kinds.js';
 import { StockDocsClient, type StockDoc } from './client.js';
+import { OrderPickerDialog } from './order-picker.js';
 import type { StockKind } from './kind.js';
 import type { StockDocDetailContext } from './detail.js';
 import { stockKey, useLineStock } from './line-stock.js';
@@ -102,6 +121,27 @@ export function StockDocFormPage({
     resource: INVENTORY_RESOURCE,
     action: 'warehouseView',
   });
+  const priceView = useCan({
+    resource: INVENTORY_RESOURCE,
+    action: 'stockPriceView',
+  });
+  const dictView = useCan({
+    resource: { type: 'composite', id: 'bizDict' },
+    action: 'view',
+  });
+  const optionsView = useCan({
+    resource: { type: 'composite', id: 'bizOptions' },
+    action: 'view',
+  });
+  const pickView = useCan({
+    resource: def.kind === 'in' ? PURCHASE.resource : SALES.resource,
+    action: def.kind === 'in' ? 'receive' : 'ship',
+  });
+  const projects = useDictEntries('project', dictView.can);
+  const taxRates = useDictEntries('tax_rate', dictView.can);
+  const people = usePersonOptions(optionsView.can);
+  const departments = useDepartmentOptions(optionsView.can);
+  const defaultTaxRate = defaultDictCode(taxRates.items);
   const canWrite = write.can;
   const editing = mode === 'edit';
   const record = useRecord<StockDoc>(
@@ -169,6 +209,12 @@ export function StockDocFormPage({
       title={title}
       lookup={lookup}
       canPick={canPick}
+      priceView={priceView.can}
+      canPickOrder={pickView.can}
+      projects={projects.items}
+      people={people.items}
+      departments={departments.items}
+      defaultTaxRate={defaultTaxRate}
     />
   );
 }
@@ -180,6 +226,12 @@ interface StockDocFormProps {
   readonly title: string;
   readonly lookup: ReturnType<typeof useInventoryLookup>;
   readonly canPick: boolean;
+  readonly priceView: boolean;
+  readonly canPickOrder: boolean;
+  readonly projects: readonly DictEntry[] | undefined;
+  readonly people: readonly PersonOption[] | undefined;
+  readonly departments: readonly DepartmentOption[] | undefined;
+  readonly defaultTaxRate: string;
 }
 
 function StockDocForm({
@@ -188,6 +240,12 @@ function StockDocForm({
   title,
   lookup,
   canPick,
+  priceView,
+  canPickOrder,
+  projects,
+  people,
+  departments,
+  defaultTaxRate,
 }: StockDocFormProps): ReactElement {
   const { t } = useTranslation();
   const { locale } = useLocale();
@@ -212,6 +270,10 @@ function StockDocForm({
   // 出库单的每一行旁边带现存量：填的数量超过它就标红（过账时以服务端的判断为准）。
   const hand = useLineStock(values.lines, def.kind === 'out' && canPick);
 
+  const setHeader = (key: keyof DocFormValues, value: string | readonly string[]) => {
+    setTouched(true);
+    setValues((old) => ({ ...old, [key]: value }));
+  };
   const setLine = (index: number, key: keyof LineFormValues, value: string) => {
     setTouched(true);
     setValues((old) => ({
@@ -229,7 +291,33 @@ function StockDocForm({
   };
   const addLine = () => {
     setTouched(true);
-    setValues((old) => ({ ...old, lines: [...old.lines, emptyLine()] }));
+    setValues((old) => ({
+      ...old,
+      lines: [...old.lines, { ...emptyLine(), taxRate: defaultTaxRate }],
+    }));
+  };
+  const [picking, setPicking] = useState(false);
+  /** 从待收、待发的订单里选一张：带出仍有剩余的行、对方与联系方式，并记下来源。 */
+  const applyOrder = (order: NarrowOrder): void => {
+    setTouched(true);
+    setValues((old) => ({
+      ...old,
+      partnerId: order.supplier?.id ?? order.customer?.id ?? old.partnerId,
+      contactName: order.contactName ?? old.contactName,
+      contactPhone: order.contactPhone ?? old.contactPhone,
+      sourceType: def.kind === 'in' ? 'purchase_order' : 'sales_order',
+      sourceId: order.id,
+      hasAddons: true,
+      lines: order.lines
+        .filter((line) => line.remainingQty > 0)
+        .map((line) => ({
+          ...emptyLine(),
+          itemId: line.itemId,
+          warehouseId: order.warehouseId ?? '',
+          qty: String(line.remainingQty),
+          taxRate: defaultTaxRate,
+        })),
+    }));
   };
   /** 删的是没保存的这一行，不是删记录：保存时整单替换明细。 */
   const removeLine = (index: number) => {
@@ -385,12 +473,202 @@ function StockDocForm({
                 </SelectContent>
               </Select>
             </DocField>
+            <DocField
+              id={idOf('docDate')}
+              label={t(`stockDocs.${def.words}.docDate`)}
+            >
+              <Input
+                id={idOf('docDate')}
+                inputMode='numeric'
+                autoComplete='off'
+                placeholder='YYYY-MM-DD'
+                value={values.docDate}
+                onChange={(event) => setHeader('docDate', event.target.value)}
+              />
+            </DocField>
+            <DocField
+              id={idOf('partnerId')}
+              label={t(`stockDocs.${def.words}.partner`)}
+            >
+              <Input
+                id={idOf('partnerId')}
+                autoComplete='off'
+                placeholder={t('stockDocs.partnerHint')}
+                value={values.partnerId}
+                onChange={(event) => setHeader('partnerId', event.target.value)}
+              />
+            </DocField>
+            <DocField
+              id={idOf('contactName')}
+              label={t('stockDocs.fields.contactName')}
+            >
+              <Input
+                id={idOf('contactName')}
+                autoComplete='off'
+                maxLength={128}
+                value={values.contactName}
+                onChange={(event) => setHeader('contactName', event.target.value)}
+              />
+            </DocField>
+            <DocField
+              id={idOf('contactPhone')}
+              label={t('stockDocs.fields.contactPhone')}
+            >
+              <Input
+                id={idOf('contactPhone')}
+                autoComplete='off'
+                maxLength={64}
+                value={values.contactPhone}
+                onChange={(event) => setHeader('contactPhone', event.target.value)}
+              />
+            </DocField>
+            <DocField
+              id={idOf('deliveryAddress')}
+              label={t('stockDocs.fields.deliveryAddress')}
+              className='sm:col-span-2 xl:col-span-1'
+            >
+              <Input
+                id={idOf('deliveryAddress')}
+                autoComplete='off'
+                maxLength={512}
+                value={values.deliveryAddress}
+                onChange={(event) => setHeader('deliveryAddress', event.target.value)}
+              />
+            </DocField>
+            {def.kind === 'out' ? (
+              <DocField
+                id={idOf('customerOrderNo')}
+                label={t('stockDocs.fields.customerOrderNo')}
+              >
+                <Input
+                  id={idOf('customerOrderNo')}
+                  autoComplete='off'
+                  maxLength={64}
+                  value={values.customerOrderNo}
+                  onChange={(event) => setHeader('customerOrderNo', event.target.value)}
+                />
+              </DocField>
+            ) : null}
+            <DocField
+              id={idOf('projectCode')}
+              label={t('stockDocs.fields.project')}
+            >
+              <Select
+                items={dictChoices(projects)}
+                value={values.projectCode || null}
+                onValueChange={(next) => setHeader('projectCode', next ?? '')}
+              >
+                <SelectTrigger id={idOf('projectCode')} className='w-full'>
+                  <SelectValue placeholder={t('orderDocs.form.choose')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {dictChoices(projects).map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </DocField>
+            <DocField
+              id={idOf('handlerUserId')}
+              label={t('stockDocs.fields.handler')}
+            >
+              <Select
+                items={personChoices(people)}
+                value={values.handlerUserId || null}
+                onValueChange={(next) => setHeader('handlerUserId', next ?? '')}
+              >
+                <SelectTrigger id={idOf('handlerUserId')} className='w-full'>
+                  <SelectValue placeholder={t('orderDocs.form.choose')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {personChoices(people).map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </DocField>
+            {values.reason === 'internal_use' ? (
+              <>
+                <DocField
+                  id={idOf('takerDepartmentId')}
+                  label={t('stockDocs.fields.takerDepartment')}
+                  required
+                  error={errors.takerDepartmentId}
+                >
+                  <Select
+                    items={departmentChoices(departments)}
+                    value={values.takerDepartmentId || null}
+                    onValueChange={(next) => setHeader('takerDepartmentId', next ?? '')}
+                  >
+                    <SelectTrigger
+                      id={idOf('takerDepartmentId')}
+                      className='w-full'
+                      aria-invalid={Boolean(errors.takerDepartmentId)}
+                    >
+                      <SelectValue placeholder={t('orderDocs.form.choose')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {departmentChoices(departments).map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </DocField>
+                <DocField
+                  id={idOf('takerUserId')}
+                  label={t('stockDocs.fields.taker')}
+                  required
+                  error={errors.takerUserId}
+                >
+                  <Select
+                    items={personChoices(people)}
+                    value={values.takerUserId || null}
+                    onValueChange={(next) => setHeader('takerUserId', next ?? '')}
+                  >
+                    <SelectTrigger
+                      id={idOf('takerUserId')}
+                      className='w-full'
+                      aria-invalid={Boolean(errors.takerUserId)}
+                    >
+                      <SelectValue placeholder={t('orderDocs.form.choose')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {personChoices(people).map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </DocField>
+              </>
+            ) : null}
+            <DocField
+              id={idOf('discountAmount')}
+              label={t('orderDocs.fields.discountAmount')}
+              error={errors.discountAmount}
+            >
+              <Input
+                id={idOf('discountAmount')}
+                inputMode='decimal'
+                autoComplete='off'
+                aria-invalid={Boolean(errors.discountAmount)}
+                value={values.discountAmount}
+                onChange={(event) => setHeader('discountAmount', event.target.value)}
+              />
+            </DocField>
             <Field>
               <FieldLabel>{t('stockDocs.fields.source')}</FieldLabel>
               {/* 来源由订单那一头生成时才有，这里不改。 */}
               <div className='flex min-h-8 items-center rounded-lg border border-border bg-muted/50 px-2.5 text-sm'>
-                {doc?.sourceType
-                  ? t(`stockDocs.source.${doc.sourceType}`)
+                {values.sourceType
+                  ? t(`stockDocs.source.${values.sourceType}`)
                   : t('stockDocs.source.manual')}
               </div>
             </Field>
@@ -414,9 +692,25 @@ function StockDocForm({
           </div>
         </DocumentSection>
         <DocumentSection title={t('stockDocs.lines')}>
-          <p className='text-sm text-muted-foreground'>
-            {t('stockDocs.lineCount', { lines: values.lines.length })}
-          </p>
+          <div className='flex flex-wrap items-center justify-between gap-2'>
+            <p className='text-sm text-muted-foreground'>
+              {t('stockDocs.lineCount', { lines: values.lines.length })}
+            </p>
+            {canPickOrder ? (
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                onClick={() => setPicking(true)}
+              >
+                {t(
+                  def.kind === 'in'
+                    ? 'stockDocs.pickPurchaseOrder'
+                    : 'stockDocs.pickSalesOrder',
+                )}
+              </Button>
+            ) : null}
+          </div>
           {errors.lines ? (
             <p role='alert' className='text-sm text-destructive'>
               {errors.lines}
@@ -440,6 +734,12 @@ function StockDocForm({
                     </span>
                   </TableHead>
                   <TableHead>{t('stockDocs.columns.batch')}</TableHead>
+                  {priceView ? (
+                    <>
+                      <TableHead>{t('stockDocs.columns.taxIncludedPrice')}</TableHead>
+                      <TableHead>{t('stockDocs.columns.taxExcludedPrice')}</TableHead>
+                    </>
+                  ) : null}
                   <TableHead>{t('stockDocs.columns.unit')}</TableHead>
                   <TableHead className='text-right'>
                     {t('stockDocs.columns.qty')}
@@ -447,6 +747,10 @@ function StockDocForm({
                       *
                     </span>
                   </TableHead>
+                  <TableHead>{t('stockDocs.columns.taxRate')}</TableHead>
+                  <TableHead>{t('stockDocs.columns.productionDate')}</TableHead>
+                  <TableHead>{t('stockDocs.columns.expiryDate')}</TableHead>
+                  <TableHead>{t('erp.fields.note')}</TableHead>
                   {showHand ? (
                     <TableHead className='text-right'>
                       {t('stockDocs.columns.onHand')}
@@ -512,6 +816,38 @@ function StockDocForm({
                         />
                         <LineError message={errors[`${prefix}batchNo`]} />
                       </TableCell>
+                      {priceView ? (
+                        <>
+                          <TableCell>
+                            <Input
+                              id={idOf(`${prefix}taxIncludedPrice`)}
+                              inputMode='decimal'
+                              className={cn(NUMBER)}
+                              aria-label={t('stockDocs.lineTaxIncludedPrice', { row })}
+                              aria-invalid={Boolean(errors[`${prefix}taxIncludedPrice`])}
+                              value={line.taxIncludedPrice}
+                              onChange={(event) =>
+                                setLine(index, 'taxIncludedPrice', event.target.value)
+                              }
+                            />
+                            <LineError message={errors[`${prefix}taxIncludedPrice`]} />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              id={idOf(`${prefix}taxExcludedPrice`)}
+                              inputMode='decimal'
+                              className={cn(NUMBER)}
+                              aria-label={t('stockDocs.lineTaxExcludedPrice', { row })}
+                              aria-invalid={Boolean(errors[`${prefix}taxExcludedPrice`])}
+                              value={line.taxExcludedPrice}
+                              onChange={(event) =>
+                                setLine(index, 'taxExcludedPrice', event.target.value)
+                              }
+                            />
+                            <LineError message={errors[`${prefix}taxExcludedPrice`]} />
+                          </TableCell>
+                        </>
+                      ) : null}
                       <TableCell className='text-muted-foreground'>
                         {item?.unitCode || DASH}
                       </TableCell>
@@ -526,6 +862,55 @@ function StockDocForm({
                           onChange={(event) => setLine(index, 'qty', event.target.value)}
                         />
                         <LineError message={errors[`${prefix}qty`]} />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          id={idOf(`${prefix}taxRate`)}
+                          inputMode='decimal'
+                          className={cn(NUMBER)}
+                          aria-label={t('stockDocs.lineTaxRate', { row })}
+                          aria-invalid={Boolean(errors[`${prefix}taxRate`])}
+                          value={line.taxRate}
+                          onChange={(event) => setLine(index, 'taxRate', event.target.value)}
+                        />
+                        <LineError message={errors[`${prefix}taxRate`]} />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          id={idOf(`${prefix}productionDate`)}
+                          inputMode='numeric'
+                          placeholder='YYYY-MM-DD'
+                          aria-label={t('stockDocs.lineProductionDate', { row })}
+                          aria-invalid={Boolean(errors[`${prefix}productionDate`])}
+                          value={line.productionDate}
+                          onChange={(event) =>
+                            setLine(index, 'productionDate', event.target.value)
+                          }
+                        />
+                        <LineError message={errors[`${prefix}productionDate`]} />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          id={idOf(`${prefix}expiryDate`)}
+                          inputMode='numeric'
+                          placeholder='YYYY-MM-DD'
+                          aria-label={t('stockDocs.lineExpiryDate', { row })}
+                          aria-invalid={Boolean(errors[`${prefix}expiryDate`])}
+                          value={line.expiryDate}
+                          onChange={(event) => setLine(index, 'expiryDate', event.target.value)}
+                        />
+                        <LineError message={errors[`${prefix}expiryDate`]} />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          id={idOf(`${prefix}note`)}
+                          maxLength={500}
+                          aria-label={t('stockDocs.lineNote', { row })}
+                          aria-invalid={Boolean(errors[`${prefix}note`])}
+                          value={line.note}
+                          onChange={(event) => setLine(index, 'note', event.target.value)}
+                        />
+                        <LineError message={errors[`${prefix}note`]} />
                       </TableCell>
                       {showHand ? (
                         <TableCell>
@@ -578,6 +963,20 @@ function StockDocForm({
             </span>
           </div>
         </DocumentSection>
+        <DocumentSection title={t('erp.docFiles.title')}>
+          <DocFilesPanel
+            files={doc?.files ?? []}
+            ids={values.fileIds}
+            disabled={busy}
+            onChange={(fileIds) => setHeader('fileIds', [...fileIds])}
+          />
+        </DocumentSection>
+        <OrderPickerDialog
+          def={def}
+          open={picking}
+          onOpenChange={setPicking}
+          onPick={applyOrder}
+        />
         {leave.dialog}
       </FeedbackForm>
     </DocumentPage>

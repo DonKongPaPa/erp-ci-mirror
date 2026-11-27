@@ -1348,6 +1348,9 @@ test('R-013: booting the authorization resources provider twice registers once',
     'purchaseOrderLines',
     'salesOrders',
     'salesOrderLines',
+    // R-022 复刻波 1：报价单头与明细两张表。
+    'quotations',
+    'quotationLines',
     // R-021 加片：单据附件通用表。
     'docFiles',
     // R-065：支出与到票各两张表。
@@ -1359,6 +1362,11 @@ test('R-013: booting the authorization resources provider twice registers once',
     'bizDictEntries',
     // R-064：订单评审头表与五项明细表。
     ...ORDER_REVIEW_COLLECTIONS.map((collection) => collection.name),
+    // R-020 波 1：盘点单与调拨单各两张表。
+    'stocktakingDocs', 'stocktakingDocLines', 'transferDocs', 'transferDocLines',
+    // R-021 波 1 加片：请购单头表与明细表。
+    'purchaseRequests',
+    'purchaseRequestLines',
   ]);
   expect(registered.composites.map((composite) => composite.name)).toContain(
     'fqc',
@@ -1373,6 +1381,18 @@ test('R-013: booting the authorization resources provider twice registers once',
     expect(registered.composites.map((composite) => composite.name)).toContain(name);
   }
   expect(registered.composites.map((composite) => composite.name)).toContain('orderReviews');
+  expect(registered.composites.map((composite) => composite.name)).toContain('purchaseRequests');
+  expect(registered.recordAccess).toContain('purchaseRequest.creatorOwn');
+  // R-076：三组打印资源各两个动作；表沿用 inventory，不重复登记集合。
+  for (const name of ['docPrintInternalIssue', 'docPrintSalesIssue', 'docPrintPurchaseReceipt']) {
+    expect(registered.composites.map((composite) => composite.name)).toContain(name);
+    expect(
+      registered.composites
+        .find((composite) => composite.name === name)
+        ?.actions.map((action) => action.name)
+        .sort(),
+    ).toEqual(['print', 'printPrice']);
+  }
 
   await expect(provider.boot()).resolves.toBeUndefined();
   expect(registrationSnapshot(authz)).toEqual(registered);
@@ -1397,6 +1417,13 @@ test('R-065: financeView 只登记在采购订单资源上，销售订单的动�
   ]);
   expect(actionsOf('orderReviews')).toEqual([
     'confirm', 'create', 'submit', 'update', 'view', 'void',
+  ]);
+  expect(actionsOf('purchaseRequests')).toEqual([
+    'convert', 'create', 'submit', 'update', 'view', 'void',
+  ]);
+  // R-022 复刻波 1：报价单新资源六个动作，不提供删除。
+  expect(actionsOf('quotations')).toEqual([
+    'confirm', 'convert', 'create', 'update', 'view', 'void',
   ]);
   expect(actionsOf('purchaseOrders')).toContain('financeView');
   expect(actionsOf('salesOrders'), '销售订单不该有借采购授权的 financeView').not.toContain('financeView');
@@ -1442,5 +1469,26 @@ test('R-013: root is the only unrestricted permission set; the seeded roles stay
       sets.protection(key),
       `${key} 不该带保护标记：业务角色与管理员自建的角色同等`,
     ).toBeUndefined();
+  }
+});
+
+
+test('R-020 波 1: registers stocktakings and transfers with no delete action', async ({ app }) => {
+  const authz = app.container.resolve(authorizationToken);
+  const actionsOf = (id: string): readonly string[] =>
+    authz.compositeResources.list()
+      .find((resource) => resource.name === id)
+      ?.actions.map((action) => action.name)
+      .sort() ?? [];
+  expect(actionsOf('stocktakings')).toEqual(['create', 'finish', 'update', 'view', 'void']);
+  expect(actionsOf('transfers')).toEqual(['create', 'post', 'update', 'view', 'void']);
+  for (const table of ['stocktakingDocs', 'stocktakingDocLines', 'transferDocs', 'transferDocLines']) {
+    const definition = authz.database.collections.list().find((entry) => entry.name === table);
+    expect(definition, `${table} 没有登记`).toBeDefined();
+    expect(definition?.actions, `${table} 不该登记删除`).not.toContain('delete');
+  }
+  // 两个资源都不做页面目录：本片没有页面，等波 2 的页面片再放。
+  for (const id of ['stocktakings', 'transfers']) {
+    expect(authz.ui.placementOf({ type: 'composite', id })).toBeUndefined();
   }
 });

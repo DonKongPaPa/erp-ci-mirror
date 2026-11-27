@@ -826,6 +826,120 @@ describe.each(KINDS)('$kind order pages', (kind: Kind) => {
     expect(reads).toBe(2);
   });
 
+  it('sends the wave-0 fields in the create body and leaves server amounts alone', async () => {
+    const user = userEvent.setup();
+    let created: unknown;
+    const waveWriter = (): AuthorizationSnapshot => ({
+      unrestricted: false,
+      permissions: [
+        ...writer(kind).permissions,
+        grant('bizDict', ['view']),
+        grant('bizOptions', ['view']),
+      ],
+    });
+    handlers = {
+      ...handlers,
+      'GET biz-dict/entries': (call) => {
+        const type = call.query?.dictType;
+        if (type === 'tax_rate')
+          return page({
+            id: 't1', dictType: type, code: '13', name: '13%', rate: 13,
+            isDefault: true, sort: 0,
+          });
+        if (type === 'project')
+          return page({
+            id: 'pr1', dictType: type, code: 'PRJ-1', name: 'Sample Project',
+            isDefault: false, sort: 0,
+          });
+        return page({
+          id: 'st1', dictType: 'settlement', code: 'CASH', name: 'Cash',
+          isDefault: false, sort: 0,
+        });
+      },
+      'GET person-options': () =>
+        page({ userId: 'u1', name: 'Sam Buyer', departmentId: null, departmentName: null }),
+      [`POST ${kind.api}`]: (call) => {
+        created = call.json;
+        return rawOrder(kind, { id: 'o9', orderNo: kind.no.created });
+      },
+      [`GET ${kind.api}/o9`]: () => rawOrder(kind, { id: 'o9', orderNo: kind.no.created }),
+    };
+    await renderAt(`${kind.path}/new`, waveWriter());
+
+    await choose(user, text.partnerLabel, `${PARTNER.code} ${PARTNER.name}`);
+    await choose(user, 'Warehouse', `${WAREHOUSE.code} ${WAREHOUSE.name}`);
+    await choose(user, 'Settlement method', 'Cash');
+    await choose(user, 'Project', 'Sample Project');
+    await choose(user, kind.kind === 'purchase' ? 'Buyer' : 'Salesperson', 'Sam Buyer');
+    await user.type(await screen.findByRole('textbox', { name: 'Contact' }, WAIT), 'Sam');
+    await user.type(await screen.findByRole('textbox', { name: 'Phone' }, WAIT), '000-1234');
+    await user.type(await screen.findByRole('textbox', { name: kind.kind === 'purchase' ? 'Delivery address' : 'Delivery address' }, WAIT), 'Sample Street 1');
+    await user.type(await screen.findByRole('textbox', { name: 'Discount amount' }, WAIT), '5');
+    await user.click(await screen.findByRole('button', { name: 'Add line' }, WAIT));
+    await choose(user, 'Item, line 1', `${ITEM_A.code} ${ITEM_A.name}`);
+    await user.type(await screen.findByRole('textbox', { name: 'Quantity, line 1' }, WAIT), '10');
+    await user.type(await screen.findByRole('textbox', { name: 'Tax-excluded price, line 1' }, WAIT), '100');
+    await user.type(await screen.findByRole('textbox', { name: 'Delivery date, line 1' }, WAIT), '2026-12-01');
+    await user.click(await screen.findByRole('button', { name: 'Save draft' }, WAIT));
+
+    await waitFor(() => expect(created).toBeDefined(), WAIT);
+    expect(created).toMatchObject({
+      [kind.partnerKey]: PARTNER.id,
+      warehouseId: WAREHOUSE.id,
+      contactName: 'Sam',
+      contactPhone: '000-1234',
+      settlementCode: 'CASH',
+      projectCode: 'PRJ-1',
+      handlerUserId: 'u1',
+      discountAmount: 5,
+      lines: [{
+        itemId: ITEM_A.id,
+        qty: 10,
+        taxRate: 13,
+        taxExcludedPrice: 100,
+        deliveryDate: '2026-12-01',
+      }],
+    });
+    // 前端不算金额：请求体里没有服务端算的列。
+    const lines = (created as { lines: Record<string, unknown>[] }).lines;
+    for (const key of ['taxExcludedAmount', 'taxAmount', 'taxIncludedAmount']) {
+      expect(lines[0]).not.toHaveProperty(key);
+    }
+    expect(created).not.toHaveProperty('taxIncludedTotal');
+  });
+
+  it('draws price and amount columns only with viewPrice', async () => {
+    const priced = rawOrder(kind, {
+      taxIncludedTotal: 113,
+      taxExcludedTotal: 100,
+      taxTotal: 13,
+      discountAmount: 0,
+      payableTotal: 113,
+      lines: [
+        {
+          id: 'l1', itemId: 'i1', qty: 10, price: 11.3,
+          receivedQty: 0, shippedQty: 0, remainingQty: 10,
+          taxRate: 13, taxExcludedPrice: 10,
+          taxExcludedAmount: 100, taxAmount: 13, taxIncludedAmount: 113,
+          deliveryDate: '2026-12-01',
+        },
+      ],
+    });
+    handlers = { ...handlers, [`GET ${kind.api}/o1`]: () => priced };
+
+    await renderAt(`${kind.path}/o1`, viewer(kind));
+    expect(await screen.findByText(kind.no.first, {}, WAIT)).toBeVisible();
+    expect(screen.queryByRole('columnheader', { name: 'Unit price' })).toBeNull();
+    expect(screen.queryByText('¥113.00')).toBeNull();
+
+    // 同一个会话加上 viewPrice：列与服务端合计都出现。
+    const pricedGrant = viewer(kind);
+    pricedGrant.permissions[0]!.actions.push('viewPrice');
+    await renderAt(`${kind.path}/o1`, pricedGrant);
+    expect(await screen.findByRole('columnheader', { name: 'Unit price' }, WAIT)).toBeVisible();
+    expect((await screen.findAllByText('¥113.00', {}, WAIT)).length).toBeGreaterThan(0);
+  });
+
   it('shows the other role nothing and sends no request for the order', async () => {
     const other = KINDS.find((entry) => entry.kind !== kind.kind)!;
     await renderAt(`${kind.path}/o1`, writer(other));

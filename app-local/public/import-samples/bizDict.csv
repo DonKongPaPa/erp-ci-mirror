@@ -1,0 +1,3 @@
+dictType,code,name,rate,sort,status
+settlement,SETTLE-DEMO-01,示例结算方式,,1,active
+tax_rate,TAX-DEMO-01,示例税率,13.00,2,active

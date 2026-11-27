@@ -63,6 +63,19 @@ export const APPROVAL_WORKFLOWS: Readonly<Record<string, ApprovalWorkflow>> = {
     nodes: [{ ...managerNode, dueAfterMs: undefined }],
     amountField: 'amount',
   },
+  /**
+   * R-021 波 1 加片：单节点、无阈值；审批人由业务片按部门编码解析后放进提交快照的
+   * `approvers`（R-017 的 context 选择器），金额字段只供节点计划读取，不额外加级。
+   */
+  purchase_request: {
+    key: 'purchase_request',
+    nodes: [{
+      key: 'manager',
+      negotiation: 'all',
+      reviewers: [CONTEXT('approvers')],
+    }],
+    amountField: 'estimatedTotal',
+  },
 };
 
 export function workflowOf(key: string): ApprovalWorkflow | undefined {

@@ -88,12 +88,14 @@ export const round4 = (value: number): number =>
 
 interface Priced {
   readonly qty: number;
-  readonly price: number | null;
+  readonly price?: number | null;
 }
 
 /** 一行的金额 = 数量 × 单价；没填单价就是 `undefined`。 */
 export function lineAmount(line: Priced): number | undefined {
-  return line.price === null ? undefined : round4(line.qty * line.price);
+  return line.price === null || line.price === undefined
+    ? undefined
+    : round4(line.qty * line.price);
 }
 
 /** 合计金额：每一行都填了单价才算得出来，否则 `undefined`（页面不画合计行）。 */
@@ -138,7 +140,12 @@ export interface LineDraft {
   readonly key: string;
   readonly itemId: string;
   readonly qty: string;
+  /** 含税单价（端点上仍叫 `price`）。 */
   readonly price: string;
+  readonly deliveryDate: string;
+  readonly taxRate: string;
+  readonly taxExcludedPrice: string;
+  readonly note: string;
 }
 
 export interface OrderFormValues {
@@ -146,6 +153,19 @@ export interface OrderFormValues {
   readonly orderDate: string;
   readonly remark: string;
   readonly lines: readonly LineDraft[];
+  // 波 0 加片：金额由服务端算，表单只录原始输入与回显服务端算出的值。
+  readonly warehouseId: string;
+  readonly contactName: string;
+  readonly contactPhone: string;
+  readonly deliveryAddress: string;
+  readonly settlementCode: string;
+  readonly projectCode: string;
+  readonly customerOrderNo: string;
+  readonly handlerUserId: string;
+  readonly discountAmount: string;
+  readonly fileIds: readonly string[];
+  /** 端点回过加片的键才在编辑时送 null 清空；老单据不夹带新键，保持旧请求形状。 */
+  readonly hasAddons: boolean;
 }
 
 export const emptyOrderForm = (): OrderFormValues => ({
@@ -153,6 +173,28 @@ export const emptyOrderForm = (): OrderFormValues => ({
   orderDate: today(),
   remark: '',
   lines: [],
+  warehouseId: '',
+  contactName: '',
+  contactPhone: '',
+  deliveryAddress: '',
+  settlementCode: '',
+  projectCode: '',
+  customerOrderNo: '',
+  handlerUserId: '',
+  discountAmount: '',
+  fileIds: [],
+  hasAddons: false,
+});
+
+export const newLine = (defaultTaxRate = ''): LineDraft => ({
+  key: `new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  itemId: '',
+  qty: '',
+  price: '',
+  deliveryDate: '',
+  taxRate: defaultTaxRate,
+  taxExcludedPrice: '',
+  note: '',
 });
 
 export const orderFormOf = (order: Order): OrderFormValues => ({
@@ -163,8 +205,36 @@ export const orderFormOf = (order: Order): OrderFormValues => ({
     key: line.id,
     itemId: line.itemId,
     qty: String(line.qty),
-    price: line.price === null ? '' : String(line.price),
+    price: line.price === null || line.price === undefined ? '' : String(line.price),
+    deliveryDate: line.deliveryDate ?? '',
+    taxRate: line.taxRate === null || line.taxRate === undefined ? '' : String(line.taxRate),
+    taxExcludedPrice:
+      line.taxExcludedPrice === null || line.taxExcludedPrice === undefined
+        ? ''
+        : String(line.taxExcludedPrice),
+    note: line.note ?? '',
   })),
+  warehouseId: order.warehouseId ?? '',
+  contactName: order.contactName ?? '',
+  contactPhone: order.contactPhone ?? '',
+  deliveryAddress: order.deliveryAddress ?? '',
+  settlementCode: order.settlementCode ?? '',
+  projectCode: order.projectCode ?? '',
+  customerOrderNo: order.customerOrderNo ?? '',
+  handlerUserId: order.handlerUserId ?? '',
+  discountAmount:
+    order.discountAmount === null || order.discountAmount === undefined
+      ? ''
+      : String(order.discountAmount),
+  fileIds: (order.files ?? []).map((file) => file.id),
+  hasAddons:
+    order.warehouseId !== undefined ||
+    order.contactName !== undefined ||
+    order.settlementCode !== undefined ||
+    order.projectCode !== undefined ||
+    order.discountAmount !== undefined ||
+    order.lines.some((line) => line.taxRate !== undefined) ||
+    (order.files?.length ?? 0) > 0,
 });
 
 /** 提交时才跑：返回「字段名 → 提示」，键的顺序就是光标落下去的顺序。 */
@@ -201,20 +271,69 @@ export function validateOrderForm(
     }
     if (line.price.trim() && parseDecimal(line.price) === undefined)
       errors[`price-${line.key}`] = t('orderDocs.errors.priceInvalid');
+    if ((line.deliveryDate ?? '').trim() && !parseDate(line.deliveryDate ?? ''))
+      errors[`deliveryDate-${line.key}`] = t('orderDocs.errors.dateInvalid');
+    if ((line.taxRate ?? '').trim()) {
+      const rate = parseDecimal(line.taxRate ?? '');
+      if (rate === undefined || rate < 0 || rate > 100)
+        errors[`taxRate-${line.key}`] = t('orderDocs.errors.taxRateInvalid');
+    }
+    if (
+      (line.taxExcludedPrice ?? '').trim() &&
+      parseDecimal(line.taxExcludedPrice ?? '') === undefined
+    )
+      errors[`taxExcludedPrice-${line.key}`] = t('orderDocs.errors.priceInvalid');
+    if ([...(line.note ?? '').trim()].length > 500)
+      errors[`note-${line.key}`] = t('orderDocs.errors.noteTooLong');
+  }
+  if ((values.discountAmount ?? '').trim()) {
+    const discount = parseDecimal(values.discountAmount ?? '');
+    if (discount === undefined)
+      errors.discountAmount = t('orderDocs.errors.priceInvalid');
   }
   return errors;
 }
 
-/** 发给端点的形状：单价没填就不带这个键（端点存成 `null`）。 */
+/** 空串在新建时不带这个键（端点存成 null），端点回过加片的编辑送 null 以便清空。 */
+function text(value: string, clear: boolean): string | null | undefined {
+  const trimmed = (value ?? '').trim();
+  if (trimmed) return trimmed;
+  return clear ? null : undefined;
+}
+
+/** 发给端点的形状；金额与合计一律不在这里算，交给服务端。 */
 export function orderInputOf(values: OrderFormValues): CreateOrderInput {
+  const clear = values.hasAddons;
   return {
     partnerId: values.partnerId,
     orderDate: values.orderDate.trim(),
     remark: values.remark.trim(),
+    warehouseId: text(values.warehouseId ?? '', clear),
+    contactName: text(values.contactName ?? '', clear),
+    contactPhone: text(values.contactPhone ?? '', clear),
+    deliveryAddress: text(values.deliveryAddress ?? '', clear),
+    settlementCode: text(values.settlementCode ?? '', clear),
+    projectCode: text(values.projectCode ?? '', clear),
+    customerOrderNo: text(values.customerOrderNo ?? '', clear),
+    handlerUserId: text(values.handlerUserId ?? '', clear),
+    ...((values.discountAmount ?? '').trim()
+      ? { discountAmount: Number(values.discountAmount) }
+      : {}),
+    ...(clear || (values.fileIds?.length ?? 0) > 0 ? { fileIds: values.fileIds ?? [] } : {}),
     lines: values.lines.map((line) => ({
       itemId: line.itemId,
       qty: Number(line.qty),
       ...(line.price.trim() ? { price: Number(line.price) } : {}),
+      ...((line.deliveryDate ?? '').trim()
+        ? { deliveryDate: (line.deliveryDate ?? '').trim() }
+        : clear ? { deliveryDate: null } : {}),
+      ...((line.taxRate ?? '').trim()
+        ? { taxRate: Number(line.taxRate) }
+        : clear ? { taxRate: null } : {}),
+      ...((line.taxExcludedPrice ?? '').trim()
+        ? { taxExcludedPrice: Number(line.taxExcludedPrice) }
+        : clear ? { taxExcludedPrice: null } : {}),
+      ...((line.note ?? '').trim() || clear ? { note: (line.note ?? '').trim() || null } : {}),
     })),
   };
 }
@@ -232,6 +351,17 @@ export function orderFieldErrors(error: unknown): FieldErrors {
     case 'WAREHOUSE_NOT_FOUND':
     case 'WAREHOUSE_INACTIVE':
       return { warehouseId: message };
+    case 'ORDER_LINE_PRICE_INVALID':
+    case 'ORDER_DISCOUNT_INVALID':
+      return { lines: message };
+    case 'ORDER_PERSON_INVALID':
+      return { handlerUserId: message };
+    case 'ORDER_DICT_CODE_INVALID':
+      return { settlementCode: message, projectCode: message };
+    case 'FILE_NOT_FOUND':
+    case 'FILE_UNAVAILABLE':
+    case 'FILE_TOO_MANY':
+      return { fileIds: message };
     case 'ITEM_NOT_FOUND':
     case 'ITEM_INACTIVE':
     case 'ORDER_LINE_INVALID':

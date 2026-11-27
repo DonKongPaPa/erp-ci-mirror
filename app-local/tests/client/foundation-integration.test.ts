@@ -80,6 +80,7 @@ describe('default Foundation integration', () => {
         'settingsSystem',
         [
           ['notificationManagement', '/settings/notifications/logs'],
+          ['imports', '/settings/imports'],
           ['databaseExplorer', '/settings/database-explorer'],
           ['capabilityGuide', '/settings/capabilities'],
         ],

@@ -557,6 +557,142 @@ describe('R-020 入库单', () => {
   });
 });
 
+  it('sends the wave-0 header and line fields in the create body', async () => {
+    let created: unknown;
+    const waveKeeper: AuthorizationSnapshot = {
+      unrestricted: false,
+      permissions: [
+        permission('inventory', [
+          'stockView', 'stockWrite', 'stockPost', 'stockVoid',
+          'warehouseView', 'stockPriceView',
+        ]),
+        permission('items', ['view']),
+        permission('bizDict', ['view']),
+        permission('bizOptions', ['view']),
+      ],
+    };
+    const entry = (dictType: string, code: string, name: string) => ({
+      id: `${dictType}-1`, dictType, code, name, rate: null,
+      startDate: null, endDate: null, description: null,
+      isDefault: dictType === 'tax_rate', sort: 0,
+      status: 'active', createdAt: at, updatedAt: at,
+    });
+    answer = (call) => {
+      if (call.method === 'GET' && call.path === 'biz-dict/entries')
+        return pageOf([entry('project', 'PRJ-1', 'Sample Project')]);
+      if (call.method === 'GET' && call.path === 'person-options')
+        return pageOf([{ userId: 'u1', name: 'Sam Keeper', departmentId: 'd1', departmentName: 'Sample Dept' }]);
+      if (call.method === 'GET' && call.path === 'department-options')
+        return pageOf([{ id: 'd1', name: 'Sample Dept' }]);
+      if (call.method === 'POST' && call.path === 'stock-docs') {
+        created = call.json;
+        return doc({ id: 'd9' });
+      }
+      return lookups(call);
+    };
+    const user = userEvent.setup();
+    await renderAt('/inbound-orders/new', waveKeeper);
+    await screen.findByRole('heading', { name: 'New inbound order' }, WAIT);
+
+    await user.type(await screen.findByRole('textbox', { name: 'Inbound date' }, WAIT), '2026-11-28');
+    await user.type(await screen.findByRole('textbox', { name: 'Supplier' }, WAIT), 's1');
+    await user.type(await screen.findByRole('textbox', { name: 'Contact' }, WAIT), 'Sam');
+    await user.type(await screen.findByRole('textbox', { name: 'Phone' }, WAIT), '000-1234');
+    await user.type(await screen.findByRole('textbox', { name: 'Discount amount' }, WAIT), '3');
+    await user.click(await screen.findByRole('combobox', { name: 'Item, line 1' }, WAIT));
+    await user.click(await screen.findByRole('option', { name: 'M001 Sample Sheet Metal' }, WAIT));
+    await user.click(await screen.findByRole('combobox', { name: 'Warehouse, line 1' }, WAIT));
+    await user.click(await screen.findByRole('option', { name: 'Sample Warehouse' }, WAIT));
+    await user.type(await screen.findByRole('textbox', { name: 'Quantity, line 1' }, WAIT), '10');
+    await user.type(await screen.findByRole('textbox', { name: 'Tax-included price, line 1' }, WAIT), '11.3');
+    await user.type(await screen.findByRole('textbox', { name: 'Tax rate, line 1' }, WAIT), '13');
+    await user.type(await screen.findByRole('textbox', { name: 'Production date, line 1' }, WAIT), '2026-11-01');
+    await user.type(await screen.findByRole('textbox', { name: 'Expiry date, line 1' }, WAIT), '2026-12-01');
+    await user.type(await screen.findByRole('textbox', { name: 'Line note, line 1' }, WAIT), 'Sample line');
+    await user.click(await screen.findByRole('button', { name: 'Save draft' }, WAIT));
+
+    await waitFor(() => expect(created).toBeDefined(), WAIT);
+    expect(created).toMatchObject({
+      docType: 'in',
+      reason: 'other_in',
+      docDate: '2026-11-28',
+      partnerId: 's1',
+      contactName: 'Sam',
+      contactPhone: '000-1234',
+      discountAmount: 3,
+      lines: [{
+        itemId: 'i1', warehouseId: 'w1', qty: 10,
+        taxIncludedPrice: 11.3, taxRate: 13,
+        productionDate: '2026-11-01', expiryDate: '2026-12-01',
+        note: 'Sample line',
+      }],
+    });
+    const lines = (created as { lines: Record<string, unknown>[] }).lines;
+    for (const key of ['taxExcludedAmount', 'taxAmount', 'taxIncludedAmount']) {
+      expect(lines[0]).not.toHaveProperty(key);
+    }
+    expect(created).not.toHaveProperty('taxIncludedTotal');
+  });
+
+  it('requires a taker on an internal-use draft before saving', async () => {
+    const waveKeeper: AuthorizationSnapshot = {
+      unrestricted: false,
+      permissions: [
+        permission('inventory', ['stockView', 'stockWrite', 'warehouseView']),
+        permission('items', ['view']),
+      ],
+    };
+    answer = (call) => {
+      if (call.method === 'GET' && call.path === 'stock-docs/d1')
+        return outDoc({ reason: 'internal_use', takerDepartmentId: null, takerUserId: null });
+      return lookups(call);
+    };
+    const user = userEvent.setup();
+    await renderAt('/outbound-orders/d1/edit', waveKeeper);
+    await screen.findByRole('textbox', { name: 'Quantity, line 1' }, WAIT);
+    await user.click(await screen.findByRole('button', { name: 'Save draft' }, WAIT));
+
+    expect((await screen.findAllByText('Required.', {}, WAIT)).length).toBeGreaterThan(0);
+    expect(calls('PATCH', 'stock-docs/d1')).toHaveLength(0);
+  });
+
+  it('brings the outstanding lines in from a purchase order', async () => {
+    const waveKeeper: AuthorizationSnapshot = {
+      unrestricted: false,
+      permissions: [
+        ...keeper.permissions,
+        permission('purchaseOrders', ['receive']),
+      ],
+    };
+    answer = (call) => {
+      if (call.method === 'GET' && call.path === 'purchase-orders/receivable')
+        return pageOf([{
+          id: 'po1', orderNo: 'CG-20261127-0001', orderDate: '2026-11-27',
+          status: 'ordered', warehouseId: 'w1', latestDeliveryDate: '2026-12-01',
+          contactName: 'Sam', contactPhone: '000-1234',
+          supplier: { id: 's1', code: 'SU1', name: 'Sample Vendor' },
+          lines: [{
+            id: 'pl1', itemId: 'i1', qty: 10, receivedQty: 2, remainingQty: 8,
+            deliveryDate: '2026-12-01',
+            item: { id: 'i1', code: 'M001', name: 'Sample Sheet Metal', spec: null, unitCode: 'KG' },
+          }],
+        }]);
+      return lookups(call);
+    };
+    const user = userEvent.setup();
+    await renderAt('/inbound-orders/new', waveKeeper);
+    await screen.findByRole('heading', { name: 'New inbound order' }, WAIT);
+    await user.click(await screen.findByRole('button', { name: 'Select a purchase order' }, WAIT));
+    expect(await screen.findByRole('columnheader', { name: 'Order number' }, WAIT)).toBeVisible();
+    await user.click(
+      await screen.findByRole('button', { name: 'Select order CG-20261127-0001' }, WAIT),
+    );
+
+    expect(await screen.findByRole('textbox', { name: 'Quantity, line 1' }, WAIT)).toHaveValue('8');
+    expect(await screen.findByText('From purchase order', {}, WAIT)).toBeVisible();
+    expect(await screen.findByRole('textbox', { name: 'Supplier' }, WAIT)).toHaveValue('s1');
+  });
+
 describe('R-020 出库单', () => {
   it('marks a line that exceeds the on-hand quantity and disables posting', async () => {
     answer = (call) => {
@@ -706,4 +842,37 @@ describe('R-020 出库单', () => {
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(calls('PATCH', 'stock-docs/d1')).toHaveLength(1);
   });
+  it('draws price columns only with stockPriceView', async () => {
+    const priced = outDoc({
+      taxIncludedTotal: 113, taxExcludedTotal: 100, taxTotal: 13, discountAmount: 0,
+      payableTotal: 113,
+      lines: [line({
+        taxIncludedPrice: 11.3, taxExcludedPrice: 10, taxRate: 13,
+        taxExcludedAmount: 100, taxAmount: 13, taxIncludedAmount: 113,
+        productionDate: '2026-11-01', expiryDate: '2026-12-01', note: 'Sample line',
+      })],
+    });
+    answer = (call) => {
+      if (call.method === 'GET' && call.path === 'stock-docs/d1') return priced;
+      return lookups(call);
+    };
+    await renderAt('/outbound-orders/d1', viewer);
+    expect(await screen.findByText('CK-20261127-0001', {}, WAIT)).toBeVisible();
+    expect(screen.queryByRole('columnheader', { name: 'Tax-included price' })).toBeNull();
+
+    const pricedKeeper: AuthorizationSnapshot = {
+      unrestricted: false,
+      permissions: [
+        ...keeper.permissions,
+        permission('inventory', ['stockPriceView']),
+      ],
+    };
+    answer = (call) => {
+      if (call.method === 'GET' && call.path === 'stock-docs/d1') return priced;
+      return lookups(call);
+    };
+    await renderAt('/outbound-orders/d1', pricedKeeper);
+    expect(await screen.findByRole('columnheader', { name: 'Tax-included price' }, WAIT)).toBeVisible();
+  });
+
 });

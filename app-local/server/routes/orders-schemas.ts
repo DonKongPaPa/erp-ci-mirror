@@ -173,6 +173,8 @@ const salesOrder = z.object({
   customerId: z.string(),
   customerOrderNo: z.string().nullable().optional(),
   customer: partnerSummary.nullable(),
+  // R-022 复刻波 1：报价转出的订单才有值；空值是 null，老客户端形状不变。
+  quotationId: z.string().nullable(),
   lines: z.array(orderLine),
 });
 

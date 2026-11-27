@@ -8,7 +8,7 @@ export interface StockKind {
   readonly kind: DocType;
   /** 列表的路径，也是新建、详情、编辑的父路径。 */
   readonly base: '/inbound-orders' | '/outbound-orders';
-  /** 这一个方向能选的类型（R-020：reason 必须与 docType 相配，一共只有四种）。 */
+  /** 这一个方向能选的类型（R-020 加片：reason 必须与 docType 相配，一共八种，每个方向四种）。 */
   readonly reasons: readonly DocReason[];
   /** 由订单生成时的来源类型；手工录入的单据没有来源。 */
   readonly sourceType: 'purchase_order' | 'sales_order';
@@ -22,7 +22,7 @@ export const STOCK_KINDS: Readonly<Record<DocType, StockKind>> = {
   in: {
     kind: 'in',
     base: '/inbound-orders',
-    reasons: ['other_in', 'purchase_receipt'],
+    reasons: ['purchase_receipt', 'production_receipt', 'sales_return', 'other_in'],
     sourceType: 'purchase_order',
     manualReason: 'other_in',
     words: 'in',
@@ -30,7 +30,7 @@ export const STOCK_KINDS: Readonly<Record<DocType, StockKind>> = {
   out: {
     kind: 'out',
     base: '/outbound-orders',
-    reasons: ['other_out', 'sales_issue'],
+    reasons: ['internal_use', 'sales_issue', 'purchase_return', 'other_out'],
     sourceType: 'sales_order',
     manualReason: 'other_out',
     words: 'out',

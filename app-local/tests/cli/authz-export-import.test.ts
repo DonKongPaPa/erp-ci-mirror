@@ -14,11 +14,15 @@ import AuthzUpgradeR019Page from '../../cli/authz/upgrade-r019-page.js';
 import AuthzUpgradeR019Price from '../../cli/authz/upgrade-r019-price.js';
 import AuthzUpgradeR020 from '../../cli/authz/upgrade-r020.js';
 import AuthzUpgradeR020Receive from '../../cli/authz/upgrade-r020-receive.js';
+import AuthzUpgradeR020Stocktake from '../../cli/authz/upgrade-r020-stocktake.js';
 import AuthzUpgradeR020Page from '../../cli/authz/upgrade-r020-page.js';
 import AuthzUpgradeR021 from '../../cli/authz/upgrade-r021.js';
 import AuthzUpgradeR021Price from '../../cli/authz/upgrade-r021-price.js';
 import AuthzUpgradeR021Page from '../../cli/authz/upgrade-r021-page.js';
+import AuthzUpgradeR021PurchaseRequest from '../../cli/authz/upgrade-r021-purchase-request.js';
+import AuthzUpgradeR022Quotation from '../../cli/authz/upgrade-r022-quotation.js';
 import AuthzUpgradeR025 from '../../cli/authz/upgrade-r025.js';
+import AuthzUpgradeR076 from '../../cli/authz/upgrade-r076.js';
 import AuthzUpgradeR026 from '../../cli/authz/upgrade-r026.js';
 import AuthzUpgradeR065 from '../../cli/authz/upgrade-r065.js';
 import AuthzUpgradeR064 from '../../cli/authz/upgrade-r064.js';
@@ -53,14 +57,18 @@ test('R-013: the authz commands are registered under their own topic', () => {
     'upgrade-r020',
     'upgrade-r020-page',
     'upgrade-r020-receive',
+    'upgrade-r020-stocktake',
     'upgrade-r021',
     'upgrade-r021-page',
     'upgrade-r021-price',
+    'upgrade-r021-purchase-request',
+    'upgrade-r022-quotation',
     'upgrade-r025',
     'upgrade-r026',
     'upgrade-r064',
     'upgrade-r065',
     'upgrade-r072',
+    'upgrade-r076',
   ]);
   expect(plugin!.commands.export).toBe(AuthzExport);
   expect(plugin!.commands.import).toBe(AuthzImport);
@@ -73,6 +81,9 @@ test('R-013: the authz commands are registered under their own topic', () => {
   // R-025 的升级步骤：给已有环境的 staff 补班次只读授权，可单独跑、可重跑。
   expect(plugin!.commands['upgrade-r025']).toBe(AuthzUpgradeR025);
   expect(AuthzUpgradeR025.description).toContain('shifts.view');
+  // R-076 的升级步骤：给三个角色补打印授权，可单独跑、可重跑。
+  expect(plugin!.commands['upgrade-r076']).toBe(AuthzUpgradeR076);
+  expect(AuthzUpgradeR076.description).toContain('printPrice');
   // R-020 的升级步骤：给已有环境的 warehouse 补库存授权，可单独跑、可重跑。
   expect(plugin!.commands['upgrade-r014']).toBe(AuthzUpgradeR014);
   expect(plugin!.commands['upgrade-r014-page']).toBe(AuthzUpgradeR014Page);
@@ -84,6 +95,8 @@ test('R-013: the authz commands are registered under their own topic', () => {
   expect(AuthzUpgradeR019Price.description).toContain('viewSalesPrice');
   expect(plugin!.commands['upgrade-r020']).toBe(AuthzUpgradeR020);
   expect(plugin!.commands['upgrade-r020-receive']).toBe(AuthzUpgradeR020Receive);
+  expect(plugin!.commands['upgrade-r020-stocktake']).toBe(AuthzUpgradeR020Stocktake);
+  expect(AuthzUpgradeR020Stocktake.description).toContain('stocktakings');
   expect(plugin!.commands['upgrade-r020-page']).toBe(AuthzUpgradeR020Page);
   expect(AuthzUpgradeR020.description).toContain('inventory');
   // R-021/R-022 的升级步骤：给采购/销售补订单授权与只读引用，可单独跑、可重跑。
@@ -94,6 +107,14 @@ test('R-013: the authz commands are registered under their own topic', () => {
   expect(AuthzUpgradeR021Page.description).toContain('salesOrders');
   expect(AuthzUpgradeR021.description).toContain('purchaseOrders');
   expect(AuthzUpgradeR021.description).toContain('salesOrders');
+  // R-021 波 1 加片：给三个现成角色补请购单动作，可单独跑、可重跑。
+  expect(plugin!.commands['upgrade-r021-purchase-request']).toBe(AuthzUpgradeR021PurchaseRequest);
+  expect(AuthzUpgradeR021PurchaseRequest.description).toContain('purchaseRequests');
+  expect(AuthzUpgradeR021PurchaseRequest.description).toContain('creator');
+  // R-022 复刻波 1：给已有环境的 sales 补报价六个动作，可单独跑、可重跑。
+  expect(plugin!.commands['upgrade-r022-quotation']).toBe(AuthzUpgradeR022Quotation);
+  expect(AuthzUpgradeR022Quotation.description).toContain('quotations.view');
+  expect(AuthzUpgradeR022Quotation.description).toContain('quotations.convert');
   // R-072 的升级步骤：给已有环境的三个业务角色补字典与选项只读，可单独跑、可重跑。
   // R-064 的升级步骤：建 planning 并补评审与台账只读，可单独跑、可重跑。
   expect(plugin!.commands['upgrade-r064']).toBe(AuthzUpgradeR064);

@@ -1,7 +1,4 @@
-import { useApiClient } from '@nocobase/app-client';
-import { useCallback, useEffect, useState } from 'react';
-
-import type { EntityPage } from '#components/erp/list-state';
+export { useOptionPage as useReferencePage } from '#components/erp/options';
 
 /**
  * 订单页面要用的三份档案：物料（R-019）、往来单位（R-014）、仓库（R-020）。
@@ -56,64 +53,4 @@ export function itemChoices(
   }));
 }
 
-const PAGE_SIZE = 100;
-/** 最多读十页（一千条）：再多就只对得上前面这些的名字，记在合并请求的「MVP 后再修」里。 */
-const MAX_PAGES = 10;
-
-export interface ReferencePage<T> {
-  /** 还没读到或是读失败时是 `undefined`。 */
-  readonly items: readonly T[] | undefined;
-  readonly error: unknown;
-  readonly loading: boolean;
-  readonly reload: () => void;
-}
-
-/**
- * 把一个列表端点按页读完。`enabled` 为 `false`（没有读的权限）时不发请求。
- * 端点没有「按 id 取一批」的参数，只能整份读回来在页面上对名字。
- */
-export function useReferencePage<T>(
-  path: string,
-  enabled: boolean,
-): ReferencePage<T> {
-  const api = useApiClient();
-  const [revision, setRevision] = useState(0);
-  const [result, setResult] = useState<{
-    path: string;
-    data?: T[];
-    error?: unknown;
-  }>({ path: '' });
-
-  useEffect(() => {
-    if (!enabled) return;
-    const controller = new AbortController();
-    const collected: T[] = [];
-    const load = async (): Promise<void> => {
-      const separator = path.includes('?') ? '&' : '?';
-      for (let page = 1; page <= MAX_PAGES; page += 1) {
-        const chunk = await api.request<EntityPage<T>>({
-          path: `${path}${separator}page=${page}&pageSize=${PAGE_SIZE}`,
-          signal: controller.signal,
-        });
-        collected.push(...chunk.items);
-        if (chunk.items.length === 0 || collected.length >= chunk.total) break;
-      }
-      if (!controller.signal.aborted) setResult({ path, data: collected });
-    };
-    void load().catch((error: unknown) => {
-      if (!controller.signal.aborted) setResult({ path, error });
-    });
-    return () => controller.abort();
-  }, [api, path, enabled, revision]);
-
-  const reload = useCallback(() => setRevision((value) => value + 1), []);
-  const current = result.path === path;
-  const data = current ? result.data : undefined;
-  const error = current ? result.error : undefined;
-  return {
-    items: data,
-    error,
-    loading: enabled && data === undefined && error === undefined,
-    reload,
-  };
-}
+/** 通用分页读取器现在放在地基里，订单与出入库、财务页共用一份（见 `components/erp/options.ts`）。 */

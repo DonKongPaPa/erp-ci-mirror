@@ -242,11 +242,26 @@ describe('app client routes', () => {
       { name: 'bizDict', authorizedAs: 'bizDict' },
       { name: 'bizDictNew', authorizedAs: 'bizDict' },
       { name: 'bizDictEdit', authorizedAs: 'bizDict' },
+      // R-065：支出记录、到票记录两个财务页面，子路由继承各自的页面授权。
+      { name: 'expenses', authorizedAs: 'expenses' },
+      { name: 'expenseNew', authorizedAs: 'expenses' },
+      { name: 'expense', authorizedAs: 'expenses' },
+      { name: 'expenseEdit', authorizedAs: 'expenses' },
+      { name: 'invoiceReceipts', authorizedAs: 'invoiceReceipts' },
+      { name: 'invoiceReceiptNew', authorizedAs: 'invoiceReceipts' },
+      { name: 'invoiceReceipt', authorizedAs: 'invoiceReceipts' },
+      { name: 'invoiceReceiptEdit', authorizedAs: 'invoiceReceipts' },
       { name: 'quality', authorizedAs: 'quality' },
       { name: 'feedbacks', authorizedAs: 'feedback' },
       { name: 'feedbackNew', authorizedAs: 'feedback' },
       { name: 'feedbackDetail', authorizedAs: 'feedback' },
+      // R-017 M5：三个审批页取 authz: 'skip'，和收件箱一样对所有登录用户开放。
+      { name: 'approvalMine', authorizedAs: null },
+      { name: 'approvalTasks', authorizedAs: null },
+      { name: 'approvalDetail', authorizedAs: null },
       { name: 'apiKeysManagement', authorizedAs: null },
+      // R-076：打印视图不登记页面授权，进入时按 docType 检查 print 动作。
+      { name: 'docPrintView', authorizedAs: null },
       // The AI Agent plugin's pages, in the order the application registers them. Each child route inherits its
       // parent page's grant, so `runtimes-connect`, `skills-new` and `skills-detail` share it.
       { name: 'models', authorizedAs: 'settings:agents.services' },
@@ -292,6 +307,8 @@ describe('app client routes', () => {
       { name: 'notificationTemplates', authorizedAs: 'notification.templates' },
       // A template's own address keeps the list page's grant.
       { name: 'notificationTemplate', authorizedAs: 'notification.templates' },
+      // R-068：导入工具只在系统设置露出，页面授权 `imports` 默认只有 root。
+      { name: 'imports', authorizedAs: 'imports' },
       { name: 'databaseExplorer', authorizedAs: 'database-explorer' },
     ]);
   });
@@ -320,6 +337,7 @@ describe('app client routes', () => {
       '/settings/notifications/logs',
       '/settings/notifications/templates',
       '/settings/notifications/templates/:templateId',
+      '/settings/imports',
       '/settings/database-explorer',
     ]);
     const built = resolveAppClientContributions([
@@ -386,11 +404,26 @@ describe('app client routes', () => {
       { name: 'bizDict', authorizedAs: 'bizDict' },
       { name: 'bizDictNew', authorizedAs: 'bizDict' },
       { name: 'bizDictEdit', authorizedAs: 'bizDict' },
+      // R-065：支出记录、到票记录两个财务页面，子路由继承各自的页面授权。
+      { name: 'expenses', authorizedAs: 'expenses' },
+      { name: 'expenseNew', authorizedAs: 'expenses' },
+      { name: 'expense', authorizedAs: 'expenses' },
+      { name: 'expenseEdit', authorizedAs: 'expenses' },
+      { name: 'invoiceReceipts', authorizedAs: 'invoiceReceipts' },
+      { name: 'invoiceReceiptNew', authorizedAs: 'invoiceReceipts' },
+      { name: 'invoiceReceipt', authorizedAs: 'invoiceReceipts' },
+      { name: 'invoiceReceiptEdit', authorizedAs: 'invoiceReceipts' },
       { name: 'quality', authorizedAs: 'quality' },
       { name: 'feedbacks', authorizedAs: 'feedback' },
       { name: 'feedbackNew', authorizedAs: 'feedback' },
       { name: 'feedbackDetail', authorizedAs: 'feedback' },
+      // R-017 M5：三个审批页取 authz: 'skip'，和收件箱一样对所有登录用户开放。
+      { name: 'approvalMine', authorizedAs: null },
+      { name: 'approvalTasks', authorizedAs: null },
+      { name: 'approvalDetail', authorizedAs: null },
       { name: 'apiKeysManagement', authorizedAs: null },
+      // R-076：打印视图不登记页面授权，进入时按 docType 检查 print 动作。
+      { name: 'docPrintView', authorizedAs: null },
       { name: 'models', authorizedAs: 'settings:agents.services' },
       { name: 'agents', authorizedAs: 'agents' },
       { name: 'runtimes', authorizedAs: 'runtimes' },
@@ -434,6 +467,8 @@ describe('app client routes', () => {
       { name: 'notificationTemplates', authorizedAs: 'notification.templates' },
       // A template's own address keeps the list page's grant.
       { name: 'notificationTemplate', authorizedAs: 'notification.templates' },
+      // R-068：导入工具只在系统设置露出，页面授权 `imports` 默认只有 root。
+      { name: 'imports', authorizedAs: 'imports' },
       { name: 'databaseExplorer', authorizedAs: 'database-explorer' },
     ]);
     for (const loader of componentLoadersIn(built.routes))

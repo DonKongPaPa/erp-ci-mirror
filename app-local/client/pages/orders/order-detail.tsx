@@ -15,6 +15,7 @@ import {
   useResolvedPath,
 } from 'react-router';
 
+import { ConfirmDialog } from '#components/erp/confirm';
 import {
   DocumentHeaderFields,
   DocumentPage,
@@ -22,7 +23,8 @@ import {
   DocumentStatusBar,
   LinesTable,
 } from '#components/erp/document';
-import { ConfirmDialog } from '#components/erp/confirm';
+import type { DetailField } from '#components/erp/detail';
+import { DocFilesPanel } from '#components/erp/doc-files-panel';
 import { errorText, type Translate } from '#components/erp/messages';
 import { PendingButton } from '#components/pending-button';
 import { Button } from '#components/ui/button';
@@ -33,26 +35,28 @@ import { OrdersClient, type Order, type OrderLine } from './client.js';
 import { useOrder } from './record.js';
 import { Dash, ItemCell, OrderStatusBadge } from './fields.js';
 import { ORDER_LIST_KEYS, type OrderKindDef } from './kinds.js';
+import { formatAmount, formatDateTime, formatNumber } from './model.js';
 import {
-  formatAmount,
-  formatDateTime,
-  formatNumber,
-  lineAmount,
-  orderTotal,
-} from './model.js';
-import { useReferencePage, type Item } from './reference.js';
+  useReferencePage,
+  type Item,
+  type WarehouseOption,
+} from './reference.js';
 
 /** 数量、单价：只管千分位，最多四位小数。 */
-function number(value: number, locale: string): ReactNode {
-  return <span className='tabular-nums'>{formatNumber(value, locale)}</span>;
+function number(value: number | null | undefined, locale: string): ReactNode {
+  return value === undefined || value === null ? (
+    <Dash />
+  ) : (
+    <span className='tabular-nums'>{formatNumber(value, locale)}</span>
+  );
 }
 
 function money(
-  value: number | undefined,
+  value: number | null | undefined,
   locale: string,
   t: Translate,
 ): ReactNode {
-  return value === undefined ? (
+  return value === undefined || value === null ? (
     <Dash />
   ) : (
     <span className='tabular-nums'>
@@ -74,9 +78,8 @@ export interface OrderOutletContext {
 
 /**
  * 一张订单的子页（《基座ERP前端设计》2.4、3.4、3.5）：盖在列表上，页头是单号、状态徽标和这一刻能做的操作，
- * 下面是状态条、表头（往来单位、单据日期、提交时间、备注）、明细与合计金额。
- * 下单（确认）之后明细锁定；生成入库单（出库单）是这里的一个对话框；取消订单先弹确认框。
- * 每个操作按动作判权限，不看角色名（设计 2.7）。
+ * 下面是状态条、表头（含波 0 加片的表头字段与只读合计）、明细与附件。
+ * 价格与金额只在持 `viewPrice` 时画；端点没回的键不拿空值当 0。
  */
 export function OrderDetailPage({
   def,
@@ -91,6 +94,7 @@ export function OrderDetailPage({
   const orderId = useParams()[def.param] ?? '';
   const client = useMemo(() => new OrdersClient(api, def), [api, def]);
   const view = useCan({ resource: def.resource, action: 'view' });
+  const priceView = useCan({ resource: def.resource, action: 'viewPrice' });
   const update = useCan({ resource: def.resource, action: 'update' });
   const submit = useCan({ resource: def.resource, action: 'submit' });
   const cancel = useCan({ resource: def.resource, action: 'cancel' });
@@ -99,9 +103,17 @@ export function OrderDetailPage({
     resource: { type: 'composite', id: 'items' },
     action: 'view',
   });
+  const warehouseView = useCan({
+    resource: { type: 'composite', id: 'inventory' },
+    action: 'warehouseView',
+  });
   const record = useOrder(def, orderId, view.can);
   // 明细行只有物料 id，名字、规格、单位要拿物料列表来对。
   const items = useReferencePage<Item>('items', itemsView.can);
+  const warehouses = useReferencePage<WarehouseOption>(
+    'warehouses?status=active',
+    warehouseView.can,
+  );
   const order = record.data;
 
   const owner = useResolvedPath('..').pathname;
@@ -121,6 +133,23 @@ export function OrderDetailPage({
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string>();
+  const [filesBusy, setFilesBusy] = useState(false);
+  const [fileError, setFileError] = useState<string>();
+
+  /** 详情里的附件改动随整组 fileIds 存草稿；已提交的单据只读。 */
+  const changeFiles = async (ids: readonly string[]): Promise<void> => {
+    if (!order || order.status !== 'draft' || !update.can) return;
+    setFilesBusy(true);
+    setFileError(undefined);
+    try {
+      await client.update(order.id, { fileIds: [...ids] });
+      record.reload();
+    } catch (next) {
+      setFileError(errorText(next, t));
+    } finally {
+      setFilesBusy(false);
+    }
+  };
 
   /** 提交（下单 / 确认）与取消订单。取消有确认框，错写在框里；提交被拒用提示说。 */
   const act = async (action: 'submit' | 'cancel'): Promise<void> => {
@@ -152,8 +181,8 @@ export function OrderDetailPage({
     () => new Map((items.items ?? []).map((item) => [item.id, item] as const)),
     [items.items],
   );
-  const columns = useMemo<ColumnDef<OrderLine>[]>(
-    () => [
+  const columns = useMemo<ColumnDef<OrderLine>[]>(() => {
+    const cols: ColumnDef<OrderLine>[] = [
       {
         id: 'index',
         header: '#',
@@ -177,19 +206,19 @@ export function OrderDetailPage({
           itemsById.get(row.original.itemId)?.unitCode ?? <Dash />,
       },
       {
-        id: 'price',
-        header: t('orderDocs.fields.price'),
-        cell: ({ row }) =>
-          row.original.price === null ? (
-            <Dash />
-          ) : (
-            number(row.original.price, locale)
-          ),
-      },
-      {
         id: 'qty',
         header: t('orderDocs.fields.qty'),
         cell: ({ row }) => number(row.original.qty, locale),
+      },
+      {
+        id: 'taxRate',
+        header: t('orderDocs.fields.taxRate'),
+        cell: ({ row }) => number(row.original.taxRate, locale),
+      },
+      {
+        id: 'deliveryDate',
+        header: t('orderDocs.fields.deliveryDate'),
+        cell: ({ row }) => row.original.deliveryDate ?? <Dash />,
       },
       {
         id: 'done',
@@ -201,14 +230,38 @@ export function OrderDetailPage({
         header: t(`${def.l}.actions.remaining`),
         cell: ({ row }) => number(row.original.remainingQty, locale),
       },
-      {
-        id: 'amount',
-        header: t('orderDocs.fields.amount'),
-        cell: ({ row }) => money(lineAmount(row.original), locale, t),
-      },
-    ],
-    [t, def.l, itemsById, locale],
-  );
+    ];
+    // 没有 viewPrice 的会话响应里根本没有这些键：整列不画，不画「—」占位。
+    if (priceView.can)
+      cols.push(
+        {
+          id: 'price',
+          header: t('orderDocs.fields.price'),
+          cell: ({ row }) => number(row.original.price, locale),
+        },
+        {
+          id: 'taxExcludedPrice',
+          header: t('orderDocs.fields.taxExcludedPrice'),
+          cell: ({ row }) => number(row.original.taxExcludedPrice, locale),
+        },
+        {
+          id: 'taxExcludedAmount',
+          header: t('orderDocs.fields.taxExcludedAmount'),
+          cell: ({ row }) => money(row.original.taxExcludedAmount, locale, t),
+        },
+        {
+          id: 'taxAmount',
+          header: t('orderDocs.fields.taxAmount'),
+          cell: ({ row }) => money(row.original.taxAmount, locale, t),
+        },
+        {
+          id: 'taxIncludedAmount',
+          header: t('orderDocs.fields.taxIncludedAmount'),
+          cell: ({ row }) => money(row.original.taxIncludedAmount, locale, t),
+        },
+      );
+    return cols;
+  }, [t, def.l, itemsById, locale, priceView.can]);
 
   const statusBar = (
     tone: 'neutral' | 'info' | 'destructive',
@@ -264,6 +317,103 @@ export function OrderDetailPage({
       </Button>
     ) : null;
 
+  const warehouseName = warehouses.items?.find(
+    (one) => one.id === order?.warehouseId,
+  )?.name;
+  const fields: (DetailField | false)[] = order
+    ? [
+        {
+          label: t(`${def.l}.partnerLabel`),
+          value: order.partner?.name,
+        },
+        { label: t('orderDocs.fields.orderDate'), value: order.orderDate },
+        {
+          label: t('orderDocs.fields.latestDeliveryDate'),
+          value: order.latestDeliveryDate,
+        },
+        {
+          label: t('orderDocs.fields.warehouse'),
+          value: warehouseName ?? order.warehouseId,
+        },
+        {
+          label: t('orderDocs.fields.contactName'),
+          value: order.contactName,
+        },
+        {
+          label: t('orderDocs.fields.contactPhone'),
+          value: order.contactPhone,
+        },
+        {
+          label: t(`${def.l}.deliveryAddress`),
+          value: order.deliveryAddress,
+          wide: true,
+        },
+        {
+          label: t('orderDocs.fields.settlement'),
+          value: order.settlementLabel ?? order.settlementCode,
+        },
+        {
+          label: t('orderDocs.fields.project'),
+          value: order.projectLabel ?? order.projectCode,
+        },
+        ...(def.id === 'sales'
+          ? [
+              {
+                label: t('orderDocs.fields.customerOrderNo'),
+                value: order.customerOrderNo,
+              },
+            ]
+          : []),
+        {
+          label: t(`${def.l}.handlerLabel`),
+          value: order.handler?.name,
+        },
+        {
+          label: t('orderDocs.fields.submittedAt'),
+          value: order.submittedAt
+            ? formatDateTime(order.submittedAt, locale)
+            : undefined,
+        },
+        { label: t('erp.fields.note'), value: order.remark, wide: true },
+        ...(priceView.can
+          ? [
+              {
+                label: t('orderDocs.fields.totalQty'),
+                value: number(order.totalQty, locale),
+              },
+              {
+                label: t('orderDocs.fields.taxIncludedTotal'),
+                value: money(order.taxIncludedTotal, locale, t),
+              },
+              {
+                label: t('orderDocs.fields.taxExcludedTotal'),
+                value: money(order.taxExcludedTotal, locale, t),
+              },
+              {
+                label: t('orderDocs.fields.taxTotal'),
+                value: money(order.taxTotal, locale, t),
+              },
+              {
+                label: t('orderDocs.fields.discountAmount'),
+                value: money(order.discountAmount, locale, t),
+              },
+              {
+                label: t(`${def.l}.payableLabel`),
+                value: money(order.payableTotal, locale, t),
+              },
+              {
+                label: t(`${def.l}.paidLabel`),
+                value: money(order.paidAmount, locale, t),
+              },
+              {
+                label: t(`${def.l}.invoicedLabel`),
+                value: money(order.invoicedAmount, locale, t),
+              },
+            ]
+          : []),
+      ]
+    : [];
+
   return (
     <>
       <DocumentPage
@@ -308,29 +458,7 @@ export function OrderDetailPage({
         {order ? (
           <>
             <DocumentSection title={t('orderDocs.form.header')}>
-              <DocumentHeaderFields
-                fields={[
-                  {
-                    label: t(`${def.l}.partnerLabel`),
-                    value: order.partner?.name,
-                  },
-                  {
-                    label: t('orderDocs.fields.orderDate'),
-                    value: order.orderDate,
-                  },
-                  {
-                    label: t('orderDocs.fields.submittedAt'),
-                    value: order.submittedAt
-                      ? formatDateTime(order.submittedAt, locale)
-                      : undefined,
-                  },
-                  {
-                    label: t('erp.fields.note'),
-                    value: order.remark,
-                    wide: true,
-                  },
-                ]}
-              />
+              <DocumentHeaderFields fields={fields} />
             </DocumentSection>
             <DocumentSection title={t('orderDocs.fields.lines')}>
               <LinesTable<OrderLine>
@@ -338,19 +466,35 @@ export function OrderDetailPage({
                 rows={order.lines}
                 getRowId={(line) => line.id}
                 totals={
-                  orderTotal(order.lines) === undefined ? undefined : (
+                  priceView.can && order.taxIncludedTotal !== undefined ? (
                     <>
-                      <TableCell colSpan={7} className='text-right font-medium'>
-                        {t('orderDocs.fields.totalAmount')}
+                      <TableCell
+                        colSpan={columns.length - 1}
+                        className='text-right font-medium'
+                      >
+                        {t(`${def.l}.payableLabel`)}
                       </TableCell>
                       <TableCell className='text-right font-medium'>
-                        {money(orderTotal(order.lines), locale, t)}
+                        {money(order.payableTotal, locale, t)}
                       </TableCell>
                     </>
-                  )
+                  ) : undefined
                 }
                 emptyMessage={t('orderDocs.form.linesEmpty')}
               />
+            </DocumentSection>
+            <DocumentSection title={t('erp.docFiles.title')}>
+              <DocFilesPanel
+                files={order.files ?? []}
+                ids={(order.files ?? []).map((file) => file.id)}
+                disabled={filesBusy || !update.can || order.status !== 'draft'}
+                onChange={(ids) => void changeFiles(ids)}
+              />
+              {fileError ? (
+                <p role='alert' className='text-sm text-destructive'>
+                  {fileError}
+                </p>
+              ) : null}
             </DocumentSection>
           </>
         ) : null}

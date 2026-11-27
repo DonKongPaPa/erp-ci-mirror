@@ -5,12 +5,11 @@ import {
   useToaster,
 } from '@nocobase/app-client';
 import { useCan } from '@nocobase/app-plugin-authorization/client';
-import { useLocale, useTranslation } from '@nocobase/i18n/client';
+import { useTranslation } from '@nocobase/i18n/client';
 import {
   useEffect,
   useId,
   useMemo,
-  useRef,
   useState,
   type FormEvent,
   type ReactElement,
@@ -23,9 +22,19 @@ import {
   useResolvedPath,
 } from 'react-router';
 
+import { DocFilesPanel } from '#components/erp/doc-files-panel';
 import { DetailSection } from '#components/erp/detail';
 import type { FieldErrors } from '#components/erp/form-dialog';
 import { errorText } from '#components/erp/messages';
+import {
+  defaultDictCode,
+  dictChoices,
+  personChoices,
+  useDictEntries,
+  usePersonOptions,
+  type DictEntry,
+  type PersonOption,
+} from '#components/erp/options';
 import { FeedbackForm } from '#components/feedback-form';
 import { PageContainer } from '#components/page-container';
 import { PageHeader } from '#components/page-header';
@@ -46,6 +55,7 @@ import { ORDER_LIST_KEYS, type OrderKindDef } from './kinds.js';
 import { LinesEditor } from './lines-editor.js';
 import {
   emptyOrderForm,
+  newLine,
   orderFieldErrors,
   orderFormOf,
   orderInputOf,
@@ -58,12 +68,14 @@ import {
   type Choice,
   type Item,
   type PartnerOption,
+  type WarehouseOption,
 } from './reference.js';
 
 /**
  * 新建与编辑订单（`/purchase-orders/new`、`/purchase-orders/:id/edit`）：盖在列表上的子页
- * （《基座ERP前端设计》2.4「新建、编辑：RouteChildPage」）。表头是往来单位、单据日期、备注，
- * 明细是一张能填的表。提交时才校验，错了标在那一项下面；保存后仍是草稿。
+ * （《基座ERP前端设计》2.4）。波 0 加片把表头的仓库、联系人、交货地址、结算方式、项目、
+ * 经办人、优惠金额与附件，明细的交期、税率、两套单价与行备注补齐。
+ * 金额由服务端算，页面只录原始输入；没有 `viewPrice` 时不画价格与金额列。
  * 只有草稿能改：读出来已经不是草稿时只给一句说明，不画表单。
  */
 export function OrderFormPage({
@@ -93,12 +105,33 @@ export function OrderFormPage({
     resource: def.partnerResource,
     action: 'view',
   });
+  const warehouseView = useCan({
+    resource: { type: 'composite', id: 'inventory' },
+    action: 'warehouseView',
+  });
+  const dictView = useCan({
+    resource: { type: 'composite', id: 'bizDict' },
+    action: 'view',
+  });
+  const optionsView = useCan({
+    resource: { type: 'composite', id: 'bizOptions' },
+    action: 'view',
+  });
   const record = useOrder(def, orderId, editing && view.can);
   const items = useReferencePage<Item>('items', itemsView.can);
   const partners = useReferencePage<PartnerOption>(
     `partners?kind=${def.partnerKind}&status=active`,
     partnerView.can,
   );
+  const warehouses = useReferencePage<WarehouseOption>(
+    'warehouses?status=active',
+    warehouseView.can,
+  );
+  const settlements = useDictEntries('settlement', dictView.can);
+  const projects = useDictEntries('project', dictView.can);
+  const taxRates = useDictEntries('tax_rate', dictView.can);
+  const people = usePersonOptions(optionsView.can);
+  const defaultTaxRate = defaultDictCode(taxRates.items);
   const order = record.data;
 
   const owner = useResolvedPath(editing ? '../..' : '..').pathname;
@@ -176,6 +209,11 @@ export function OrderFormPage({
       order={order}
       items={items.items}
       partners={partners.items}
+      warehouses={warehouses.items}
+      settlements={settlements.items}
+      projects={projects.items}
+      people={people.items}
+      defaultTaxRate={defaultTaxRate}
       onNotDraft={record.reload}
     />
   );
@@ -200,15 +238,7 @@ function FormShell({
   );
 }
 
-function OrderForm({
-  def,
-  client,
-  initial,
-  order,
-  items,
-  partners,
-  onNotDraft,
-}: {
+interface OrderFormProps {
   readonly def: OrderKindDef;
   readonly client: OrdersClient;
   readonly initial: OrderFormValues;
@@ -216,16 +246,34 @@ function OrderForm({
   readonly order: Order | undefined;
   readonly items: readonly Item[] | undefined;
   readonly partners: readonly PartnerOption[] | undefined;
+  readonly warehouses: readonly WarehouseOption[] | undefined;
+  readonly settlements: readonly DictEntry[] | undefined;
+  readonly projects: readonly DictEntry[] | undefined;
+  readonly people: readonly PersonOption[] | undefined;
+  readonly defaultTaxRate: string;
   /** 保存时服务端说已经不是草稿：重新读一遍，这一页换成一句说明。 */
   readonly onNotDraft: () => void;
-}): ReactElement {
+}
+
+function OrderForm({
+  def,
+  client,
+  initial,
+  order,
+  items,
+  partners,
+  warehouses,
+  settlements,
+  projects,
+  people,
+  defaultTaxRate,
+  onNotDraft,
+}: OrderFormProps): ReactElement {
   const { t } = useTranslation();
-  const { locale } = useLocale();
   const toaster = useToaster();
   const navigate = useNavigate();
   const location = useLocation();
   const formId = useId();
-  const sequenceRef = useRef(0);
   const [values, setValues] = useState<OrderFormValues>(initial);
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -261,23 +309,11 @@ function OrderForm({
     }));
   };
   const addLine = (): void => {
-    sequenceRef.current += 1;
     setTouched(true);
     setErrors((old) =>
       old.lines === undefined ? old : { ...old, lines: undefined },
     );
-    setValues((old) => ({
-      ...old,
-      lines: [
-        ...old.lines,
-        {
-          key: `new-${sequenceRef.current}`,
-          itemId: '',
-          qty: '',
-          price: '',
-        },
-      ],
-    }));
+    setValues((old) => ({ ...old, lines: [...old.lines, newLine(defaultTaxRate)] }));
   };
   /** 删的是没保存的行，不是删记录；这一行下面的提示一起收掉。 */
   const removeLine = (key: string): void => {
@@ -363,7 +399,6 @@ function OrderForm({
     label: `${partner.code} ${partner.name}`,
   }));
   if (inactivePartner) {
-    // 同一个 id 在「只查在用」的列表里不会出现；万一两侧都带回来，以停用的这一份为准。
     const active = partnerChoices.findIndex(
       (choice) => choice.value === inactivePartner.id,
     );
@@ -374,6 +409,14 @@ function OrderForm({
       disabled: true,
     });
   }
+  const choices = (entries: readonly DictEntry[] | undefined): Choice[] =>
+    dictChoices(entries);
+  const warehouseChoices: Choice[] = (warehouses ?? []).map((one) => ({
+    value: one.id,
+    label: `${one.code} ${one.name}`,
+    disabled: one.status !== 'active',
+  }));
+  const handlerChoices = personChoices(people);
   const dateError = errors.orderDate;
   const remarkError = errors.remark;
 
@@ -444,6 +487,116 @@ function OrderForm({
                   onChange={(event) => set('orderDate', event.target.value)}
                 />
               </PageField>
+              <SelectField
+                id={`${formId}-warehouseId`}
+                label={t('orderDocs.fields.warehouse')}
+                error={errors.warehouseId}
+                value={values.warehouseId}
+                onChange={(warehouseId) => set('warehouseId', warehouseId)}
+                options={warehouseChoices}
+                placeholder={t('orderDocs.form.choose')}
+                disabled={busy}
+              />
+              <SelectField
+                id={`${formId}-settlementCode`}
+                label={t('orderDocs.fields.settlement')}
+                error={errors.settlementCode}
+                value={values.settlementCode}
+                onChange={(settlementCode) => set('settlementCode', settlementCode)}
+                options={choices(settlements)}
+                placeholder={t('orderDocs.form.choose')}
+                disabled={busy}
+              />
+              <SelectField
+                id={`${formId}-projectCode`}
+                label={t('orderDocs.fields.project')}
+                error={errors.projectCode}
+                value={values.projectCode}
+                onChange={(projectCode) => set('projectCode', projectCode)}
+                options={choices(projects)}
+                placeholder={t('orderDocs.form.choose')}
+                disabled={busy}
+              />
+              <SelectField
+                id={`${formId}-handlerUserId`}
+                label={t(`${def.l}.handlerLabel`)}
+                error={errors.handlerUserId}
+                value={values.handlerUserId}
+                onChange={(handlerUserId) => set('handlerUserId', handlerUserId)}
+                options={handlerChoices}
+                placeholder={t('orderDocs.form.choose')}
+                disabled={busy}
+              />
+              <PageField
+                id={`${formId}-contactName`}
+                label={t('orderDocs.fields.contactName')}
+              >
+                <Input
+                  id={`${formId}-contactName`}
+                  autoComplete='off'
+                  maxLength={128}
+                  disabled={busy}
+                  value={values.contactName}
+                  onChange={(event) => set('contactName', event.target.value)}
+                />
+              </PageField>
+              <PageField
+                id={`${formId}-contactPhone`}
+                label={t('orderDocs.fields.contactPhone')}
+              >
+                <Input
+                  id={`${formId}-contactPhone`}
+                  autoComplete='off'
+                  maxLength={64}
+                  disabled={busy}
+                  value={values.contactPhone}
+                  onChange={(event) => set('contactPhone', event.target.value)}
+                />
+              </PageField>
+              <PageField
+                id={`${formId}-deliveryAddress`}
+                label={t(`${def.l}.deliveryAddress`)}
+                className='sm:col-span-2'
+              >
+                <Input
+                  id={`${formId}-deliveryAddress`}
+                  autoComplete='off'
+                  maxLength={512}
+                  disabled={busy}
+                  value={values.deliveryAddress}
+                  onChange={(event) => set('deliveryAddress', event.target.value)}
+                />
+              </PageField>
+              {def.id === 'sales' ? (
+                <PageField
+                  id={`${formId}-customerOrderNo`}
+                  label={t('orderDocs.fields.customerOrderNo')}
+                >
+                  <Input
+                    id={`${formId}-customerOrderNo`}
+                    autoComplete='off'
+                    maxLength={64}
+                    disabled={busy}
+                    value={values.customerOrderNo}
+                    onChange={(event) => set('customerOrderNo', event.target.value)}
+                  />
+                </PageField>
+              ) : null}
+              <PageField
+                id={`${formId}-discountAmount`}
+                label={t('orderDocs.fields.discountAmount')}
+                error={errors.discountAmount}
+              >
+                <Input
+                  id={`${formId}-discountAmount`}
+                  inputMode='decimal'
+                  autoComplete='off'
+                  aria-invalid={errors.discountAmount ? true : undefined}
+                  disabled={busy}
+                  value={values.discountAmount}
+                  onChange={(event) => set('discountAmount', event.target.value)}
+                />
+              </PageField>
               <PageField
                 id={`${formId}-remark`}
                 label={t('erp.fields.note')}
@@ -463,7 +616,6 @@ function OrderForm({
           </DetailSection>
           <LinesEditor
             formId={formId}
-            locale={locale}
             lines={values.lines}
             errors={errors}
             items={items}
@@ -472,6 +624,14 @@ function OrderForm({
             onChange={setLine}
             onRemove={removeLine}
           />
+          <DetailSection title={t('erp.docFiles.title')}>
+            <DocFilesPanel
+              files={order?.files ?? []}
+              ids={values.fileIds}
+              disabled={busy}
+              onChange={(fileIds) => set('fileIds', [...fileIds])}
+            />
+          </DetailSection>
           {leave.dialog}
         </FeedbackForm>
       </PageContainer>

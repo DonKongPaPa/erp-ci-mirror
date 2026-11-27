@@ -419,6 +419,8 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
           projectCode: query.projectCode,
           handlerUserId: query.handlerUserId,
           takerDepartmentId: query.takerDepartmentId,
+          stocktakingId: query.stocktakingId,
+          transferDocId: query.transferDocId,
           page: query.page,
           pageSize: query.pageSize,
         }, withPrice);

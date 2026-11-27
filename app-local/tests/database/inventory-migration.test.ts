@@ -356,3 +356,116 @@ describe('R-020 加片：出入库补字段的迁移', () => {
     },
   });
 });
+
+/** R-020 波 1：四张表的列、主键、索引与 stock_docs 两列逐项钉住。 */
+const STOCKTAKING_FIELDS = [
+  'id', 'docNo', 'docDate', 'warehouseId', 'handlerUserId', 'supervisorUserId',
+  'status', 'remark', 'createdById', 'createdAt', 'updatedAt',
+].sort();
+const STOCKTAKING_LINE_FIELDS = [
+  'id', 'docId', 'itemId', 'systemQty', 'actualQty', 'deltaQty', 'result', 'note',
+].sort();
+const TRANSFER_FIELDS = [
+  'id', 'docNo', 'docDate', 'transferInWarehouseId', 'transferOutWarehouseId',
+  'handlerUserId', 'status', 'remark', 'createdById', 'createdAt', 'updatedAt',
+].sort();
+const TRANSFER_LINE_FIELDS = [
+  'id', 'docId', 'itemId', 'qty', 'transferQty', 'note',
+].sort();
+const ADDON_DOC_FIELDS = [...EXT_DOC_FIELDS, 'stocktakingId', 'transferDocId'].sort();
+
+describe('R-020 波 1：盘点单与调拨单的迁移', () => {
+  describeMigration('202611260023_stocktaking_transfer', {
+    sources,
+    up: async ({ connection, expectCollection }) => {
+      const stocktaking = await expectCollection('stocktakingDocs').toExist();
+      expect(Object.keys(stocktaking.fields).sort()).toEqual(STOCKTAKING_FIELDS);
+      expect(stocktaking.primaryKey).toEqual(['id']);
+      expect(stocktaking.foreignKeys).toHaveLength(0);
+      await expectCollection('stocktakingDocs').toHaveField('docNo', {
+        type: 'string', length: 32, nullable: false,
+      });
+      await expectCollection('stocktakingDocs').toHaveField('status', {
+        type: 'string', length: 16, nullable: false,
+      });
+      await expectCollection('stocktakingDocs').toHaveIndex(['warehouseId', 'docDate']);
+
+      const stocktakingLines = await expectCollection('stocktakingDocLines').toExist();
+      expect(Object.keys(stocktakingLines.fields).sort()).toEqual(STOCKTAKING_LINE_FIELDS);
+      expect(stocktakingLines.primaryKey).toEqual(['id']);
+      expect(stocktakingLines.foreignKeys).toHaveLength(0);
+      await expectDecimal(connection, 'stocktaking_doc_lines', 'system_qty');
+      await expectDecimal(connection, 'stocktaking_doc_lines', 'actual_qty');
+      await expectDecimal(connection, 'stocktaking_doc_lines', 'delta_qty');
+      await expectCollection('stocktakingDocLines').toHaveIndex(['docId']);
+
+      const transfer = await expectCollection('transferDocs').toExist();
+      expect(Object.keys(transfer.fields).sort()).toEqual(TRANSFER_FIELDS);
+      expect(transfer.primaryKey).toEqual(['id']);
+      expect(transfer.foreignKeys).toHaveLength(0);
+      await expectCollection('transferDocs').toHaveIndex(['transferInWarehouseId', 'docDate']);
+
+      const transferLines = await expectCollection('transferDocLines').toExist();
+      expect(Object.keys(transferLines.fields).sort()).toEqual(TRANSFER_LINE_FIELDS);
+      expect(transferLines.primaryKey).toEqual(['id']);
+      expect(transferLines.foreignKeys).toHaveLength(0);
+      await expectDecimal(connection, 'transfer_doc_lines', 'qty');
+      await expectDecimal(connection, 'transfer_doc_lines', 'transfer_qty');
+
+      const docs = await expectCollection('stockDocs').toExist();
+      expect(Object.keys(docs.fields).sort()).toEqual(ADDON_DOC_FIELDS);
+      await expectCollection('stockDocs').toHaveField('stocktakingId', {
+        type: 'string', length: 64, nullable: true,
+      });
+      await expectCollection('stockDocs').toHaveField('transferDocId', {
+        type: 'string', length: 64, nullable: true,
+      });
+      const physical = await connection.schemaInspector.getPhysicalCollection({
+        tableName: 'stock_docs',
+      });
+      const names = [...(physical?.indexes.map((index) => index.name) ?? [])].sort();
+      expect(names).toEqual(expect.arrayContaining([
+        'uq_stock_docs_stocktaking', 'uq_stock_docs_transfer',
+      ]));
+
+      const insertDoc = async (id: string, stocktakingId: string | null, docType: string) =>
+        connection.query.insertInto('stock_docs').values({
+          id,
+          doc_no: `PD-${randomUUID().slice(0, 8)}`,
+          doc_type: docType,
+          reason: docType === 'in' ? 'other_in' : 'other_out',
+          created_by_id: 'migration-test',
+          created_at: '2026-11-28T01:00:00.000Z',
+          updated_at: '2026-11-28T01:00:00.000Z',
+          stocktakingId,
+        }).execute();
+      const before = await connection.repository<Record<string, unknown>>('stockDocs').count();
+      const linkId = `st-${randomUUID()}`;
+      await insertDoc(`sd-${randomUUID()}`, linkId, 'in');
+      await expect(
+        insertDoc(`sd-${randomUUID()}`, linkId, 'in'),
+        '同一盘点单的同类单据只能有一张',
+      ).rejects.toThrow();
+      // 部分索引：不回链的老单据不受影响。
+      await insertDoc(`sd-${randomUUID()}`, null, 'in');
+      await insertDoc(`sd-${randomUUID()}`, null, 'in');
+      expect(
+        await connection.repository<Record<string, unknown>>('stockDocs').count(),
+      ).toBe(before + 3);
+    },
+    down: async ({ connection, expectCollection }) => {
+      await expectCollection('stocktakingDocLines').not.toExist();
+      await expectCollection('stocktakingDocs').not.toExist();
+      await expectCollection('transferDocLines').not.toExist();
+      await expectCollection('transferDocs').not.toExist();
+      expect(Object.keys((await expectCollection('stockDocs').toExist()).fields).sort())
+        .toEqual(EXT_DOC_FIELDS);
+      const physical = await connection.schemaInspector.getPhysicalCollection({
+        tableName: 'stock_docs',
+      });
+      const names = physical?.indexes.map((index) => index.name) ?? [];
+      expect(names).not.toContain('uq_stock_docs_stocktaking');
+      expect(names).not.toContain('uq_stock_docs_transfer');
+    },
+  });
+});

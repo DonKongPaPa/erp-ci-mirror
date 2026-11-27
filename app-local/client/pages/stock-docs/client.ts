@@ -1,16 +1,38 @@
 import type { ApiClient } from '@nocobase/app-client';
+
+import type { DocFile } from '#components/erp/doc-files';
 import type { EntityPage } from '#components/erp/list-state';
 
 export type DocType = 'in' | 'out';
 export type DocStatus = 'draft' | 'posted' | 'void';
+/** R-020 加片：八种出入库原因。 */
 export type DocReason =
   | 'purchase_receipt'
-  | 'sales_issue'
+  | 'production_receipt'
+  | 'sales_return'
   | 'other_in'
+  | 'sales_issue'
+  | 'internal_use'
+  | 'purchase_return'
   | 'other_out';
 export type SourceType = 'purchase_order' | 'sales_order';
 
-/** 一行明细，与 R-020 的 `StockDocLine` 逐列对应。 */
+/** 人员摘要只回标识与姓名；部门只回标识与名称。 */
+export interface PersonSummary {
+  readonly userId: string;
+  readonly name: string;
+}
+export interface DepartmentSummary {
+  readonly id: string;
+  readonly name: string;
+}
+export interface PartnerSummary {
+  readonly id: string;
+  readonly code: string;
+  readonly name: string;
+}
+
+/** 一行明细，与 R-020 加片的 `StockDocLine` 逐列对应。 */
 export interface StockDocLine {
   readonly id: string;
   readonly docId: string;
@@ -19,12 +41,21 @@ export interface StockDocLine {
   /** 空串表示没有批号。 */
   readonly batchNo: string;
   readonly qty: number;
+  readonly taxIncludedPrice?: number | null;
+  readonly taxExcludedPrice?: number | null;
+  readonly taxRate?: number | null;
+  readonly taxExcludedAmount?: number | null;
+  readonly taxAmount?: number | null;
+  readonly taxIncludedAmount?: number | null;
+  readonly productionDate?: string | null;
+  readonly expiryDate?: string | null;
+  readonly note?: string | null;
 }
 
 /** 单据头：列表的行不带明细。 */
 export type StockDocSummary = Omit<StockDoc, 'lines'>;
 
-/** 一张单据，与 R-020 的 `StockDoc` 逐列对应。建单人、过账人的标识不显示。 */
+/** 一张单据，与 R-020 加片的 `StockDoc` 对应。建单人、过账人的标识不显示。 */
 export interface StockDoc {
   readonly id: string;
   readonly docNo: string;
@@ -40,6 +71,28 @@ export interface StockDoc {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly lines: readonly StockDocLine[];
+  readonly docDate?: string | null;
+  readonly partnerId?: string | null;
+  readonly partner?: PartnerSummary | null;
+  readonly contactName?: string | null;
+  readonly contactPhone?: string | null;
+  readonly deliveryAddress?: string | null;
+  readonly customerOrderNo?: string | null;
+  readonly projectCode?: string | null;
+  readonly projectLabel?: string | null;
+  readonly handlerUserId?: string | null;
+  readonly handler?: PersonSummary | null;
+  readonly takerDepartmentId?: string | null;
+  readonly takerUserId?: string | null;
+  readonly taker?: PersonSummary | null;
+  readonly takerDepartment?: DepartmentSummary | null;
+  readonly discountAmount?: number | null;
+  readonly totalQty?: number | null;
+  readonly taxIncludedTotal?: number | null;
+  readonly taxExcludedTotal?: number | null;
+  readonly taxTotal?: number | null;
+  readonly payableTotal?: number | null;
+  readonly files?: readonly DocFile[];
 }
 
 export interface StockLineInput {
@@ -49,23 +102,45 @@ export interface StockLineInput {
   readonly batchNo?: string;
   /** 大于 0，小数最多四位。 */
   readonly qty: number;
+  readonly taxIncludedPrice?: number | null;
+  readonly taxExcludedPrice?: number | null;
+  readonly taxRate?: number | null;
+  readonly productionDate?: string | null;
+  readonly expiryDate?: string | null;
+  readonly note?: string | null;
 }
 
-export interface CreateStockDocInput {
+/** 加片的可选键：空串不发送，null 用来清空老单据里已存的值。 */
+export interface StockWriteFields {
+  readonly docDate?: string | null;
+  readonly partnerId?: string | null;
+  readonly contactName?: string | null;
+  readonly contactPhone?: string | null;
+  readonly deliveryAddress?: string | null;
+  readonly customerOrderNo?: string | null;
+  readonly projectCode?: string | null;
+  readonly handlerUserId?: string | null;
+  readonly takerDepartmentId?: string | null;
+  readonly takerUserId?: string | null;
+  readonly discountAmount?: number | null;
+  readonly fileIds?: readonly string[];
+}
+
+export interface CreateStockDocInput extends StockWriteFields {
   readonly docType: DocType;
   readonly reason: DocReason;
   readonly remark?: string;
-  readonly sourceType?: SourceType;
-  readonly sourceId?: string;
+  readonly sourceType?: SourceType | null;
+  readonly sourceId?: string | null;
   readonly lines: readonly StockLineInput[];
 }
 
-/** 改草稿：整单替换明细。来源单据的两项要么一起带、要么都不带，这里都不带（保持原样）。 */
-export interface UpdateStockDocInput {
+/** 改草稿：整单替换明细。 */
+export interface UpdateStockDocInput extends StockWriteFields {
   readonly reason?: DocReason;
   readonly remark?: string;
-  readonly sourceType?: SourceType;
-  readonly sourceId?: string;
+  readonly sourceType?: SourceType | null;
+  readonly sourceId?: string | null;
   readonly lines: readonly StockLineInput[];
 }
 
@@ -73,11 +148,58 @@ export interface StockDocListQuery {
   readonly docType?: DocType;
   readonly status?: DocStatus;
   readonly q?: string;
+  readonly reason?: DocReason;
+  readonly partnerId?: string;
+  readonly projectCode?: string;
+  readonly handlerUserId?: string;
+  readonly takerDepartmentId?: string;
   /** 带时区的 ISO 时间串，按创建时间过滤，含端点。 */
   readonly from?: string;
   readonly to?: string;
+  readonly dateField?: string;
   readonly page?: number;
   readonly pageSize?: number;
+}
+
+/** 只把有值的键带过去，老客户端的请求体与加片前一致。 */
+function optional<T>(values: Record<string, T | undefined>): Record<string, T> {
+  return Object.fromEntries(
+    Object.entries(values).filter(([, value]) => value !== undefined && value !== ''),
+  ) as Record<string, T>;
+}
+
+function writeFields(input: StockWriteFields): Record<string, unknown> {
+  return optional({
+    docDate: input.docDate,
+    partnerId: input.partnerId,
+    contactName: input.contactName,
+    contactPhone: input.contactPhone,
+    deliveryAddress: input.deliveryAddress,
+    customerOrderNo: input.customerOrderNo,
+    projectCode: input.projectCode,
+    handlerUserId: input.handlerUserId,
+    takerDepartmentId: input.takerDepartmentId,
+    takerUserId: input.takerUserId,
+    discountAmount: input.discountAmount,
+    fileIds: input.fileIds,
+  });
+}
+
+function lineFields(line: StockLineInput): Record<string, unknown> {
+  return {
+    itemId: line.itemId,
+    warehouseId: line.warehouseId,
+    batchNo: line.batchNo,
+    qty: line.qty,
+    ...optional({
+      taxIncludedPrice: line.taxIncludedPrice,
+      taxExcludedPrice: line.taxExcludedPrice,
+      taxRate: line.taxRate,
+      productionDate: line.productionDate,
+      expiryDate: line.expiryDate,
+      note: line.note,
+    }),
+  };
 }
 
 /**
@@ -108,7 +230,16 @@ export class StockDocsClient {
     return this.api.request<StockDoc>({
       path: 'stock-docs',
       method: 'POST',
-      json: input,
+      json: {
+        docType: input.docType,
+        reason: input.reason,
+        remark: input.remark,
+        ...(input.sourceType && input.sourceId
+          ? { sourceType: input.sourceType, sourceId: input.sourceId }
+          : {}),
+        ...writeFields(input),
+        lines: input.lines.map(lineFields),
+      },
     });
   }
 
@@ -117,7 +248,15 @@ export class StockDocsClient {
     return this.api.request<StockDoc>({
       path: `stock-docs/${encodeURIComponent(id)}`,
       method: 'PATCH',
-      json: input,
+      json: {
+        ...(input.reason === undefined ? {} : { reason: input.reason }),
+        ...(input.remark === undefined ? {} : { remark: input.remark }),
+        ...(input.sourceType && input.sourceId
+          ? { sourceType: input.sourceType, sourceId: input.sourceId }
+          : {}),
+        ...writeFields(input),
+        lines: input.lines.map(lineFields),
+      },
     });
   }
 

@@ -67,6 +67,22 @@ const enUS = {
       personInvalid: 'The handler is not an active employee.',
     },
   },
+  // R-022 wave 1: quotation rule messages; the route supplies defaultValue for missing keys.
+  quotations: {
+    errors: {
+      quotationNotFound: 'That quotation does not exist.',
+      notDraft: 'Only a draft quotation can be changed.',
+      notConfirmed: 'That quotation is not confirmed and cannot be converted.',
+      converted: 'That quotation has already been converted once.',
+      empty: 'A quotation with no lines cannot be confirmed.',
+      validityInvalid: 'The validity date cannot be earlier than the quote date.',
+      discountInvalid: 'The discount must not be negative or exceed the tax-included total.',
+      lineInvalid: 'A quotation line or unit price is invalid.',
+      customerInvalid: 'That customer does not exist, is not a customer or is inactive.',
+      dictCodeInvalid: 'The project or settlement code is not active in the dictionary.',
+      personInvalid: 'The salesperson is not an active employee.',
+    },
+  },
   employees: {
     errors: {
       'target-user-not-found': 'That account does not exist.',
@@ -134,6 +150,40 @@ const enUS = {
       discountInvalid: 'The discount must not be negative or exceed the tax-included total.',
       dictCodeInvalid: 'The project code is not active in the dictionary.',
       personInvalid: 'The handler or taker is not an active employee, or the department is inactive.',
+    },
+  },
+  // R-020 wave 1: stocktaking and transfer rule-code messages.
+  stocktaking: {
+    errors: {
+      stocktakingNotFound: 'That stocktaking does not exist.',
+      stocktakingNotStaging: 'Only a staging stocktaking can be changed, finished or voided.',
+      actualRequired: 'Every line needs a counted quantity before finishing.',
+      supervisorRequired: 'Finishing a stocktaking needs a supervisor.',
+      duplicateItem: 'An item can appear only once on a stocktaking.',
+      warehouseNotFound: 'The warehouse does not exist.',
+      warehouseInactive: 'The warehouse is inactive.',
+      itemNotFound: 'The item does not exist.',
+      itemInactive: 'The item is inactive.',
+      personInvalid: 'The handler or supervisor is not an active employee.',
+      lineInvalid: 'A stocktaking line is invalid.',
+      emptyUpdate: 'Give at least one field to change.',
+      insufficient: 'The loss issue was not posted because the balance is too low.',
+    },
+  },
+  transfer: {
+    errors: {
+      transferNotFound: 'That transfer does not exist.',
+      transferNotDraft: 'Only a draft transfer can be changed, posted or voided.',
+      transferQtyInvalid: 'Quantities must be positive and the transfer quantity cannot exceed the requested quantity.',
+      transferInsufficient: 'The transfer was not posted: the source warehouse balance is too low.',
+      transferSameWarehouse: 'The source and destination warehouses must differ.',
+      warehouseNotFound: 'The warehouse does not exist.',
+      warehouseInactive: 'The warehouse is inactive.',
+      itemNotFound: 'The item does not exist.',
+      itemInactive: 'The item is inactive.',
+      personInvalid: 'The handler is not an active employee.',
+      lineInvalid: 'A transfer line is invalid.',
+      emptyUpdate: 'Give at least one field to change.',
     },
   },
   // R-064: order review rule-code messages; the route supplies defaultValue for missing keys.
@@ -240,6 +290,25 @@ const enUS = {
       recipients: 'The approver of the overdue task.',
       title: '{{workflowKey}} is waiting',
       body: 'Approval {{approvalId}} of {{workflowKey}}, submitted by {{applicantName}}, is still waiting for your review.',
+    },
+  },
+  // R-021 波 1 加片：请购单规则码文案；端点在缺键时用英文原句兜底。
+  purchaseRequest: {
+    errors: {
+      notFound: 'That purchase request does not exist.',
+      notEditable: 'Only a draft or rejected purchase request can be edited.',
+      noLines: 'A purchase request needs at least one line before submission.',
+      notApproved: 'Only an approved purchase request can be converted into an order.',
+      converted: 'This purchase request has already been converted.',
+      emptyPatch: 'Give at least one field to change.',
+      lineInvalid: 'The requested lines are not valid.',
+      itemNotFound: 'That item does not exist.',
+      itemInactive: 'That item is inactive; choose another.',
+      departmentNotFound: 'That department does not exist.',
+      departmentInactive: 'That department is inactive; choose another.',
+      dictCodeInvalid: 'That project code is not an active dictionary entry: {{reason}}.',
+      personInvalid: 'That requester is not an active employee: {{reason}}.',
+      approvalFailed: 'The approval could not be created: {{reason}}.',
     },
   },
 } as const;

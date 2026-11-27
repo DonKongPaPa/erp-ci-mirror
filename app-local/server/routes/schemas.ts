@@ -1152,3 +1152,37 @@ export type UpdateCategoryInput = z.infer<typeof UpdateCategoryBody>;
 /** R-021 加片：单据附件可选键，建改（草稿）请求体共用同一个约束。 */
 export const FileIdsSchema = z.array(z.string().min(1).max(64)).optional();
 export const DocFileIdParam = z.object({ id: z.string().min(1).max(64) });
+
+/** R-068 工具加片：三步端点的路径参数、请求体与报告形状。报告只回行号、错误码与固定文案。 */
+export const ImportKindParam = z.object({
+  kind: z.enum(['items', 'partners', 'warehouses', 'bizDict', 'openingStock']),
+});
+export const ImportDryRunBody = z.object({ token: z.string().min(1).max(128) });
+export const ImportCommitBody = z.object({
+  token: z.string().min(1).max(128),
+  mode: z.enum(['skip', 'update']),
+});
+export const ImportIssueSchema = z.object({
+  row: z.number().int().nonnegative(),
+  code: z.string().min(1),
+  message: z.string().min(1),
+});
+export const ImportReportSchema = z.object({
+  kind: z.string().min(1),
+  rowCount: z.number().int().nonnegative(),
+  wouldCreate: z.number().int().nonnegative(),
+  wouldSkip: z.number().int().nonnegative(),
+  wouldUpdate: z.number().int().nonnegative(),
+  errorCount: z.number().int().nonnegative(),
+  issues: z.array(ImportIssueSchema),
+});
+
+/** 路径参数先按字符串收，非法种类留给端点回 404 IMPORT_KIND_INVALID。 */
+export const ImportKindRawParam = z.object({ kind: z.string().min(1) });
+
+export const ImportParseResponseSchema = z.object({
+  token: z.string().min(1),
+  rowCount: z.number().int().nonnegative(),
+  headers: z.array(z.string()),
+  issues: z.array(ImportIssueSchema),
+});

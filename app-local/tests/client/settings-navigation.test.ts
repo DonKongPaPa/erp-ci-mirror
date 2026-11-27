@@ -249,6 +249,7 @@ describe('System settings navigation', () => {
         'settingsSystem',
         [
           ['notificationManagement', '/settings/notifications/logs'],
+          ['imports', '/settings/imports'],
           ['databaseExplorer', '/settings/database-explorer'],
         ],
       ],
@@ -266,8 +267,13 @@ describe('System settings navigation', () => {
       'salesOrders',
       // R-072：业务字典维护页，只给管理入口 root；排在系统设置前面，不动已有顺序。
       'bizDict',
+      // R-065：财务的两张记录页排在业务字典后、质量工单前。
+      'expenses',
+      'invoiceReceipts',
       'quality',
       'feedbacks',
+      // R-017 M5：审批的三个页面进主导航的「审批」分组，排在反馈单之后、AI 之前。
+      'approvals',
       'ai',
       'settingsHome',
     ]);
@@ -304,6 +310,7 @@ it('hides the notification module and the application API keys card when their p
       'settingsSystem',
       [
         ['notificationManagement', '/settings/notifications/templates'],
+        ['imports', '/settings/imports'],
         ['databaseExplorer', '/settings/database-explorer'],
       ],
     ],
@@ -324,7 +331,13 @@ it('hides the notification module and the application API keys card when their p
         ['applicationApiKeysManagement', '/settings/api-keys'],
       ],
     ],
-    ['settingsSystem', [['databaseExplorer', '/settings/database-explorer']]],
+    [
+      'settingsSystem',
+      [
+        ['imports', '/settings/imports'],
+        ['databaseExplorer', '/settings/database-explorer'],
+      ],
+    ],
   ]);
 
   const applicationKeys = find(routes, 'applicationApiKeysManagement');
@@ -369,6 +382,7 @@ it('places database browsing in System and hides its card when access is denied'
       'settingsSystem',
       [
         ['notificationManagement', '/settings/notifications/logs'],
+        ['imports', '/settings/imports'],
         ['databaseExplorer', '/settings/database-explorer'],
       ],
     ],
@@ -386,7 +400,10 @@ it('places database browsing in System and hides its card when access is denied'
     ],
     [
       'settingsSystem',
-      [['notificationManagement', '/settings/notifications/logs']],
+      [
+        ['notificationManagement', '/settings/notifications/logs'],
+        ['imports', '/settings/imports'],
+      ],
     ],
   ]);
 });

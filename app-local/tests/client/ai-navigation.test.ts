@@ -80,7 +80,8 @@ describe('R-042: AI navigation follows authorization', () => {
     const denied = await deniedFor(memberSnapshot);
     const menu = buildRouteNavigation(resolved, denied);
 
-    expect(menu.map(({ route }) => route.name)).toEqual(['home', 'quality']);
+    // R-017 M5：审批入口对所有登录用户可见，和业务用户能不能开 AI 无关。
+    expect(menu.map(({ route }) => route.name)).toEqual(['home', 'quality', 'approvals']);
     expect(menu.some(({ route }) => route.name === 'ai')).toBe(false);
 
     for (const name of ['models', 'agents']) {

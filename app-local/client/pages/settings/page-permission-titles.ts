@@ -43,4 +43,6 @@ export const pagePermissionTitles: PagePermissionTitles = {
   // R-021 / R-022：采购订单、销售订单的子页与对话框继承列表页的页面授权，权限清单里要有可读的名字。
   purchaseOrderReceipt: 'purchaseOrders.receiptTitle',
   salesOrderIssue: 'salesOrders.receiptTitle',
+  // R-068：导入工具只在设置区露出，权限清单沿用它的导航标题。
+  imports: 'settings.imports',
 };

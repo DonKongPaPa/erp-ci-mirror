@@ -4,6 +4,7 @@ import {
   signIn,
   type TestSession,
 } from '@nocobase/app-plugin-authentication/testing';
+import { authorizationToken } from '@nocobase/app-plugin-authorization';
 import { expect } from 'vitest';
 
 import { createAppTest } from '../helpers/test-app.js';
@@ -40,13 +41,16 @@ const upload = (session: TestSession, name = 'doc.pdf'): Promise<Response> => {
   });
 };
 
-test('没有任何写动作的会话上传得 403，而且坏请求体不会先拿到 400', async ({ testApp }) => {
+test('没有任何写动作的会话上传得 403，而且坏请求体不会先拿到 400', async ({ testApp, app }) => {
   const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
-  const { session: nobody } = await makeRoleUser(
+  const { id, session: nobody } = await makeRoleUser(
     admin, testApp, 'r021noupload', [
       { resource: { type: 'composite', id: 'purchaseOrders' }, actions: [{ action: 'view' }] },
     ],
   );
+  // R-021 波 1 加片给 staff 补了请购单建/改，也就补了附件上传入口；这里撤掉基线
+  // staff，才是真正「没有任何写动作」的会话。
+  await app.container.resolve(authorizationToken).permissionSets.revoke(`user:${id}:staff`);
   for (const init of [
     { method: 'POST', headers: { origin: 'http://localhost' }, body: 'not multipart' },
     { method: 'POST', headers: { origin: 'http://localhost' }, body: new FormData() },

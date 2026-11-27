@@ -1,0 +1,3 @@
+code,legacyCode,name,spec,unitCode,categoryCode,category2Code,category3Code,purchasePrice,salesPrice,stockMin,stockMax,barcode,brand,manufacturerModel,leadTimeDays,note
+,OLD-M-001,示例物料A,规格10x20,PCS,CAT-01,,,12.50,20.00,5,100,690000000001,示例牌,M-100,7,样例数据请按实际修改
+,OLD-M-002,示例物料B,规格20x30,KG,CAT-01,,,8.00,15.00,0,50,,示例牌,M-200,0,样例数据请按实际修改

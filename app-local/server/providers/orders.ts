@@ -134,8 +134,12 @@ export interface OrderHeaderView {
   readonly settlementCode: string | null;
   readonly projectCode: string | null;
   readonly customerOrderNo?: string | null;
+  /** R-021 波 1 加片：请购单回链，只对生成出来的采购订单有值。 */
+  readonly purchaseRequestId?: string | null;
   readonly handlerUserId: string | null;
   readonly handler: PersonRef | null;
+  /** R-022 复刻波 1：报价转出的订单才有值；老订单是 null。 */
+  readonly quotationId?: string | null;
   readonly totalQty: number | null;
   readonly latestDeliveryDate: string | null;
   /** 以下键只在持有 viewPrice 时出现。 */
@@ -243,9 +247,12 @@ interface HeaderExtraInput {
   readonly settlementCode?: string | null;
   readonly projectCode?: string | null;
   readonly customerOrderNo?: string | null;
+  readonly purchaseRequestId?: string | null;
   readonly handlerUserId?: string | null;
   readonly discountAmount?: number;
   readonly fileIds?: readonly string[];
+  /** R-022 复刻波 1：只有报价单转出的订单有值；转单在同一个事务里带进来。 */
+  readonly quotationId?: string | null;
 }
 export interface CreateOrderInput extends HeaderExtraInput {
   readonly partnerId: string;
@@ -376,7 +383,9 @@ interface HeaderRow {
   settlement_code: string | null;
   project_code: string | null;
   customer_order_no?: string | null;
+  purchase_request_id: string | null;
   handler_user_id: string | null;
+  quotation_id?: string | null;
   discount_amount: string | number;
   total_qty: string | number | null;
   tax_included_total: string | number | null;
@@ -455,11 +464,17 @@ function headerView(
       : {}),
   };
   return kind === 'purchase'
-    ? { ...common, supplierId: row.supplier_id ?? '' }
+    ? {
+      ...common,
+      supplierId: row.supplier_id ?? '',
+      purchaseRequestId: row.purchase_request_id ?? null,
+    }
     : {
       ...common,
       customerId: row.customer_id ?? '',
       customerOrderNo: row.customer_order_no ?? null,
+      // R-022 复刻波 1：没有来源的空值保持 null，老客户端形状不变（多一个空键）。
+      quotationId: row.quotation_id ?? null,
     };
 }
 
@@ -638,7 +653,11 @@ export interface OrderReader {
 }
 
 export interface OrderMutations {
-  create(kind: OrderKind, input: CreateOrderInput, byUserId: string): Promise<OrderRecord>;
+  /** 传入事务时复用调用方的事务（转单需要同一事务）；普通建单不传。 */
+  create(
+    kind: OrderKind, input: CreateOrderInput, byUserId: string,
+    transaction?: DatabaseConnection,
+  ): Promise<OrderRecord>;
   update(kind: OrderKind, id: string, input: UpdateOrderInput, byUserId?: string): Promise<OrderRecord>;
   submit(kind: OrderKind, id: string): Promise<OrderRecord>;
   cancel(kind: OrderKind, id: string): Promise<OrderRecord>;
@@ -948,9 +967,10 @@ export class DatabaseOrderMutations implements OrderMutations {
     kind: OrderKind,
     input: CreateOrderInput,
     byUserId: string,
+    transaction?: DatabaseConnection,
   ): Promise<OrderRecord> {
     validateLines(input.lines);
-    return await this.inTransaction(undefined, async (tx) => {
+    return await this.inTransaction(transaction, async (tx) => {
       const knex = await this.knex(tx);
       await this.requirePartner(knex, kind, input.partnerId);
       await assertItemsActive(knex, input.lines.map((line) => line.itemId));
@@ -985,7 +1005,15 @@ export class DatabaseOrderMutations implements OrderMutations {
         delivery_address: input.deliveryAddress ?? null,
         settlement_code: input.settlementCode ?? null,
         project_code: input.projectCode ?? null,
-        ...(config.headerPartner === 'customer_id' ? { customer_order_no: input.customerOrderNo ?? null } : {}),
+        ...(config.headerPartner === 'customer_id'
+          ? {
+            customer_order_no: input.customerOrderNo ?? null,
+            quotation_id: input.quotationId ?? null,
+          }
+          : {}),
+        ...(kind === 'purchase'
+          ? { purchase_request_id: input.purchaseRequestId ?? null }
+          : {}),
         handler_user_id: handlerUserId,
         discount_amount: totals.discountAmount,
         total_qty: totals.totalQty,

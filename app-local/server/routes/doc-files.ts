@@ -39,6 +39,8 @@ type Check = { readonly resource: string; readonly actions: readonly string[] };
 /** 上传：持有任意一种带附件单据的写动作即可；这是跨资源的「至少一种」判断。 */
 const WRITE_CHECKS: readonly Check[] = [
   { resource: 'purchaseOrders', actions: ['create', 'update', 'receive'] },
+  // R-021 波 1 加片：请购单上传先过建/改动作。
+  { resource: 'purchaseRequests', actions: ['create', 'update'] },
   { resource: 'salesOrders', actions: ['create', 'update', 'ship'] },
   { resource: 'inventory', actions: ['stockWrite'] },
   { resource: 'customers', actions: ['create', 'update'] },
@@ -49,6 +51,7 @@ const WRITE_CHECKS: readonly Check[] = [
 // 往来单位附件随它自己的片来做，读取要按侧裁（客户/供应商不能互相放行）。
 const READ_CHECKS: Readonly<Record<string, readonly Check[]>> = {
   purchase_order: [{ resource: 'purchaseOrders', actions: ['view', 'receive', 'financeView'] }],
+  purchase_request: [{ resource: 'purchaseRequests', actions: ['view', 'convert'] }],
   sales_order: [{ resource: 'salesOrders', actions: ['view', 'ship'] }],
   stock_doc: [{ resource: 'inventory', actions: ['stockView'] }],
   expense: [{ resource: 'expenses', actions: ['view'] }],

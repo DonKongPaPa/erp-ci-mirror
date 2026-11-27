@@ -16,12 +16,17 @@ import {
 } from './pages/stock-docs/page-id.js';
 import { WAREHOUSES_PAGE_ID } from './pages/warehouses/page-id.js';
 import {
+  EXPENSES_PAGE_ID,
+  INVOICE_RECEIPTS_PAGE_ID,
+} from './pages/finance/page-id.js';
+import {
   ArrowDownToLine,
   ArrowUpFromLine,
   BookOpen,
   Boxes,
   Bot,
   ChartColumn,
+  ClipboardCheck,
   Clock,
   Cpu,
   Handshake,
@@ -36,6 +41,7 @@ import {
   Users,
   Warehouse,
   Wrench,
+  Wallet,
 } from 'lucide-react';
 import {
   agentsRoute,
@@ -51,6 +57,7 @@ import {
 import { FEEDBACK_PAGE_ID } from './pages/feedbacks/page-id.js';
 import settingsShellRoutes from './pages/settings/shell-routes.js';
 import systemSettingsRoutes from './pages/settings/routes.js';
+import importRoutes from './pages/settings/imports/routes.js';
 import {
   defineAppRoutes,
   type AppClientRouteContribution,
@@ -529,6 +536,82 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
     ],
   },
   {
+    // R-065 支出记录：页面授权只给财务与 root；打开之后读、写再分 `expenses` 资源的动作。
+    auth: 'required',
+    authz: {
+      resource: { type: 'page', id: EXPENSES_PAGE_ID },
+      action: 'access',
+    },
+    breadcrumb: { title: 'navigation.expenses' },
+    componentLoader: () => import('./pages/expenses/index.js'),
+    name: 'expenses',
+    navigation: { title: 'navigation.expenses', icon: Wallet },
+    path: '/expenses',
+    children: [
+      {
+        name: 'expenseNew',
+        path: 'new',
+        breadcrumb: { title: 'expenses.newTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/expenses/new.js'),
+      },
+      {
+        name: 'expense',
+        path: ':expenseId',
+        breadcrumb: { title: 'expenses.detailTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/expenses/detail/index.js'),
+        children: [
+          {
+            name: 'expenseEdit',
+            path: 'edit',
+            breadcrumb: { title: 'expenses.editTitle' },
+            presentation: { kind: 'child-page' },
+            componentLoader: () => import('./pages/expenses/edit.js'),
+          },
+        ],
+      },
+    ],
+  },
+  {
+    // R-065 到票记录：与支出记录同一骨架，页面授权只给财务与 root。
+    auth: 'required',
+    authz: {
+      resource: { type: 'page', id: INVOICE_RECEIPTS_PAGE_ID },
+      action: 'access',
+    },
+    breadcrumb: { title: 'navigation.invoiceReceipts' },
+    componentLoader: () => import('./pages/invoice-receipts/index.js'),
+    name: 'invoiceReceipts',
+    navigation: { title: 'navigation.invoiceReceipts', icon: ReceiptText },
+    path: '/invoice-receipts',
+    children: [
+      {
+        name: 'invoiceReceiptNew',
+        path: 'new',
+        breadcrumb: { title: 'invoiceReceipts.newTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/invoice-receipts/new.js'),
+      },
+      {
+        name: 'invoiceReceipt',
+        path: ':invoiceReceiptId',
+        breadcrumb: { title: 'invoiceReceipts.detailTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/invoice-receipts/detail/index.js'),
+        children: [
+          {
+            name: 'invoiceReceiptEdit',
+            path: 'edit',
+            breadcrumb: { title: 'invoiceReceipts.editTitle' },
+            presentation: { kind: 'child-page' },
+            componentLoader: () => import('./pages/invoice-receipts/edit.js'),
+          },
+        ],
+      },
+    ],
+  },
+  {
     // 质量工单看板：客户反馈初筛与分流。
     // authz 声明在路径首个页面上，page id 用于存储页面授权，改名需要迁移引用它的授权。
     auth: 'required',
@@ -566,6 +649,41 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
     ],
   },
   {
+    // R-017 M5：审批的三个页面。个人数据页取 authz: 'skip'（同 inbox），入口对所有登录用户可见，
+    // 行级资格由端点按申请人/审批人过滤。列表的页签与筛选记在地址栏查询参数里。
+    auth: 'required',
+    name: 'approvals',
+    navigation: { title: 'navigation.approvals', icon: ClipboardCheck },
+    children: [
+      {
+        auth: 'required',
+        authz: 'skip',
+        breadcrumb: { title: 'navigation.approvalMine' },
+        componentLoader: () => import('./pages/approvals/mine.js'),
+        name: 'approvalMine',
+        navigation: { title: 'navigation.approvalMine' },
+        path: '/approvals/mine',
+      },
+      {
+        auth: 'required',
+        authz: 'skip',
+        breadcrumb: { title: 'navigation.approvalTasks' },
+        componentLoader: () => import('./pages/approvals/tasks.js'),
+        name: 'approvalTasks',
+        navigation: { title: 'navigation.approvalTasks' },
+        path: '/approvals/tasks',
+      },
+      {
+        auth: 'required',
+        authz: 'skip',
+        breadcrumb: { title: 'approvals.detail.title' },
+        componentLoader: () => import('./pages/approvals/detail.js'),
+        name: 'approvalDetail',
+        path: '/approvals/:id',
+      },
+    ],
+  },
+  {
     // R-032「我的 API 密钥」：每个登录用户只管自己的密钥，接口只作用于本人。
     // 所以页面像 inbox 一样不需要页面授权；入口在右上角账号菜单，不声明 navigation。
     auth: 'required',
@@ -573,6 +691,15 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
     componentLoader: () => import('./pages/account/api-keys.js'),
     name: 'apiKeysManagement',
     path: '/account/api-keys',
+  },
+  {
+    // R-076：浏览器打印视图。不进侧栏，也不登记页面授权——进入时由视图按 docType
+    // 检查对应的 print 动作；没有就显示 403，且不发取数请求。
+    auth: 'required',
+    authz: 'skip',
+    componentLoader: () => import('./pages/doc-print/index.js'),
+    name: 'docPrintView',
+    path: '/main/doc-print/:docType/:docNo',
   },
   {
     auth: 'guest',
@@ -657,6 +784,7 @@ export function createApplicationRoutes(
       systemSettingsRoutes,
       databaseExplorerRoutes,
       notificationLogRoutes,
+      importRoutes,
     ],
     config.get<boolean>('notificationTemplates.invitationConfigured') === true,
   );

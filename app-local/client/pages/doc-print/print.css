@@ -1,0 +1,64 @@
+/* R-076：屏幕预览与打印共用同一份 DOM；打印时隐藏外壳，只留三联单据。 */
+@page {
+  size: A4 portrait;
+  margin: 10mm;
+}
+
+.doc-print-page {
+  color: #000;
+  background: #fff;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+.doc-print-copy {
+  box-sizing: border-box;
+  padding: 6mm 4mm;
+  border-bottom: 1px dashed #999;
+}
+
+/* 三联二等分：第一页两联，第三联换页。 */
+.doc-print-copy[data-copy='2'] {
+  break-after: page;
+  page-break-after: always;
+}
+
+.doc-print-copy[data-copy='3'] {
+  break-after: auto;
+  page-break-after: auto;
+  border-bottom: none;
+}
+
+.doc-print-sheet {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10pt;
+}
+
+.doc-print-sheet th,
+.doc-print-sheet td {
+  border: 1px solid #333;
+  padding: 2mm 1.5mm;
+  text-align: left;
+}
+
+.doc-print-title {
+  text-align: center;
+  font-size: 16pt;
+  font-weight: 700;
+  margin: 0 0 4mm;
+}
+
+.doc-print-signoff {
+  margin-top: 5mm;
+  font-size: 10pt;
+}
+
+@media print {
+  [data-print-hide] {
+    display: none !important;
+  }
+
+  .doc-print-page {
+    color: #000;
+  }
+}

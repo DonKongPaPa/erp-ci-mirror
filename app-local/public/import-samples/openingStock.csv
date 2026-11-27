@@ -1,0 +1,2 @@
+warehouseCode,itemCode,qty,batchNo,productionDate,expiryDate,note
+WH-DEMO-01,OLD-M-001,100,BATCH-DEMO-01,2026-01-01,2027-01-01,样例数据请按实际修改

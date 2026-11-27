@@ -95,6 +95,19 @@ import authorizationServerPlugin from '@nocobase/app-plugin-authorization/server
 import { createServer as createEmbeddedServer } from '../../server/embedded.ts';
 import { createStandaloneRuntimeScope } from '@nocobase/app-server/node';
 import appRuntime from '../../server/runtime.ts';
+import { apiRoutes as approvalRoutes } from '../../server/routes/approvals.js';
+import { apiRoutes as docPrintRoutes } from '../../server/routes/doc-print.js';
+import { apiRoutes as importRoutes } from '../../server/routes/import-tool.js';
+import { apiRoutes as purchaseRequestRoutes } from '../../server/routes/purchase-requests.js';
+import { apiRoutes as orderReviewRoutes } from '../../server/routes/order-reviews.js';
+import ApprovalsProvider from '../../server/approvals-service.js';
+import ApprovalNotificationsProvider from '../../server/providers/approval-notifications.js';
+import ApprovalTimeoutProvider from '../../server/providers/approval-timeout.js';
+import DocPrintProvider from '../../server/providers/doc-print.js';
+import ImportToolProvider from '../../server/providers/import-tool.js';
+import PurchaseRequestsProvider from '../../server/providers/purchase-requests.js';
+import OrderReviewsProvider from '../../server/providers/order-reviews.js';
+import OrderLedgerProvider from '../../server/providers/order-ledger.js';
 import serverPlugins from '../../server/plugins.ts';
 import {
   createStandaloneServer,
@@ -311,6 +324,31 @@ describe('app server', () => {
   });
 
   it('registers application-owned providers and routes from the runtime', async () => {
+    // 钉住应用自己登记的提供者与路由：新增一片必须在这里补清单，不能靠自动展开悄悄接进来。
+    // 以 server/providers/index.ts 与 server/routes/index.ts 的实际登记为准。
+    const expectedRoutes = [
+      approvalRoutes,
+      docPrintRoutes,
+      importRoutes,
+      purchaseRequestRoutes,
+      orderReviewRoutes,
+    ];
+    for (const route of expectedRoutes) {
+      expect(appRuntime.routes).toContain(route);
+    }
+    const expectedProviders = [
+      ApprovalsProvider,
+      ApprovalNotificationsProvider,
+      ApprovalTimeoutProvider,
+      DocPrintProvider,
+      ImportToolProvider,
+      PurchaseRequestsProvider,
+      OrderReviewsProvider,
+      OrderLedgerProvider,
+    ];
+    for (const provider of expectedProviders) {
+      expect(appRuntime.serviceProviders).toContain(provider);
+    }
     const pluginServiceToken = createServiceToken<string>(
       '@nocobase/app-template-default/tests/plugin-service',
     );

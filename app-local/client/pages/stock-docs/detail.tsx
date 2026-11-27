@@ -2,7 +2,7 @@ import { useApiClient, usePageBreadcrumb, useToaster } from '@nocobase/app-clien
 import { useCan } from '@nocobase/app-plugin-authorization/client';
 import { useLocale, useTranslation } from '@nocobase/i18n/client';
 import type { ColumnDef } from '@tanstack/react-table';
-import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import {
   Link,
   Outlet,
@@ -21,7 +21,8 @@ import {
 } from '#components/erp/document';
 import { ConfirmDialog } from '#components/erp/confirm';
 import type { DetailField } from '#components/erp/detail';
-import { errorText } from '#components/erp/messages';
+import { DocFilesPanel } from '#components/erp/doc-files-panel';
+import { errorText, type Translate } from '#components/erp/messages';
 import { StatusBadge } from '#components/status-badge';
 import { useRecord } from '#components/erp/record';
 import { Button } from '#components/ui/button';
@@ -29,11 +30,12 @@ import { formatDateTime, formatQty } from '../stock/format.js';
 import { ITEMS_RESOURCE, useInventoryLookup } from '../stock/lookup.js';
 import { INVENTORY_RESOURCE } from '../warehouses/page-id.js';
 import { useAncestorSearch } from '../../routing/route-context.js';
+import { DOC_PRINT_PATHS, DOC_PRINT_REASON_PATHS } from '../doc-print/model.js';
 
 import { StockDocsClient, type StockDoc, type StockDocLine } from './client.js';
 import type { StockKind } from './kind.js';
 import { stockKey, useLineStock } from './line-stock.js';
-import { isNotDraft, STOCK_DOC_LIST_KEYS } from './model.js';
+import { isNotDraft, needsSource, STOCK_DOC_LIST_KEYS } from './model.js';
 
 /** 详情交给盖在它上面的编辑子页的东西：面包屑的层级与重新取数。 */
 export interface StockDocDetailContext {
@@ -48,6 +50,12 @@ const NO_LINES: readonly StockDocLine[] = [];
 const DASH = <span className='text-muted-foreground'>—</span>;
 const NUMBER = 'flex justify-end tabular-nums';
 type Action = 'post' | 'void';
+
+function money(value: number | null | undefined, locale: string, t: Translate): ReactNode {
+  return value === null || value === undefined
+    ? DASH
+    : <span className='tabular-nums'>{t('orderDocs.money', { amount: new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(value) })}</span>;
+}
 
 /**
  * 一张入库单或出库单（`/inbound-orders/:docId`、`/outbound-orders/:docId`，《基座ERP前端设计》2.4）：
@@ -66,10 +74,27 @@ export function StockDocDetailPage({ def }: { readonly def: StockKind }): ReactE
   const write = useCan({ resource: INVENTORY_RESOURCE, action: 'stockWrite' });
   const posting = useCan({ resource: INVENTORY_RESOURCE, action: 'stockPost' });
   const voiding = useCan({ resource: INVENTORY_RESOURCE, action: 'stockVoid' });
+  const priceView = useCan({
+    resource: INVENTORY_RESOURCE,
+    action: 'stockPriceView',
+  });
   const itemView = useCan({ resource: ITEMS_RESOURCE, action: 'view' });
   const warehouseView = useCan({
     resource: INVENTORY_RESOURCE,
     action: 'warehouseView',
+  });
+  // R-076：只有持有对应单据类型 print 动作的人才看到「打印」按钮。
+  const printInternal = useCan({
+    resource: { type: 'composite', id: DOC_PRINT_PATHS['internal-use'].resource },
+    action: 'print',
+  });
+  const printSales = useCan({
+    resource: { type: 'composite', id: DOC_PRINT_PATHS['sales-issue'].resource },
+    action: 'print',
+  });
+  const printPurchase = useCan({
+    resource: { type: 'composite', id: DOC_PRINT_PATHS['purchase-receipt'].resource },
+    action: 'print',
   });
   const record = useRecord<StockDoc>(
     `stock-docs/${encodeURIComponent(docId)}`,
@@ -108,6 +133,23 @@ export function StockDocDetailPage({ def }: { readonly def: StockKind }): ReactE
   const [confirm, setConfirm] = useState<Action>();
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string>();
+  const [filesBusy, setFilesBusy] = useState(false);
+  const [fileError, setFileError] = useState<string>();
+
+  /** 附件随整组 fileIds 存草稿；已过账、已作废的单据只读。 */
+  const changeFiles = async (ids: readonly string[]): Promise<void> => {
+    if (!doc || doc.status !== 'draft') return;
+    setFilesBusy(true);
+    setFileError(undefined);
+    try {
+      await client.update(doc.id, { fileIds: [...ids], lines: doc.lines });
+      record.reload();
+    } catch (next) {
+      setFileError(errorText(next, t));
+    } finally {
+      setFilesBusy(false);
+    }
+  };
 
   /** 过账与作废。都先过下面的确认框。 */
   const run = async (action: Action, target: StockDoc) => {
@@ -147,7 +189,12 @@ export function StockDocDetailPage({ def }: { readonly def: StockKind }): ReactE
     hand.stock?.[stockKey(line)] ?? 0;
   // 超过现存量的行：标红，过账按钮不能用。现存量没读出来之前先不下结论。
   const over = doc?.lines.filter((line) => line.qty > stockOf(line)) ?? [];
-  const blocked = Boolean(showHand) && hand.stock !== undefined && over.length > 0;
+  // R1：销售出库过账必须有来源销售订单；R3：内部领用必须有领用部门与领用人。
+  const needsTaker = doc?.reason === 'internal_use' && !(doc.takerDepartmentId && doc.takerUserId);
+  const blocked =
+    (Boolean(showHand) && hand.stock !== undefined && over.length > 0) ||
+    Boolean(doc && needsSource(doc)) ||
+    needsTaker;
 
   const lineColumns = useMemo<ColumnDef<StockDocLine>[]>(() => {
     const columns: ColumnDef<StockDocLine>[] = [
@@ -197,6 +244,55 @@ export function StockDocDetailPage({ def }: { readonly def: StockKind }): ReactE
         ),
       },
     ];
+    if (priceView.can) {
+      columns.push(
+        {
+          id: 'taxRate',
+          header: t('stockDocs.columns.taxRate'),
+          cell: ({ row }) => row.original.taxRate ?? DASH,
+        },
+        {
+          id: 'taxIncludedPrice',
+          header: t('stockDocs.columns.taxIncludedPrice'),
+          cell: ({ row }) => row.original.taxIncludedPrice ?? DASH,
+        },
+        {
+          id: 'taxExcludedPrice',
+          header: t('stockDocs.columns.taxExcludedPrice'),
+          cell: ({ row }) => row.original.taxExcludedPrice ?? DASH,
+        },
+        {
+          id: 'taxExcludedAmount',
+          header: t('stockDocs.columns.taxExcludedAmount'),
+          cell: ({ row }) => money(row.original.taxExcludedAmount, locale, t),
+        },
+        {
+          id: 'taxAmount',
+          header: t('stockDocs.columns.taxAmount'),
+          cell: ({ row }) => money(row.original.taxAmount, locale, t),
+        },
+        {
+          id: 'taxIncludedAmount',
+          header: t('stockDocs.columns.taxIncludedAmount'),
+          cell: ({ row }) => money(row.original.taxIncludedAmount, locale, t),
+        },
+        {
+          id: 'productionDate',
+          header: t('stockDocs.columns.productionDate'),
+          cell: ({ row }) => row.original.productionDate ?? DASH,
+        },
+        {
+          id: 'expiryDate',
+          header: t('stockDocs.columns.expiryDate'),
+          cell: ({ row }) => row.original.expiryDate ?? DASH,
+        },
+        {
+          id: 'note',
+          header: t('erp.fields.note'),
+          cell: ({ row }) => row.original.note ?? DASH,
+        },
+      );
+    }
     if (!showHand) return columns;
     return [
       ...columns,
@@ -231,7 +327,7 @@ export function StockDocDetailPage({ def }: { readonly def: StockKind }): ReactE
       },
     ];
     // stockOf 只读 hand.stock；lookup 的两个查找函数引用是稳定的。
-  }, [t, locale, lookup, showHand, hand.stock]);
+  }, [t, locale, lookup, showHand, hand.stock, priceView.can]);
 
   // 权限没落定、单据还没读到：先画页头与一句「加载中」。没有读的权限、读不到时各自说明。
   if (!doc)
@@ -283,6 +379,62 @@ export function StockDocDetailPage({ def }: { readonly def: StockKind }): ReactE
         : t('stockDocs.source.manual'),
     },
     {
+      label: t(`stockDocs.${def.words}.docDate`),
+      value: doc.docDate ?? formatDateTime(doc.createdAt, locale),
+    },
+    {
+      label: t(`stockDocs.${def.words}.partner`),
+      value: doc.partner?.name ?? doc.partnerId,
+    },
+    { label: t('stockDocs.fields.contactName'), value: doc.contactName },
+    { label: t('stockDocs.fields.contactPhone'), value: doc.contactPhone },
+    {
+      label: t('stockDocs.fields.deliveryAddress'),
+      value: doc.deliveryAddress,
+      wide: true,
+    },
+    ...(def.kind === 'out'
+      ? [{ label: t('stockDocs.fields.customerOrderNo'), value: doc.customerOrderNo }]
+      : []),
+    {
+      label: t('stockDocs.fields.project'),
+      value: doc.projectLabel ?? doc.projectCode,
+    },
+    { label: t('stockDocs.fields.handler'), value: doc.handler?.name },
+    {
+      label: t('stockDocs.fields.takerDepartment'),
+      value: doc.takerDepartment?.name,
+    },
+    { label: t('stockDocs.fields.taker'), value: doc.taker?.name },
+    ...(priceView.can
+      ? [
+          {
+            label: t('orderDocs.fields.totalQty'),
+            value: doc.totalQty ?? DASH,
+          },
+          {
+            label: t('orderDocs.fields.taxIncludedTotal'),
+            value: money(doc.taxIncludedTotal, locale, t),
+          },
+          {
+            label: t('orderDocs.fields.taxExcludedTotal'),
+            value: money(doc.taxExcludedTotal, locale, t),
+          },
+          {
+            label: t('orderDocs.fields.taxTotal'),
+            value: money(doc.taxTotal, locale, t),
+          },
+          {
+            label: t('orderDocs.fields.discountAmount'),
+            value: money(doc.discountAmount, locale, t),
+          },
+          {
+            label: t(`${def.kind === 'in' ? 'purchaseOrders' : 'salesOrders'}.payableLabel`),
+            value: money(doc.payableTotal, locale, t),
+          },
+        ]
+      : []),
+    {
       label: t('stockDocs.fields.createdAt'),
       value: formatDateTime(doc.createdAt, locale),
     },
@@ -292,6 +444,26 @@ export function StockDocDetailPage({ def }: { readonly def: StockKind }): ReactE
     },
     { label: t('erp.fields.note'), value: doc.remark },
   ];
+  const printPath = DOC_PRINT_REASON_PATHS[doc.reason as keyof typeof DOC_PRINT_REASON_PATHS];
+  const canPrint =
+    printPath !== undefined &&
+    (printPath === 'internal-use'
+      ? printInternal.can
+      : printPath === 'sales-issue'
+        ? printSales.can
+        : printPurchase.can);
+  const printButton =
+    printPath === undefined || !canPrint ? null : (
+      <Button
+        variant='outline'
+        nativeButton={false}
+        render={
+          <Link to={`/main/doc-print/${printPath}/${encodeURIComponent(doc.docNo)}`} />
+        }
+      >
+        {t('docPrint.print')}
+      </Button>
+    );
   const actions =
     draft && (editing || posting.can || voiding.can) ? (
       <span className='flex flex-wrap items-center gap-2'>
@@ -325,7 +497,10 @@ export function StockDocDetailPage({ def }: { readonly def: StockKind }): ReactE
             {t('stockDocs.post')}
           </Button>
         ) : null}
+        {printButton}
       </span>
+    ) : printButton ? (
+      <span className='flex flex-wrap items-center gap-2'>{printButton}</span>
     ) : undefined;
 
   return (
@@ -355,7 +530,13 @@ export function StockDocDetailPage({ def }: { readonly def: StockKind }): ReactE
           <DocumentStatusBar>{t('stockDocs.voidStatus')}</DocumentStatusBar>
         ) : blocked ? (
           <DocumentStatusBar tone='destructive'>
-            <span>{t('stockDocs.shortage', { lines: over.length })}</span>
+            <span>
+              {doc && needsSource(doc)
+                ? t('stockDocs.sourceRequired')
+                : needsTaker
+                  ? t('stockDocs.takerRequired')
+                  : t('stockDocs.shortage', { lines: over.length })}
+            </span>
             {editing ? (
               <Link
                 to={{
@@ -383,6 +564,19 @@ export function StockDocDetailPage({ def }: { readonly def: StockKind }): ReactE
           getRowId={(line) => line.id}
           emptyMessage={t('stockDocs.noLines')}
         />
+      </DocumentSection>
+      <DocumentSection title={t('erp.docFiles.title')}>
+        <DocFilesPanel
+          files={doc.files ?? []}
+          ids={(doc.files ?? []).map((file) => file.id)}
+          disabled={filesBusy || doc.status !== 'draft'}
+          onChange={(ids) => void changeFiles(ids)}
+        />
+        {fileError ? (
+          <p role='alert' className='text-sm text-destructive'>
+            {fileError}
+          </p>
+        ) : null}
       </DocumentSection>
       <ConfirmDialog
         open={confirm !== undefined}
