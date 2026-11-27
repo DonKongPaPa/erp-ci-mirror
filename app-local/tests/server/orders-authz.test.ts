@@ -4,6 +4,7 @@ import {
   signIn,
   type TestSession,
 } from '@nocobase/app-plugin-authentication/testing';
+import { authorizationToken } from '@nocobase/app-plugin-authorization';
 import { expect } from 'vitest';
 
 import { createAppTest } from '../helpers/test-app.js';
@@ -16,6 +17,8 @@ import {
   unique,
   write,
 } from '../helpers/orders.js';
+import { upgradeR020Receive } from '../../cli/authz/upgrade-r020-receive.js';
+import { upgradeR021Price } from '../../cli/authz/upgrade-r021-price.js';
 import { createStandaloneServer } from '../../server/standalone.js';
 
 /**
@@ -211,4 +214,61 @@ test('采购碰销售订单 403，销售碰采购订单 403，别的角色两边
   }));
   expect(invalid.status).toBe(403);
   expect((await jsonOf(invalid)).error?.reason).not.toBe('ORDER_LINE_INVALID');
+}, TIMEOUT);
+
+
+test('价格管控是可单独收走的动作；升级命令只补缺的那一项且幂等', async ({
+  testApp, app, connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const buyer = await makeUser(admin, testApp, 'r021price', ['purchase']);
+  const item = await createItem(connection);
+  const order = await createOrder(buyer, 'purchase', {
+    lines: [{ itemId: item, qty: 2, price: 113, taxRate: 13 }],
+  });
+  const priced = await jsonOf(await buyer.fetch(`/purchase-orders/${String(order.id)}`, get()));
+  expect(Object.keys(priced)).toContain('payableTotal');
+
+  const authz = app.container.resolve(authorizationToken);
+  const set = await authz.permissionSets.get('purchase');
+  expect(set, '前置：purchase 权限集').toBeDefined();
+  const grants = JSON.parse(JSON.stringify(set!.grants)) as {
+    resource: { type: string; id: string };
+    actions: { action: string }[];
+  }[];
+  for (const grant of grants) {
+    if (grant.resource.type === 'composite' && grant.resource.id === 'purchaseOrders') {
+      grant.actions = grant.actions.filter((action) => action.action !== 'viewPrice');
+    }
+  }
+  await authz.permissionSets.update('purchase', {
+    key: 'purchase',
+    ...(set!.title === undefined ? {} : { title: set!.title }),
+    grants: grants as never,
+  });
+  const stripped = await jsonOf(await buyer.fetch(`/purchase-orders/${String(order.id)}`, get()));
+  expect(Object.keys(stripped)).not.toContain('payableTotal');
+  expect(stripped.lines?.every((line) => !('price' in line))).toBe(true);
+
+  const report = await upgradeR021Price({ authorization: authz }, { info: () => {} });
+  expect(report.changed).toEqual(['purchase']);
+  expect(report.unchanged).toEqual(['sales']);
+  const restored = await jsonOf(await buyer.fetch(`/purchase-orders/${String(order.id)}`, get()));
+  expect(Object.keys(restored)).toContain('payableTotal');
+  const again = await upgradeR021Price({ authorization: authz }, { info: () => {} });
+  expect(again.changed).toEqual([]);
+  expect(again.unchanged).toEqual(['purchase', 'sales']);
+}, TIMEOUT);
+
+
+test('仓管收货动作单独声明；升级命令只补 warehouse 且不重写既有授权', async ({ app }) => {
+  const authz = app.container.resolve(authorizationToken);
+  const set = await authz.permissionSets.get('warehouse');
+  expect(set).toBeDefined();
+  const before = JSON.stringify(set!.grants);
+  const report = await upgradeR020Receive({ authorization: authz }, { info: () => {} });
+  expect(report.changed).toEqual([]);
+  expect(report.unchanged).toEqual(['warehouse']);
+  expect(JSON.stringify((await authz.permissionSets.get('warehouse'))!.grants)).toBe(before);
+  expect((await authz.permissionSets.get('purchase'))!.revision).toBeDefined();
 }, TIMEOUT);

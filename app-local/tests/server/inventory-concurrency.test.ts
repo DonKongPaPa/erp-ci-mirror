@@ -10,6 +10,7 @@ import type { Knex } from 'knex';
 
 import { createAppTest } from '../helpers/test-app.js';
 import { createItem } from '../helpers/inventory.js';
+import { createOrder, createPartner } from '../helpers/orders.js';
 import { createStandaloneServer } from '../../server/standalone.js';
 import {
   StockRuleError,
@@ -90,9 +91,17 @@ test('两张出库单同时过账：一成一拒，现存量不为负', async ({
 
   const ids: string[] = [];
   for (const qty of [60, 60]) {
+    // R1（新约束）：销售出库过账要有来源订单；这里各备一张量足够的订单。
+    const customer = await createPartner(admin, { isCustomer: true });
+    const source = await createOrder(admin, 'sales', {
+      customerId: customer.id, lines: [{ itemId, qty: 200 }],
+    });
+    expect((await admin.fetch(`/sales-orders/${String(source.id)}/submit`, write())).status).toBe(200);
     const response = await admin.fetch('/stock-docs', write({
       docType: 'out',
       reason: 'sales_issue',
+      sourceType: 'sales_order',
+      sourceId: String(source.id),
       lines: [{ itemId, warehouseId, qty }],
     }));
     expect(response.status).toBe(201);

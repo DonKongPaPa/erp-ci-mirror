@@ -74,6 +74,9 @@ const SERVER_ARTIFACT_MARKERS = [
   'demo.quality_inspector',
   'demo.dept_manager',
   'demo.staff',
+  'demo.warehouse',
+  'demo.purchase',
+  'demo.sales',
 ];
 
 /**

@@ -1442,6 +1442,7 @@ const enUS = {
     },
   },
   authorization: {
+    docFiles: { table: 'Document attachments' },
     sections: {
       quality: 'Quality management',
       organization: 'Organization',
@@ -1517,6 +1518,7 @@ const enUS = {
         stockWrite: 'Write stock documents',
         stockPost: 'Post stock documents',
         stockVoid: 'Void stock documents',
+        stockPriceView: 'View stock document prices',
       },
     },
     // R-021/R-022: order resources; no page placement in this MVP.
@@ -1533,6 +1535,9 @@ const enUS = {
         submit: 'Submit purchase orders',
         cancel: 'Cancel purchase orders',
         createReceipt: 'Create inbound documents',
+        viewPrice: 'View prices and amounts',
+        receive: 'Receive from purchase orders',
+        financeView: 'View payable orders',
       },
     },
     salesOrders: {
@@ -1548,6 +1553,8 @@ const enUS = {
         submit: 'Submit sales orders',
         cancel: 'Cancel sales orders',
         createIssue: 'Create outbound documents',
+        viewPrice: 'View prices and amounts',
+        ship: 'Ship from sales orders',
       },
     },
     // R-014: customers and suppliers are two business resources with three actions each and no delete.
@@ -1571,6 +1578,16 @@ const enUS = {
     },
     partners: {
       tables: { partners: 'Business partners', contacts: 'Contacts' },
+    },
+    expenses: {
+      title: 'Expenses',
+      tables: { records: 'Expenses', lines: 'Expenses lines' },
+      actions: { view: 'View expenses', create: 'Create expenses', update: 'Edit draft expenses', confirm: 'Confirm expenses', void: 'Void expenses' },
+    },
+    invoiceReceipts: {
+      title: 'Invoice receipts',
+      tables: { records: 'Invoice receipts', lines: 'Invoice receipts lines' },
+      actions: { view: 'View invoice receipts', create: 'Create invoice receipts', update: 'Edit draft invoice receipts', confirm: 'Confirm invoice receipts', void: 'Void invoice receipts' },
     },
     // R-019: items, units of measure and item categories are one business resource; view reads, manage writes.
     items: {
@@ -1610,6 +1627,7 @@ const enUS = {
       staff: 'Staff',
       warehouse: 'Warehouse keeper',
       purchase: 'Purchasing',
+      finance: 'Finance',
       sales: 'Sales',
     },
   },

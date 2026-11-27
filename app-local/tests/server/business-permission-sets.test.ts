@@ -244,6 +244,16 @@ const salesPriceGrant = {
   actions: [{ action: 'viewSalesPrice' }],
 };
 
+/** R-021/R-022 加片：订单价格管控，采购与销售各一份。 */
+const purchaseOrderPriceGrant = {
+  resource: { type: 'composite', id: 'purchaseOrders' },
+  actions: [{ action: 'viewPrice' }],
+};
+const salesOrderPriceGrant = {
+  resource: { type: 'composite', id: 'salesOrders' },
+  actions: [{ action: 'viewPrice' }],
+};
+
 /** R-020：仓管五个库存动作，不含 warehouseManage。 */
 const inventoryGrant = {
   resource: { type: 'composite', id: 'inventory' },
@@ -254,6 +264,19 @@ const inventoryGrant = {
     { action: 'stockPost' },
     { action: 'stockVoid' },
   ],
+};
+
+const stockPriceViewGrant = {
+  resource: { type: 'composite', id: 'inventory' },
+  actions: [{ action: 'stockPriceView' }],
+};
+const purchaseReceiveGrant = {
+  resource: { type: 'composite', id: 'purchaseOrders' },
+  actions: [{ action: 'receive' }],
+};
+const salesShipGrant = {
+  resource: { type: 'composite', id: 'salesOrders' },
+  actions: [{ action: 'ship' }],
 };
 
 const expectedRoles = {
@@ -302,6 +325,9 @@ const expectedRoles = {
       inboundOrdersPageGrant,
       outboundOrdersPageGrant,
       inventoryGrant,
+      stockPriceViewGrant,
+      purchaseReceiveGrant,
+      salesShipGrant,
       bizDictGrant,
       bizOptionsGrant,
     ],
@@ -320,6 +346,26 @@ const expectedRoles = {
       bizDictGrant,
       bizOptionsGrant,
       salesPriceGrant,
+      salesOrderPriceGrant,
+    ],
+  },
+  finance: {
+    title: { key: 'permissionSets.business.finance', ns: 'app-local' },
+    grants: [
+      {
+        resource: { type: 'composite', id: 'expenses' },
+        actions: ['view', 'create', 'update', 'confirm', 'void'].map((action) => ({ action })),
+      },
+      {
+        resource: { type: 'composite', id: 'invoiceReceipts' },
+        actions: ['view', 'create', 'update', 'confirm', 'void'].map((action) => ({ action })),
+      },
+      {
+        resource: { type: 'composite', id: 'purchaseOrders' },
+        actions: [{ action: 'financeView' }],
+      },
+      bizDictGrant,
+      bizOptionsGrant,
     ],
   },
   purchase: {
@@ -336,6 +382,7 @@ const expectedRoles = {
       bizDictGrant,
       bizOptionsGrant,
       purchasePriceGrant,
+      purchaseOrderPriceGrant,
     ],
   },
 } as const;

@@ -142,7 +142,7 @@ printf '%s\n' "$PLATFORM_OUT"
 # devTools），写宽了只能靠排除来放行，那是给自己留口子。
 #
 #   路径   dist/ 下不许有：文件名含 dev-account-switcher、路径含 /dev-tools/、名为 dev-tools.<扩展名>；
-#   服务端 dist/server 全文不许出现：switch-account、dev-account-switcher、四个演示账户的用户名；
+#   服务端 dist/server 全文不许出现：switch-account、dev-account-switcher、七个演示账户的用户名；
 #   客户端 dist/client 全文不许出现：dev-account-switcher 与切换器的四条词条文案。
 DEV_TOOLS_PATH_FIND=(
   -name '*dev-account-switcher*'
@@ -156,6 +156,9 @@ DEV_TOOLS_SERVER_MARKERS=(
   demo.quality_inspector
   demo.dept_manager
   demo.staff
+  demo.warehouse
+  demo.purchase
+  demo.sales
 )
 DEV_TOOLS_CLIENT_MARKERS=(
   dev-account-switcher

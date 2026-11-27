@@ -119,9 +119,9 @@ const KINDS: readonly Kind[] = [
     makeAction: 'createReceipt',
     makeSegment: 'create-receipt',
     no: {
-      first: 'PO-20261127-0001',
-      created: 'PO-20261127-0002',
-      doc: 'IN-20261127-0001',
+      first: 'CG-20261127-0001',
+      created: 'CG-20261127-0002',
+      doc: 'RK-20261127-0001',
     },
   },
   {
@@ -135,9 +135,9 @@ const KINDS: readonly Kind[] = [
     makeAction: 'createIssue',
     makeSegment: 'create-issue',
     no: {
-      first: 'SO-20261127-0001',
-      created: 'SO-20261127-0002',
-      doc: 'OUT-20261127-0001',
+      first: 'XS-20261127-0001',
+      created: 'XS-20261127-0002',
+      doc: 'CK-20261127-0001',
     },
   },
 ];

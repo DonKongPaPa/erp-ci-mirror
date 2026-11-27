@@ -28,7 +28,7 @@ import { renderAuthenticatedClient } from '../helpers/authenticated-client.js';
 /**
  * R-037 开发环境专用的多用户快捷切换，头像菜单部分。
  *
- * 验收标准第 2 条的前半（关着时菜单里没有这一段）与第 1 条里「列出四个演示账户与各自的角色」。
+ * 验收标准第 2 条的前半（关着时菜单里没有这一段）与第 1 条里「列出七个演示账户与各自的角色」。
  * 测试应用按开发环境启动并打开开关，演示账户由服务端在启动时建出来；客户端配置用一个只覆盖
  * `config.public` 的包装传进去 —— `renderWithApp()` 不读页面里的公开配置，它总是给空对象。
  */
@@ -88,6 +88,9 @@ const ROLE_ENTRIES = [
   ['演示 · 质量员', 'Quality inspector'],
   ['演示 · 部门主管', 'Department manager'],
   ['演示 · 普通员工', 'Staff'],
+  ['演示 · 仓管', 'Warehouse keeper'],
+  ['演示 · 采购', 'Purchasing'],
+  ['演示 · 销售', 'Sales'],
 ] as const;
 
 describe('account switcher in the avatar menu', () => {
@@ -157,7 +160,7 @@ describe('account switcher in the avatar menu', () => {
         name: new RegExp(name, 'u'),
       });
       expect(item).toHaveTextContent(role);
-      // 登录的是管理员，四个演示账户都不是当前账户。
+      // 登录的是管理员，所有演示账户都不是当前账户。
       expect(within(item).queryByLabelText('Current account')).toBeNull();
     }
 
@@ -176,7 +179,10 @@ describe('account switcher in the avatar menu', () => {
       name: /演示 · 普通员工/u,
     });
     expect(within(current).getByLabelText('Current account')).toBeVisible();
-    for (const [name] of ROLE_ENTRIES.slice(0, 3)) {
+    // 除已切到的那个账户外，逐个验其余账户都没有「当前账户」标记。
+    for (const [name] of ROLE_ENTRIES.filter(
+      ([entry]) => entry !== '演示 · 普通员工',
+    )) {
       const other = await screen.findByRole('menuitem', {
         name: new RegExp(name, 'u'),
       });
@@ -186,7 +192,7 @@ describe('account switcher in the avatar menu', () => {
 });
 
 // 客户端 DEV 门的行为：vitest 里 import.meta.env.DEV 为真（开发态），入口登记的提供者会把切换器那一段
-// 登记给头像菜单 —— 上面「列出四个演示账户」那条用例走的就是这条路（R-073）。生产构建把 DEV 换成常量假，
+// 登记给头像菜单 —— 上面「列出全部七个演示账户」那条用例走的就是这条路（R-073）。生产构建把 DEV 换成常量假，
 // 提供者的 start() 直接返回、不引入切换器；那一半单测里跑不出来，由产物自检断言。
 it('the development extensions entry contributes exactly one provider', () => {
   const registration = developmentExtensions();

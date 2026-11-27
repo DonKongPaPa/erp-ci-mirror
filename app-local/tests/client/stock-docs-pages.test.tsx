@@ -95,7 +95,7 @@ const line = (overrides: Record<string, unknown> = {}) => ({
 function doc(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id: 'd1',
-    docNo: 'IN-20261127-0001',
+    docNo: 'RK-20261127-0001',
     docType: 'in',
     reason: 'other_in',
     status: 'draft',
@@ -113,7 +113,7 @@ function doc(overrides: Record<string, unknown> = {}): Record<string, unknown> {
 }
 const outDoc = (overrides: Record<string, unknown> = {}) =>
   doc({
-    docNo: 'OUT-20261127-0001',
+    docNo: 'CK-20261127-0001',
     docType: 'out',
     reason: 'other_out',
     ...overrides,
@@ -210,7 +210,7 @@ describe('R-020 入库单', () => {
     await renderAt('/inbound-orders', keeper);
 
     expect(
-      await screen.findByRole('link', { name: 'IN-20261127-0001' }, WAIT),
+      await screen.findByRole('link', { name: 'RK-20261127-0001' }, WAIT),
     ).toHaveAttribute('href', '/inbound-orders/d1');
     expect(await screen.findByText('Other inbound', {}, WAIT)).toBeVisible();
     expect(await screen.findByText('Entered manually', {}, WAIT)).toBeVisible();
@@ -225,7 +225,7 @@ describe('R-020 入库单', () => {
     await userEvent.click(
       await screen.findByRole(
         'button',
-        { name: 'Actions for IN-20261127-0001' },
+        { name: 'Actions for RK-20261127-0001' },
         WAIT,
       ),
     );
@@ -244,7 +244,7 @@ describe('R-020 入库单', () => {
         : notFound();
     await renderAt('/inbound-orders', viewer);
     expect(
-      await screen.findByText('IN-20261127-0001', {}, WAIT),
+      await screen.findByText('RK-20261127-0001', {}, WAIT),
     ).toBeVisible();
 
     expect(
@@ -252,7 +252,7 @@ describe('R-020 入库单', () => {
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', {
-        name: 'Actions for IN-20261127-0001',
+        name: 'Actions for RK-20261127-0001',
       }),
     ).not.toBeInTheDocument();
   });
@@ -260,7 +260,7 @@ describe('R-020 入库单', () => {
   it('creates a draft by hand and lands on the document', async () => {
     answer = (call) => {
       if (call.method === 'POST' && call.path === 'stock-docs')
-        return doc({ id: 'd9', docNo: 'IN-20261127-0009' });
+        return doc({ id: 'd9', docNo: 'RK-20261127-0009' });
       return lookups(call);
     };
     const view = await renderAt('/inbound-orders/new', keeper);
@@ -390,7 +390,7 @@ describe('R-020 入库单', () => {
     await renderAt('/inbound-orders/d1', keeper);
 
     expect(
-      await screen.findByRole('heading', { name: /IN-20261127-0001/ }, WAIT),
+      await screen.findByRole('heading', { name: /RK-20261127-0001/ }, WAIT),
     ).toBeVisible();
     expect(await screen.findByText('Draft', {}, WAIT)).toBeVisible();
     expect(
@@ -426,7 +426,7 @@ describe('R-020 入库单', () => {
     await userEvent.click(post);
     const confirm = await screen.findByRole(
       'alertdialog',
-      { name: 'Post IN-20261127-0001?' },
+      { name: 'Post RK-20261127-0001?' },
       WAIT,
     );
     await userEvent.click(
@@ -444,7 +444,7 @@ describe('R-020 入库单', () => {
     expect(view.toasts()).toEqual([
       expect.objectContaining({
         type: 'success',
-        title: 'Posted IN-20261127-0001. Stock has increased.',
+        title: 'Posted RK-20261127-0001. Stock has increased.',
       }),
     ]);
     expect(
@@ -472,7 +472,7 @@ describe('R-020 入库单', () => {
     );
     const confirm = await screen.findByRole(
       'alertdialog',
-      { name: 'Void IN-20261127-0001?' },
+      { name: 'Void RK-20261127-0001?' },
       WAIT,
     );
     await userEvent.click(
@@ -494,7 +494,7 @@ describe('R-020 入库单', () => {
     expect(view.toasts()).toEqual([
       expect.objectContaining({
         type: 'success',
-        title: 'Voided IN-20261127-0001',
+        title: 'Voided RK-20261127-0001',
       }),
     ]);
   });
@@ -613,7 +613,7 @@ describe('R-020 出库单', () => {
     await userEvent.click(post);
     const confirm = await screen.findByRole(
       'alertdialog',
-      { name: 'Post OUT-20261127-0001?' },
+      { name: 'Post CK-20261127-0001?' },
       WAIT,
     );
     await userEvent.click(
@@ -636,7 +636,7 @@ describe('R-020 出库单', () => {
 
   it('reloads the document when the server says it is no longer a draft', async () => {
     let stored = doc({
-      docNo: 'OUT-20261127-0001',
+      docNo: 'CK-20261127-0001',
       docType: 'out',
       reason: 'other_out',
     });
@@ -655,7 +655,7 @@ describe('R-020 出库单', () => {
     );
     const confirm = await screen.findByRole(
       'alertdialog',
-      { name: 'Void OUT-20261127-0001?' },
+      { name: 'Void CK-20261127-0001?' },
       WAIT,
     );
     await userEvent.click(

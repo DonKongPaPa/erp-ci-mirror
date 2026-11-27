@@ -82,7 +82,7 @@ const transaction = {
   id: 't1',
   docId: 'd1',
   docLineId: 'l1',
-  docNo: 'IN-20261127-0001',
+  docNo: 'RK-20261127-0001',
   itemId: 'i1',
   warehouseId: 'w1',
   batchNo: 'B01',
@@ -193,7 +193,7 @@ describe('R-020 库存查询', () => {
     await userEvent.click(screen.getByRole('tab', { name: 'Ledger' }));
 
     expect(
-      await screen.findByRole('link', { name: 'IN-20261127-0001' }, WAIT),
+      await screen.findByRole('link', { name: 'RK-20261127-0001' }, WAIT),
     ).toHaveAttribute('href', '/inbound-orders/d1');
     expect(
       await screen.findByText('Inbound order', {}, WAIT),

@@ -10,6 +10,9 @@ import { expect } from 'vitest';
 
 import { createAppTest } from '../helpers/test-app.js';
 import { createItem } from '../helpers/inventory.js';
+import {
+  createDictEntry, createEmployee, createOrder, createPartner, makeRoleUser,
+} from '../helpers/orders.js';
 import { createStandaloneServer } from '../../server/standalone.js';
 
 /**
@@ -79,9 +82,19 @@ async function createOutbound(
   qty: number,
   batchNo = '',
 ): Promise<Row> {
+  // R1（设计新加的约束）：销售出库过账要有来源；这里备一张量足够的销售订单。
+  const customer = await createPartner(session, { isCustomer: true });
+  const order = await createOrder(session, 'sales', {
+    customerId: customer.id,
+    lines: [{ itemId, qty: qty + 1000 }],
+  });
+  const submitted = await session.fetch(`/sales-orders/${String(order.id)}/submit`, write());
+  expect(submitted.status, `提交来源订单失败：${await submitted.clone().text()}`).toBe(200);
   const response = await session.fetch('/stock-docs', write({
     docType: 'out',
     reason: 'sales_issue',
+    sourceType: 'sales_order',
+    sourceId: String(order.id),
     lines: [{ itemId, warehouseId, batchNo, qty }],
   }));
   expect(response.status, `建出库单失败：${await response.clone().text()}`).toBe(201);
@@ -99,12 +112,12 @@ const balanceOf = async (
   return row === undefined ? 0 : Number(row.qty);
 };
 
-test('建单自动取号：IN/OUT 前缀带日期，明细整单写入', async ({ testApp, connection }) => {
+test('建单自动取号：RK/CK 前缀带日期，明细整单写入', async ({ testApp, connection }) => {
   const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
   const warehouse = await createWarehouse(admin);
   const itemId = await createItem(connection);
   const inbound = await createInbound(admin, itemId, String(warehouse.id), 12.5);
-  expect(String(inbound.docNo)).toMatch(/^IN-\d{8}-\d{4,}$/u);
+  expect(String(inbound.docNo)).toMatch(/^RK-\d{8}-\d{4,}$/u);
   expect(inbound).toMatchObject({ docType: 'in', status: 'draft' });
   expect(String(inbound.remark)).toBe('');
   expect(inbound.sourceType).toBeNull();
@@ -112,7 +125,7 @@ test('建单自动取号：IN/OUT 前缀带日期，明细整单写入', async (
   expect(inbound.lines?.[0]).toMatchObject({ itemId, warehouseId: warehouse.id, qty: 12.5 });
 
   const outbound = await createOutbound(admin, itemId, String(warehouse.id), 3);
-  expect(String(outbound.docNo)).toMatch(/^OUT-\d{8}-\d{4,}$/u);
+  expect(String(outbound.docNo)).toMatch(/^CK-\d{8}-\d{4,}$/u);
   expect(String(outbound.docNo)).not.toBe(inbound.docNo);
 
   const stored = await connection
@@ -330,3 +343,173 @@ test('物料必须存在且在用：不存在 404 ITEM_NOT_FOUND，停用 422 IT
   expect(stopped.status).toBe(422);
   expect((await jsonOf(stopped)).error?.reason).toBe('ITEM_INACTIVE');
 });
+
+
+async function createDepartment(connection: Parameters<typeof createItem>[0]): Promise<string> {
+  const id = `dept-${randomUUID()}`;
+  const now = new Date();
+  await connection.query.insertInto('departments').values({
+    id, title: '测试领用部门', active: true, sortOrder: 0, createdAt: now, updatedAt: now,
+  }).execute();
+  return id;
+}
+
+test('加片正向：内部领用、生产入库、采购退货过账，回写订单进度不变', async ({
+  testApp, connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const warehouse = await createWarehouse(admin);
+  const wh = String(warehouse.id);
+  const itemId = await createItem(connection);
+  const departmentId = await createDepartment(connection);
+  const takerUserId = unique('TAKER');
+  await createEmployee(connection, takerUserId);
+  const inbound = await createInbound(admin, itemId, wh, 100);
+  const stocked = await admin.fetch(`/stock-docs/${String(inbound.id)}/post`, write());
+  expect(stocked.status, `备货过账失败：${await stocked.clone().text()}`).toBe(200);
+
+  const internal = await jsonOf(await admin.fetch('/stock-docs', write({
+    docType: 'out', reason: 'internal_use',
+    takerDepartmentId: departmentId, takerUserId,
+    docDate: '2026-11-28', remark: '领用测试',
+    lines: [{ itemId, warehouseId: wh, qty: 10 }],
+  })));
+  expect(internal.reason).toBe('internal_use');
+  expect(internal.taker).toMatchObject({ userId: takerUserId });
+  expect(Object.keys(internal.taker as Row).sort()).toEqual(['name', 'userId']);
+  expect(internal.takerDepartment).toMatchObject({ id: departmentId });
+  expect(internal.docDate).toBe('2026-11-28');
+  const postedInternal = await admin.fetch(`/stock-docs/${String(internal.id)}/post`, write());
+  expect(postedInternal.status, `内部领用过账失败：${await postedInternal.clone().text()}`).toBe(200);
+  expect(await balanceOf(connection, itemId, wh)).toBe(90);
+  const transactions = await connection.repository<Row>('stockTransactions')
+    .findMany({ filter: { docId: internal.id } });
+  expect(Number(transactions[0]?.qtyDelta)).toBe(-10);
+
+  const production = await jsonOf(await admin.fetch('/stock-docs', write({
+    docType: 'in', reason: 'production_receipt',
+    lines: [{ itemId, warehouseId: wh, qty: 7 }],
+  })));
+  expect((await admin.fetch(`/stock-docs/${String(production.id)}/post`, write())).status).toBe(200);
+  expect(await balanceOf(connection, itemId, wh)).toBe(97);
+
+  const supplier = await createPartner(admin, { isSupplier: true });
+  const order = await createOrder(admin, 'purchase', {
+    supplierId: supplier.id, lines: [{ itemId, qty: 20 }],
+  });
+  await admin.fetch(`/purchase-orders/${String(order.id)}/submit`, write());
+  const before = await jsonOf(await admin.fetch(`/purchase-orders/${String(order.id)}`, get()));
+  const returned = await jsonOf(await admin.fetch('/stock-docs', write({
+    docType: 'out', reason: 'purchase_return', partnerId: supplier.id,
+    lines: [{ itemId, warehouseId: wh, qty: 3 }],
+  })));
+  expect((await admin.fetch(`/stock-docs/${String(returned.id)}/post`, write())).status).toBe(200);
+  expect(await balanceOf(connection, itemId, wh)).toBe(94);
+  const after = await jsonOf(await admin.fetch(`/purchase-orders/${String(order.id)}`, get()));
+  expect(after.lines?.[0]?.receivedQty).toBe(before.lines?.[0]?.receivedQty);
+}, 30_000);
+
+test('加片拒绝路径：来源、领用、对方、日期六类规则码', async ({ testApp, connection }) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const warehouse = await createWarehouse(admin);
+  const wh = String(warehouse.id);
+  const itemId = await createItem(connection);
+  const otherItem = await createItem(connection);
+  const supplier = await createPartner(admin, { isSupplier: true });
+  const customer = await createPartner(admin, { isCustomer: true });
+  const order = await createOrder(admin, 'sales', {
+    customerId: customer.id, lines: [{ itemId, qty: 10 }],
+  });
+  await admin.fetch(`/sales-orders/${String(order.id)}/submit`, write());
+  const reject = async (
+    body: Row, reason: string, post = false, id?: string,
+  ): Promise<void> => {
+    const response = post
+      ? await admin.fetch(`/stock-docs/${String(id)}/post`, write())
+      : await admin.fetch('/stock-docs', write(body));
+    expect(response.status, `${reason}: ${await response.clone().text()}`).toBe(422);
+    expect((await jsonOf(response)).error?.reason).toBe(reason);
+  };
+  // R1：无来源的销售出库可以建草稿，过账才拦。
+  const noSource = await jsonOf(await admin.fetch('/stock-docs', write({
+    docType: 'out', reason: 'sales_issue', lines: [{ itemId, warehouseId: wh, qty: 1 }],
+  })));
+  await reject({}, 'STOCK_SOURCE_REQUIRED', true, noSource.id);
+  await reject({
+    docType: 'out', reason: 'sales_issue', sourceType: 'sales_order', sourceId: String(order.id),
+    lines: [{ itemId: otherItem, warehouseId: wh, qty: 1 }],
+  }, 'STOCK_SOURCE_LINE_INVALID');
+  await reject({
+    docType: 'out', reason: 'sales_issue', sourceType: 'sales_order', sourceId: String(order.id),
+    lines: [{ itemId, warehouseId: wh, qty: 11 }],
+  }, 'STOCK_SOURCE_QTY_EXCEEDS');
+  await reject({
+    docType: 'out', reason: 'purchase_return', sourceType: 'sales_order', sourceId: String(order.id),
+    lines: [{ itemId, warehouseId: wh, qty: 1 }],
+  }, 'STOCK_SOURCE_NOT_ALLOWED');
+  await reject({
+    docType: 'out', reason: 'sales_issue', partnerId: supplier.id,
+    sourceType: 'sales_order', sourceId: String(order.id),
+    lines: [{ itemId, warehouseId: wh, qty: 1 }],
+  }, 'STOCK_PARTNER_MISMATCH');
+  await reject({
+    docType: 'in', reason: 'purchase_receipt',
+    lines: [{
+      itemId, warehouseId: wh, qty: 1,
+      productionDate: '2026-12-02', expiryDate: '2026-12-01',
+    }],
+  }, 'STOCK_LINE_INVALID');
+  const internal = await jsonOf(await admin.fetch('/stock-docs', write({
+    docType: 'out', reason: 'internal_use',
+    lines: [{ itemId, warehouseId: wh, qty: 1 }],
+  })));
+  await reject({}, 'STOCK_TAKER_REQUIRED', true, internal.id);
+}, 30_000);
+
+test('加片金额与价格反向：没给税率的旧行照旧没有金额键，只持 stockView 看不到价格', async ({
+  testApp, connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const warehouse = await createWarehouse(admin);
+  const wh = String(warehouse.id);
+  const itemId = await createItem(connection);
+  await createDictEntry(connection, 'project', 'STOCK-PROJ');
+  const created = await jsonOf(await admin.fetch('/stock-docs', write({
+    docType: 'in', reason: 'purchase_receipt', projectCode: 'STOCK-PROJ', discountAmount: 13,
+    lines: [{ itemId, warehouseId: wh, qty: 10, taxIncludedPrice: 113, taxRate: 13 }],
+  })));
+  expect(created.lines?.[0]).toMatchObject({
+    taxRate: 13, taxExcludedPrice: 100, taxExcludedAmount: 1000,
+    taxAmount: 130, taxIncludedAmount: 1130,
+  });
+  expect(created).toMatchObject({
+    totalQty: 10, taxIncludedTotal: 1130, taxExcludedTotal: 1000,
+    taxTotal: 130, payableTotal: 1117,
+  });
+
+  const { session: viewer } = await makeRoleUser(
+    admin, testApp, 'r020view', [
+      { resource: { type: 'composite', id: 'inventory' }, actions: [{ action: 'stockView' }] },
+    ],
+  );
+  const priceKeys = [
+    'taxIncludedPrice', 'taxExcludedPrice', 'taxExcludedAmount', 'taxAmount', 'taxIncludedAmount',
+    'discountAmount', 'taxIncludedTotal', 'taxExcludedTotal', 'taxTotal', 'payableTotal',
+  ];
+  for (const response of [
+    await viewer.fetch('/stock-docs', get()),
+    await viewer.fetch(`/stock-docs/${String(created.id)}`, get()),
+  ]) {
+    expect(response.status, `只持 stockView 应当能读：${await response.clone().text()}`).toBe(200);
+    const body = await jsonOf(response);
+    for (const row of (body.items ?? [body]) as Row[]) {
+      for (const key of priceKeys) expect(Object.keys(row)).not.toContain(key);
+      for (const line of (row.lines ?? []) as Row[]) {
+        for (const key of priceKeys) expect(Object.keys(line)).not.toContain(key);
+      }
+    }
+  }
+  const priced = await jsonOf(await admin.fetch(`/stock-docs/${String(created.id)}`, get()));
+  for (const key of priceKeys.slice(5)) expect(Object.keys(priced)).toContain(key);
+  for (const key of priceKeys.slice(0, 5)) expect(Object.keys(priced.lines![0]!)).toContain(key);
+}, 30_000);

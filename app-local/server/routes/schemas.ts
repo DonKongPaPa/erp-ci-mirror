@@ -1148,3 +1148,7 @@ export const UpdateCategoryBody = z
   })
   .passthrough();
 export type UpdateCategoryInput = z.infer<typeof UpdateCategoryBody>;
+
+/** R-021 加片：单据附件可选键，建改（草稿）请求体共用同一个约束。 */
+export const FileIdsSchema = z.array(z.string().min(1).max(64)).optional();
+export const DocFileIdParam = z.object({ id: z.string().min(1).max(64) });

@@ -57,6 +57,10 @@ const zhCN: AppServerResource = {
       itemInactive: '这条物料已停用，请换一个。',
       warehouseNotFound: '这个仓库不存在。',
       warehouseInactive: '这个仓库已停用，请换一个。',
+      linePriceInvalid: '单价或税率不合法（税率要在 0 到 100 之间，单价不能为负）。',
+      discountInvalid: '优惠金额不合法（不能为负，也不能大于含税总金额）。',
+      dictCodeInvalid: '结算方式或项目的码不在字典里，或已经停用。',
+      personInvalid: '经办人不是在职员工。',
     },
   },
   employees: {
@@ -110,6 +114,22 @@ const zhCN: AppServerResource = {
       valueInvalid: '有内容不合规（{{reason}}），请检查名称、税率或日期。',
       codeInactive: '这个码不是该类型里在用的取值：{{reason}}。',
       notFound: '这条字典取值不存在。',
+    },
+  },
+  // R-020 加片：库存单据规则码文案。
+  inventory: {
+    errors: {
+      sourceRequired: '销售出库过账必须带来源销售订单。',
+      sourceInvalid: '来源订单不存在或不能发货。',
+      sourceLineInvalid: '单据里的物料不在来源订单里。',
+      sourceQtyExceeds: '按物料累计数量超过订单剩余。',
+      sourceNotAllowed: '这种出入库原因不允许带订单来源。',
+      takerRequired: '内部领用过账必须填领用部门与领用人。',
+      partnerMismatch: '往来单位与出入库原因不符。',
+      linePriceInvalid: '单价或税率不合法。',
+      discountInvalid: '优惠金额不能为负，也不能大于含税总金额。',
+      dictCodeInvalid: '项目的码不在字典里，或已经停用。',
+      personInvalid: '经办人、领用人不是在职员工，或领用部门不在用。',
     },
   },
   ticketNotifications: {

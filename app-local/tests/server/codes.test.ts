@@ -46,7 +46,7 @@ test('前缀写死一处；格式是前缀-yyyymmdd-四位序号；none 不带�
 }) => {
   const codes = app.container.resolve(codeServiceToken);
   expect(Object.values(CODE_PREFIXES)).toEqual([
-    'M', 'P', 'CU', 'SU', 'PO', 'SO', 'IN', 'OUT',
+    'M', 'P', 'CU', 'SU', 'CG', 'XS', 'RK', 'CK', 'EXP', 'RCV',
   ]);
 
   expect(
@@ -67,6 +67,35 @@ test('前缀写死一处；格式是前缀-yyyymmdd-四位序号；none 不带�
       now: DAY2,
     }),
   ).toBe('CU-0002');
+});
+
+test('四类单据：同一天内连续发号流水递增、前缀照旧系统', async ({
+  app,
+  connection,
+}) => {
+  const codes = app.container.resolve(codeServiceToken);
+  const cases = [
+    { key: 'purchaseOrder', prefix: 'CG' },
+    { key: 'salesOrder', prefix: 'XS' },
+    { key: 'inbound', prefix: 'RK' },
+    { key: 'outbound', prefix: 'CK' },
+  ] as const;
+
+  for (const { key, prefix } of cases) {
+    expect(CODE_PREFIXES[key], `${key} 的前缀`).toBe(prefix);
+    const first = await codes.nextCode(connection, CODE_PREFIXES[key], {
+      now: DAY1,
+    });
+    const second = await codes.nextCode(connection, CODE_PREFIXES[key], {
+      now: DAY1,
+    });
+    const third = await codes.nextCode(connection, CODE_PREFIXES[key], {
+      now: DAY1,
+    });
+    expect(first).toBe(`${prefix}-20261127-0001`);
+    expect(second).toBe(`${prefix}-20261127-0002`);
+    expect(third).toBe(`${prefix}-20261127-0003`);
+  }
 });
 
 test('并发：两个连接各取 20 个号，互不重复', async ({

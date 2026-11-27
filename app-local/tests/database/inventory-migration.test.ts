@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { describeMigration } from '@nocobase/app-testing/server';
 import type { Knex } from 'knex';
@@ -9,6 +10,8 @@ async function expectDecimal(
   connection: { client<T>(): Promise<T> },
   table: string,
   column: string,
+  precision = 18,
+  scale = 4,
 ): Promise<void> {
   const knex = await connection.client<Knex>();
   const result = await knex.raw<{
@@ -24,8 +27,8 @@ async function expectDecimal(
       precision: Number(row?.numeric_precision),
       scale: Number(row?.numeric_scale),
     },
-    `${table}.${column} 必须是 decimal(18,4)`,
-  ).toEqual({ precision: 18, scale: 4 });
+    `${table}.${column} 必须是 decimal(${precision},${scale})`,
+  ).toEqual({ precision, scale });
 }
 
 /**
@@ -278,6 +281,78 @@ describe('R-020：仓库与库存的迁移', () => {
       await expectCollection('stockDocLines').not.toExist();
       await expectCollection('stockBalances').not.toExist();
       await expectCollection('stockTransactions').not.toExist();
+    },
+  });
+});
+
+
+/** R-020 加片：头 16 列、行 9 列、三个索引逐项钉住；down 还原到加片前。 */
+const EXT_DOC_FIELDS = [
+  ...DOC_FIELDS,
+  'docDate', 'partnerId', 'contactName', 'contactPhone', 'deliveryAddress',
+  'customerOrderNo', 'projectCode', 'handlerUserId', 'takerDepartmentId',
+  'takerUserId', 'discountAmount', 'totalQty', 'taxIncludedTotal',
+  'taxExcludedTotal', 'taxTotal', 'payableTotal',
+].sort();
+const EXT_LINE_FIELDS = [
+  ...LINE_FIELDS,
+  'taxIncludedPrice', 'taxExcludedPrice', 'taxRate', 'taxExcludedAmount',
+  'taxAmount', 'taxIncludedAmount', 'productionDate', 'expiryDate', 'note',
+].sort();
+
+describe('R-020 加片：出入库补字段的迁移', () => {
+  describeMigration('202611260019_stock_docs_ext', {
+    sources,
+    up: async ({ connection, expectCollection }) => {
+      const docs = await expectCollection('stockDocs').toExist();
+      expect(Object.keys(docs.fields).sort()).toEqual(EXT_DOC_FIELDS);
+      const lines = await expectCollection('stockDocLines').toExist();
+      expect(Object.keys(lines.fields).sort()).toEqual(EXT_LINE_FIELDS);
+      for (const [table, columns] of [
+        ['stock_docs', [
+          'discount_amount', 'total_qty', 'tax_included_total', 'tax_excluded_total',
+          'tax_total', 'payable_total',
+        ]],
+        ['stock_doc_lines', [
+          'tax_included_price', 'tax_excluded_price', 'tax_excluded_amount',
+          'tax_amount', 'tax_included_amount',
+        ]],
+      ] as const) {
+        for (const column of columns) await expectDecimal(connection, table, column);
+      }
+      await expectDecimal(connection, 'stock_doc_lines', 'tax_rate', 5, 2);
+      await expectCollection('stockDocs').toHaveIndex(['docType', 'docDate']);
+      await expectCollection('stockDocs').toHaveIndex(['partnerId']);
+      await expectCollection('stockDocs').toHaveIndex(['projectCode']);
+      const physical = await connection.schemaInspector.getPhysicalCollection({
+        tableName: 'stock_docs',
+      });
+      expect([...(physical?.indexes.map((index) => index.name) ?? [])].sort()).toEqual(
+        expect.arrayContaining([
+          'ix_stock_docs_doc_date', 'ix_stock_docs_partner', 'ix_stock_docs_project',
+        ]),
+      );
+      const insertedId = `sd-ext-${randomUUID()}`;
+      await connection.query.insertInto('stock_docs').values({
+        id: insertedId, doc_no: `IN-EXT-${randomUUID().slice(0, 6)}`, doc_type: 'in', reason: 'purchase_receipt',
+        created_by_id: 'tester', created_at: '2026-11-27T01:00:00.000Z',
+        updated_at: '2026-11-27T01:00:00.000Z',
+      }).execute();
+      const row = await connection.query.selectFrom('stock_docs').selectAll()
+        .where('id', '=', insertedId).executeTakeFirstOrThrow();
+      expect(Number(row.discountAmount)).toBe(0);
+      expect(row.docDate).toBeNull();
+      expect(row.payableTotal).toBeNull();
+    },
+    down: async ({ connection, expectCollection }) => {
+      expect(Object.keys((await expectCollection('stockDocs').toExist()).fields).sort())
+        .toEqual(DOC_FIELDS);
+      expect(Object.keys((await expectCollection('stockDocLines').toExist()).fields).sort())
+        .toEqual(LINE_FIELDS);
+      const physical = await connection.schemaInspector.getPhysicalCollection({
+        tableName: 'stock_docs',
+      });
+      expect(physical?.indexes.map((index) => index.name)).not.toContain('ix_stock_docs_project');
     },
   });
 });

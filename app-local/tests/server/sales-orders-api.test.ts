@@ -8,11 +8,14 @@ import { expect } from 'vitest';
 import { createAppTest } from '../helpers/test-app.js';
 import { createItem } from '../helpers/inventory.js';
 import {
+  createDictEntry,
+  createEmployee,
   createOrder,
   createPartner,
   createWarehouse,
   get,
   jsonOf,
+  makeRoleUser,
   unique,
   write,
   type Row,
@@ -34,7 +37,7 @@ const test = createAppTest({
 const TIMEOUT = 30_000;
 const PATH = '/sales-orders';
 
-test('建单自动取号：SO 前缀、客户摘要、明细整单写入，服务端列不收', async ({
+test('建单自动取号：XS 前缀、客户摘要、明细整单写入，服务端列不收', async ({
   testApp, connection,
 }) => {
   const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
@@ -50,7 +53,7 @@ test('建单自动取号：SO 前缀、客户摘要、明细整单写入，服�
   }));
   expect(response.status, `建单失败：${await response.clone().text()}`).toBe(201);
   const order = await jsonOf(response);
-  expect(String(order.orderNo)).toMatch(/^SO-\d{8}-\d{4,}$/u);
+  expect(String(order.orderNo)).toMatch(/^XS-\d{8}-\d{4,}$/u);
   expect(order).toMatchObject({
     customerId: customer.id, orderDate: '2026-11-26', status: 'draft',
     remark: '首张销售单', submittedAt: null,
@@ -230,4 +233,111 @@ test('生成出库单：默认全量、指定行/部分行、超额与重复生�
       filter: { sourceType: 'sales_order', sourceId: id },
     }),
   ).toHaveLength(2);
+}, TIMEOUT);
+
+
+test('加片金额与经办人：两行含税单价 226、税率 13、数量 5，默认登录人', async ({
+  testApp, connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const customer = await createPartner(admin, { isCustomer: true });
+  const warehouse = await createWarehouse(admin);
+  const items = [await createItem(connection), await createItem(connection)];
+  await createDictEntry(connection, 'project', 'SALES-PROJ');
+  await createDictEntry(connection, 'settlement', 'SALES-SET');
+
+  const username = unique('r022handler');
+  const password = 'R022-handler-123!';
+  const created = await admin.fetch('/users', write({
+    name: username, username, email: `${username.toLowerCase()}@example.test`,
+    password, roleScopes: { app: ['sales'] },
+  }));
+  expect(created.status).toBe(201);
+  const userId = String((await jsonOf(created)).data?.id);
+  expect(userId, '前置：用户 id').toBeTruthy();
+  await createEmployee(connection, userId);
+  const seller = await signIn(testApp, { username, password });
+
+  const order = await jsonOf(await seller.fetch('/sales-orders', write({
+    customerId: customer.id,
+    orderDate: '2026-11-27',
+    warehouseId: warehouse.id,
+    contactName: '测试联系人',
+    deliveryAddress: '测试交货地址',
+    customerOrderNo: 'CUST-TEST-1',
+    settlementCode: 'SALES-SET',
+    projectCode: 'SALES-PROJ',
+    lines: [
+      { itemId: items[0], qty: 5, price: 226, taxRate: 13, deliveryDate: '2026-12-02' },
+      { itemId: items[1], qty: 5, price: 226, taxRate: 13, deliveryDate: '2026-12-06' },
+    ],
+  })));
+  expect(order.handler).toMatchObject({ userId });
+  expect(Object.keys(order.handler as Row).sort()).toEqual(['name', 'userId']);
+  expect(order).toMatchObject({
+    customerOrderNo: 'CUST-TEST-1', totalQty: 10,
+    taxIncludedTotal: 2260, taxExcludedTotal: 2000, taxTotal: 260, payableTotal: 2260,
+    latestDeliveryDate: '2026-12-06',
+  });
+  for (const line of order.lines!) {
+    expect(line).toMatchObject({
+      taxExcludedPrice: 200, taxExcludedAmount: 1000, taxAmount: 130, taxIncludedAmount: 1130,
+    });
+  }
+}, TIMEOUT);
+
+test('加片拒绝路径与价格反向：仅 view 的会话读列表与详情都没有价格键', async ({
+  testApp, connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const customer = await createPartner(admin, { isCustomer: true });
+  const item = await createItem(connection);
+  await createDictEntry(connection, 'settlement', 'OFF-SET', 'inactive');
+  const base = { customerId: customer.id, orderDate: '2026-11-27' };
+  const reject = async (body: Row, reason: string): Promise<void> => {
+    const response = await admin.fetch('/sales-orders', write({
+      ...base, lines: [{ itemId: item, qty: 1 }], ...body,
+    }));
+    expect(response.status, `${reason}: ${await response.clone().text()}`).toBe(422);
+    expect((await jsonOf(response)).error?.reason).toBe(reason);
+  };
+  await reject({ lines: [{ itemId: item, qty: 1, taxExcludedPrice: 10 }] }, 'ORDER_LINE_PRICE_INVALID');
+  await reject({ lines: [{ itemId: item, qty: 1, price: 226, taxRate: 13 }], discountAmount: 500 }, 'ORDER_DISCOUNT_INVALID');
+  await reject({ settlementCode: 'OFF-SET' }, 'ORDER_DICT_CODE_INVALID');
+  await reject({ handlerUserId: unique('NO-PERSON') }, 'ORDER_PERSON_INVALID');
+
+  const order = await createOrder(admin, 'sales', {
+    lines: [{ itemId: item, qty: 5, price: 226, taxRate: 13 }],
+  });
+  const { session: viewer } = await makeRoleUser(
+    admin, testApp, 'r022view', [
+      { resource: { type: 'composite', id: 'salesOrders' }, actions: [{ action: 'view' }] },
+    ],
+  );
+  const headerPriceKeys = [
+    'discountAmount', 'taxIncludedTotal', 'taxExcludedTotal', 'taxTotal', 'payableTotal',
+  ];
+  const linePriceKeys = [
+    'price', 'taxExcludedPrice', 'taxExcludedAmount', 'taxAmount', 'taxIncludedAmount',
+  ];
+  for (const response of [
+    await viewer.fetch('/sales-orders', get()),
+    await viewer.fetch(`/sales-orders/${String(order.id)}`, get()),
+  ]) {
+    expect(response.status, `只持 view 应当能读：${await response.clone().text()}`).toBe(200);
+    const body = await jsonOf(response);
+    for (const row of (body.items ?? [body]) as Row[]) {
+      for (const key of [...headerPriceKeys, ...linePriceKeys]) {
+        expect(Object.keys(row)).not.toContain(key);
+      }
+      for (const line of (row.lines ?? []) as Row[]) {
+        for (const key of linePriceKeys) expect(Object.keys(line)).not.toContain(key);
+      }
+    }
+  }
+  const priced = await jsonOf(await admin.fetch(`/sales-orders/${String(order.id)}`, get()));
+  for (const key of headerPriceKeys) expect(Object.keys(priced)).toContain(key);
+  for (const line of priced.lines!) {
+    for (const key of linePriceKeys) expect(Object.keys(line)).toContain(key);
+  }
 }, TIMEOUT);

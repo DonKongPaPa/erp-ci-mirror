@@ -9,6 +9,7 @@ import { createAppTest } from '../helpers/test-app.js';
 import { createItem } from '../helpers/inventory.js';
 import {
   createOrder,
+  createPartner,
   createWarehouse,
   get,
   jsonOf,
@@ -150,4 +151,46 @@ test('销售：先备货，部分出库过账回写 partially_shipped，全部�
   });
   expect(Number(stored.find((line) => line.itemId === itemA)?.shippedQty)).toBe(10);
   expect(Number(stored.find((line) => line.itemId === itemB)?.shippedQty)).toBe(5);
+}, TIMEOUT);
+
+
+test('加片风险：带来源按订单生成的草稿带价格，过账照旧回写；来源物料或数量不合法建不了', async ({
+  testApp, app, connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const item = await createItem(connection);
+  const outsideItem = await createItem(connection);
+  const warehouse = await createWarehouse(admin);
+  const supplier = await createPartner(admin, { isSupplier: true });
+  const order = await createOrder(admin, 'purchase', {
+    supplierId: supplier.id,
+    lines: [{ itemId: item, qty: 10, price: 113, taxRate: 13, deliveryDate: '2026-12-01' }],
+  });
+  expect((await admin.fetch(`/purchase-orders/${String(order.id)}/submit`, write())).status).toBe(200);
+
+  // 来源合法但物料不在订单里 / 超量：建草稿就被 R2 拦住。
+  for (const [line, reason] of [
+    [{ itemId: outsideItem, warehouseId: warehouse.id, qty: 1 }, 'STOCK_SOURCE_LINE_INVALID'],
+    [{ itemId: item, warehouseId: warehouse.id, qty: 11 }, 'STOCK_SOURCE_QTY_EXCEEDS'],
+  ] as const) {
+    const refused = await admin.fetch('/stock-docs', write({
+      docType: 'in', reason: 'purchase_receipt',
+      sourceType: 'purchase_order', sourceId: String(order.id), lines: [line],
+    }));
+    expect(refused.status, `${reason}: ${await refused.clone().text()}`).toBe(422);
+    expect((await jsonOf(refused)).error?.reason).toBe(reason);
+  }
+
+  const generated = await jsonOf(await admin.fetch(
+    `/purchase-orders/${String(order.id)}/create-receipt`,
+    write({ warehouseId: warehouse.id }),
+  ));
+  expect(generated.partner).toMatchObject({ id: supplier.id });
+  expect(generated.lines?.[0]).toMatchObject({ taxIncludedPrice: 113, taxRate: 13 });
+  expect(String(generated.docDate)).toMatch(/^\d{4}-\d{2}-\d{2}$/u);
+  const mutations = app.container.resolve(stockMutationsToken);
+  expect((await mutations.post(String(generated.id), 'receipt-flow-test')).status).toBe('posted');
+  const after = await jsonOf(await admin.fetch(`/purchase-orders/${String(order.id)}`, get()));
+  expect(after.lines?.[0]?.receivedQty).toBe(10);
+  expect(after.status).toBe('received');
 }, TIMEOUT);

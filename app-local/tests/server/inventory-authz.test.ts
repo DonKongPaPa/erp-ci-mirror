@@ -10,6 +10,7 @@ import { expect } from 'vitest';
 
 import { createAppTest } from '../helpers/test-app.js';
 import { createItem } from '../helpers/inventory.js';
+import { createOrder, createPartner, makeRoleUser } from '../helpers/orders.js';
 import { createStandaloneServer } from '../../server/standalone.js';
 
 /**
@@ -159,3 +160,71 @@ test('其余角色与无角色用户：这一片全 403，且先授权后读内�
   expect(invalid.status).toBe(403);
   expect((await jsonOf(invalid)).error?.reason).not.toBe('STOCK_LINE_INVALID');
 });
+
+
+test('只持 receive / ship 的仓管：窄形状没有价格、备注、经办人、项目；订单列表与提交 403', async ({
+  testApp, connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const item = await createItem(connection);
+  const warehouse = await jsonOf(await admin.fetch('/warehouses', write({
+    code: unique('NARROW-WH'), name: '窄形状测试仓',
+  })));
+  const supplier = await createPartner(admin, { isSupplier: true });
+  const customer = await createPartner(admin, { isCustomer: true });
+  const purchase = await createOrder(admin, 'purchase', {
+    supplierId: supplier.id,
+    lines: [{ itemId: item, qty: 10, price: 113, taxRate: 13, deliveryDate: '2026-12-01' }],
+  });
+  const sales = await createOrder(admin, 'sales', {
+    customerId: customer.id,
+    lines: [{ itemId: item, qty: 8, price: 226, taxRate: 13 }],
+  });
+  for (const [kind, id] of [['purchase', purchase.id], ['sales', sales.id]] as const) {
+    expect((await admin.fetch(`/${kind}-orders/${String(id)}/submit`, write())).status).toBe(200);
+  }
+  const { session: keeper } = await makeRoleUser(
+    admin, testApp, 'r020narrow', [
+      { resource: { type: 'composite', id: 'purchaseOrders' }, actions: [{ action: 'receive' }] },
+      { resource: { type: 'composite', id: 'salesOrders' }, actions: [{ action: 'ship' }] },
+    ],
+  );
+
+  const forbiddenKeys = ['price', 'remark', 'handler', 'projectCode', 'discountAmount', 'payableTotal'];
+  for (const [path, partnerKey] of [
+    ['/purchase-orders/receivable', 'supplier'],
+    ['/sales-orders/shippable', 'customer'],
+  ] as const) {
+    const response = await keeper.fetch(path, get());
+    expect(response.status, `窄形状清单应可读：${await response.clone().text()}`).toBe(200);
+    const body = await jsonOf(response);
+    expect(body.items?.length).toBeGreaterThan(0);
+    for (const row of body.items!) {
+      for (const key of forbiddenKeys) expect(Object.keys(row)).not.toContain(key);
+      expect(row[partnerKey]).toBeDefined();
+      for (const line of (row.lines ?? []) as Row[]) {
+        for (const key of forbiddenKeys) expect(Object.keys(line)).not.toContain(key);
+        expect(Object.keys(line)).toContain('remainingQty');
+      }
+    }
+  }
+
+  for (const [method, path, init] of [
+    ['GET', '/purchase-orders', get()],
+    ['GET', '/sales-orders', get()],
+    ['POST', `/purchase-orders/${String(purchase.id)}/submit`, write()],
+    ['POST', `/sales-orders/${String(sales.id)}/submit`, write()],
+  ] as const) {
+    const denied = await keeper.fetch(path, init);
+    expect(denied.status, `${method} ${path} 应当 403`).toBe(403);
+  }
+
+  const generated = await keeper.fetch(`/purchase-orders/${String(purchase.id)}/create-receipt`, write({
+    warehouseId: warehouse.id,
+  }));
+  expect(generated.status, `仓管生成入库草稿失败：${await generated.clone().text()}`).toBe(201);
+  const doc = await jsonOf(generated);
+  expect(doc.partner).toMatchObject({ id: supplier.id, code: supplier.code });
+  expect(doc.contactName ?? null).toBe(null);
+  expect(doc.lines?.[0]).toMatchObject({ taxIncludedPrice: 113, taxRate: 13 });
+}, 30_000);

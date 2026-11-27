@@ -2,10 +2,12 @@ import ApiKeysPolicyProvider from './api-keys-policy.js';
 import AuthorizationResourcesProvider from './authorization-resources.js';
 import BizDictProvider from './biz-dict.js';
 import CodesProvider from './codes.js';
+import DocFilesProvider from './doc-files.js';
 import DepartmentMutationsProvider from './department-mutations.js';
 import DepartmentProvider from './departments.js';
 import DevToolsGuardProvider from './dev-tools-guard.js';
 import EmployeesProvider from './employee-service.js';
+import FinanceProvider from './finance.js';
 import EmployeeMutationsProvider from './employees.js';
 import FeedbackReminderProvider from './feedback-reminder.js';
 import InventoryProvider from './inventory.js';
@@ -31,12 +33,16 @@ const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
   SubmissionProvider,
   // R-016：统一发号器，内部服务；没有页面与端点，顺序无关。
   CodesProvider,
+  // R-021 加片：单据附件的盘存储与绑定服务；无调用方时也能被容器解析。
+  DocFilesProvider,
   // R-026：七天提醒，进程内每天一次的扫单任务。
   FeedbackReminderProvider,
   DepartmentProvider,
   DepartmentMutationsProvider,
   // R-011：读服务、内部服务与写服务。放在用户管理服务之后由容器按需解析，顺序无关。
   EmployeesProvider,
+  // R-065：支出与到票的读写服务；登记顺序无关。
+  FinanceProvider,
   EmployeeMutationsProvider,
   // R-025：内部只读服务、HTTP 读服务与写服务。无调用方时也能被容器解析。
   ShiftsProvider,

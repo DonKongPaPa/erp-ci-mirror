@@ -13,11 +13,14 @@ import AuthzUpgradeR014Page from '../../cli/authz/upgrade-r014-page.js';
 import AuthzUpgradeR019Page from '../../cli/authz/upgrade-r019-page.js';
 import AuthzUpgradeR019Price from '../../cli/authz/upgrade-r019-price.js';
 import AuthzUpgradeR020 from '../../cli/authz/upgrade-r020.js';
+import AuthzUpgradeR020Receive from '../../cli/authz/upgrade-r020-receive.js';
 import AuthzUpgradeR020Page from '../../cli/authz/upgrade-r020-page.js';
 import AuthzUpgradeR021 from '../../cli/authz/upgrade-r021.js';
+import AuthzUpgradeR021Price from '../../cli/authz/upgrade-r021-price.js';
 import AuthzUpgradeR021Page from '../../cli/authz/upgrade-r021-page.js';
 import AuthzUpgradeR025 from '../../cli/authz/upgrade-r025.js';
 import AuthzUpgradeR026 from '../../cli/authz/upgrade-r026.js';
+import AuthzUpgradeR065 from '../../cli/authz/upgrade-r065.js';
 import AuthzUpgradeR072 from '../../cli/authz/upgrade-r072.js';
 import cliPlugins from '../../cli/plugins.js';
 import {
@@ -48,10 +51,13 @@ test('R-013: the authz commands are registered under their own topic', () => {
     'upgrade-r019-price',
     'upgrade-r020',
     'upgrade-r020-page',
+    'upgrade-r020-receive',
     'upgrade-r021',
     'upgrade-r021-page',
+    'upgrade-r021-price',
     'upgrade-r025',
     'upgrade-r026',
+    'upgrade-r065',
     'upgrade-r072',
   ]);
   expect(plugin!.commands.export).toBe(AuthzExport);
@@ -75,16 +81,19 @@ test('R-013: the authz commands are registered under their own topic', () => {
   expect(AuthzUpgradeR019Price.description).toContain('viewPurchasePrice');
   expect(AuthzUpgradeR019Price.description).toContain('viewSalesPrice');
   expect(plugin!.commands['upgrade-r020']).toBe(AuthzUpgradeR020);
+  expect(plugin!.commands['upgrade-r020-receive']).toBe(AuthzUpgradeR020Receive);
   expect(plugin!.commands['upgrade-r020-page']).toBe(AuthzUpgradeR020Page);
   expect(AuthzUpgradeR020.description).toContain('inventory');
   // R-021/R-022 的升级步骤：给采购/销售补订单授权与只读引用，可单独跑、可重跑。
   expect(plugin!.commands['upgrade-r021']).toBe(AuthzUpgradeR021);
+  expect(plugin!.commands['upgrade-r021-price']).toBe(AuthzUpgradeR021Price);
   expect(plugin!.commands['upgrade-r021-page']).toBe(AuthzUpgradeR021Page);
   expect(AuthzUpgradeR021Page.description).toContain('purchaseOrders');
   expect(AuthzUpgradeR021Page.description).toContain('salesOrders');
   expect(AuthzUpgradeR021.description).toContain('purchaseOrders');
   expect(AuthzUpgradeR021.description).toContain('salesOrders');
   // R-072 的升级步骤：给已有环境的三个业务角色补字典与选项只读，可单独跑、可重跑。
+  expect(plugin!.commands['upgrade-r065']).toBe(AuthzUpgradeR065);
   expect(plugin!.commands['upgrade-r072']).toBe(AuthzUpgradeR072);
   expect(AuthzUpgradeR072.description).toContain('bizDict.view');
   expect(AuthzUpgradeR072.description).toContain('bizOptions.view');
@@ -589,6 +598,7 @@ test(
         document.permissionSets.map((set: { key: string }) => set.key),
       ).toEqual([
         'dept_manager',
+        'finance',
         'member',
         'purchase',
         'quality_inspector',

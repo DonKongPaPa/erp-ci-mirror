@@ -29,6 +29,7 @@ import {
 } from '@nocobase/i18n/server';
 import { Hono, type Context } from 'hono';
 
+import { DocFileRuleError } from '../providers/doc-files.js';
 import { StockRuleError } from '../providers/inventory.js';
 import {
   OrderRuleError,
@@ -46,9 +47,11 @@ import {
   PurchaseOrderListQuery,
   PurchaseOrderListSchema,
   PurchaseOrderSchemaOut,
+  ReceivableOrderListSchema,
   SalesOrderListQuery,
   SalesOrderListSchema,
   SalesOrderSchemaOut,
+  ShippableOrderListSchema,
   UpdatePurchaseOrderBody,
   UpdateSalesOrderBody,
 } from './orders-schemas.js';
@@ -60,7 +63,8 @@ type StockReferenceCode =
   | 'item-not-found' | 'item-inactive';
 type AnyRuleCode = OrderRuleCode | StockReferenceCode;
 type OrderAction =
-  | 'view' | 'create' | 'update' | 'submit' | 'cancel' | 'createReceipt' | 'createIssue';
+  | 'view' | 'viewPrice' | 'create' | 'update' | 'submit' | 'cancel'
+  | 'createReceipt' | 'createIssue' | 'receive' | 'ship';
 type OrderContext = Context<AuthEnv & AuthorizationEnv>;
 type OrderDecision = AuthorizationDecision<CompositeResourceConditions>;
 
@@ -84,6 +88,10 @@ const RULE_STATUS: Readonly<
   'item-inactive': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
   'warehouse-not-found': { status: 'NOT_FOUND' },
   'warehouse-inactive': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
+  'line-price-invalid': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
+  'discount-invalid': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
+  'dict-code-invalid': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
+  'person-invalid': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
 };
 
 /** 规则码逐项写死；订单自己的业务码沿用任务书的大写命名。 */
@@ -105,6 +113,10 @@ const RULE_REASON: Readonly<Record<AnyRuleCode, string>> = {
   'item-inactive': 'ITEM_INACTIVE',
   'warehouse-not-found': 'WAREHOUSE_NOT_FOUND',
   'warehouse-inactive': 'WAREHOUSE_INACTIVE',
+  'line-price-invalid': 'ORDER_LINE_PRICE_INVALID',
+  'discount-invalid': 'ORDER_DISCOUNT_INVALID',
+  'dict-code-invalid': 'ORDER_DICT_CODE_INVALID',
+  'person-invalid': 'ORDER_PERSON_INVALID',
 };
 
 const camelOf = (code: string): string =>
@@ -115,6 +127,25 @@ function orderApiError(
   translate: Translator,
   locale: string,
 ): ApiError {
+  if (error instanceof DocFileRuleError) {
+    const status = error.code === 'file-not-found'
+      ? 'NOT_FOUND'
+      : error.code === 'file-unavailable'
+        ? 'FAILED_PRECONDITION'
+        : 'INVALID_ARGUMENT';
+    return new ApiError({
+      status,
+      reason: error.code === 'file-not-found'
+        ? 'FILE_NOT_FOUND'
+        : error.code === 'file-unavailable'
+          ? 'FILE_UNAVAILABLE'
+          : 'FILE_TOO_MANY',
+      domain: 'docFiles',
+      message: error.message,
+      ...(status === 'FAILED_PRECONDITION' ? { httpStatus: 422 as const } : {}),
+      cause: error,
+    });
+  }
   let code: AnyRuleCode;
   let detail: string | undefined;
   if (error instanceof OrderRuleError) {
@@ -161,6 +192,18 @@ async function authorizeOrder(
   return decision;
 }
 
+async function hasAction(
+  context: OrderContext,
+  resourceId: string,
+  action: OrderAction,
+): Promise<boolean> {
+  const decision = await context.get('authz').authorize({
+    resource: { type: 'composite', id: resourceId },
+    action,
+  });
+  return decision.effect !== 'deny';
+}
+
 function actorOf(context: OrderContext): string {
   const session = context.get('auth');
   if (session === null) {
@@ -201,15 +244,39 @@ interface ListQuery {
   customerId?: string;
   from?: string;
   to?: string;
+  dateField?: 'orderDate';
+  projectCode?: string;
+  handlerUserId?: string;
+  deliveryFrom?: string;
+  deliveryTo?: string;
   page: number;
   pageSize: number;
+}
+interface OrderLineBody {
+  itemId: string;
+  qty: number;
+  price?: number | null;
+  taxExcludedPrice?: number | null;
+  taxRate?: number | null;
+  deliveryDate?: string | null;
+  note?: string | null;
 }
 interface OrderBody {
   supplierId?: string;
   customerId?: string;
   orderDate: string;
   remark?: string;
-  lines: { itemId: string; qty: number; price?: number | null }[];
+  warehouseId?: string | null;
+  contactName?: string | null;
+  contactPhone?: string | null;
+  deliveryAddress?: string | null;
+  settlementCode?: string | null;
+  projectCode?: string | null;
+  customerOrderNo?: string | null;
+  handlerUserId?: string | null;
+  discountAmount?: number;
+  fileIds?: string[];
+  lines: OrderLineBody[];
 }
 /** R-021/R-022 的七个端点：先授权、再读内容。没有 DELETE 路由。 */
 export function createOrderApiRoutes(
@@ -227,6 +294,7 @@ export function createOrderApiRoutes(
   const issueBody = purchase ? CreateReceiptBody : CreateIssueBody;
   const detailSchema = purchase ? PurchaseOrderSchemaOut : SalesOrderSchemaOut;
   const listSchema = purchase ? PurchaseOrderListSchema : SalesOrderListSchema;
+  const narrowListSchema = purchase ? ReceivableOrderListSchema : ShippableOrderListSchema;
 
   return defineApiRoutes((app) => {
     const router = new Hono<AuthEnv & AuthorizationEnv>();
@@ -255,6 +323,7 @@ export function createOrderApiRoutes(
       apiValidator('query', listQuery),
       async (context) => {
         await authorizeOrder(context, resourceId, 'view');
+        const withPrice = await hasAction(context, resourceId, 'viewPrice');
         const query = context.req.valid('query') as ListQuery;
         const result = await reader.list(kind, {
           ...(query.status === undefined ? {} : { status: query.status as OrderStatus }),
@@ -262,6 +331,44 @@ export function createOrderApiRoutes(
           partnerId: purchase ? query.supplierId : query.customerId,
           from: query.from,
           to: query.to,
+          dateField: query.dateField,
+          projectCode: query.projectCode,
+          handlerUserId: query.handlerUserId,
+          deliveryFrom: query.deliveryFrom,
+          deliveryTo: query.deliveryTo,
+          page: query.page,
+          pageSize: query.pageSize,
+        }, withPrice);
+        return context.json({ ...result, page: query.page, pageSize: query.pageSize });
+      },
+    );
+
+    // 先于 /:id 注册：否则 "receivable" / "shippable" 会被当成订单 id。
+    router.get(
+      purchase ? `${base}/receivable` : `${base}/shippable`,
+      describeRoute({
+        tags: [tag],
+        summary: purchase ? 'List receivable purchase orders for the warehouse' : 'List shippable sales orders for the warehouse',
+        operationId: purchase ? 'listReceivableOrders' : 'listShippableOrders',
+        responses: {
+          '200': objectResponse(narrowListSchema, 'One page of narrow order summaries'),
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '500': apiErrorResponse(500),
+        },
+      }),
+      apiValidator('query', listQuery),
+      async (context) => {
+        const narrowAction: OrderAction = purchase ? 'receive' : 'ship';
+        const decision = await context.get('authz').authorize({
+          resource: { type: 'composite', id: resourceId },
+          action: narrowAction,
+        });
+        if (decision.effect === 'deny') await authorizeOrder(context, resourceId, 'view');
+        const query = context.req.valid('query') as ListQuery;
+        const result = await reader.receivable(kind, {
+          q: query.q,
+          partnerId: purchase ? query.supplierId : query.customerId,
           page: query.page,
           pageSize: query.pageSize,
         });
@@ -285,7 +392,8 @@ export function createOrderApiRoutes(
       }),
       async (context) => {
         await authorizeOrder(context, resourceId, 'view');
-        const row = await reader.detail(kind, context.req.param('id'));
+        const withPrice = await hasAction(context, resourceId, 'viewPrice');
+        const row = await reader.detail(kind, context.req.param('id'), withPrice);
         if (row === undefined) {
           throw orderApiError(
             new OrderRuleError('order-not-found'),
@@ -323,6 +431,16 @@ export function createOrderApiRoutes(
             partnerId: (purchase ? body.supplierId : body.customerId) ?? '',
             orderDate: body.orderDate,
             remark: body.remark,
+            warehouseId: body.warehouseId,
+            contactName: body.contactName,
+            contactPhone: body.contactPhone,
+            deliveryAddress: body.deliveryAddress,
+            settlementCode: body.settlementCode,
+            projectCode: body.projectCode,
+            customerOrderNo: body.customerOrderNo,
+            handlerUserId: body.handlerUserId,
+            discountAmount: body.discountAmount,
+            fileIds: body.fileIds,
             lines: body.lines,
           }, actorOf(context)),
         );
@@ -358,8 +476,18 @@ export function createOrderApiRoutes(
               : { partnerId: (purchase ? body.supplierId : body.customerId)! }),
             orderDate: body.orderDate,
             remark: body.remark,
+            warehouseId: body.warehouseId,
+            contactName: body.contactName,
+            contactPhone: body.contactPhone,
+            deliveryAddress: body.deliveryAddress,
+            settlementCode: body.settlementCode,
+            projectCode: body.projectCode,
+            customerOrderNo: body.customerOrderNo,
+            handlerUserId: body.handlerUserId,
+            discountAmount: body.discountAmount,
+            fileIds: body.fileIds,
             lines: body.lines,
-          }),
+          }, actorOf(context)),
         );
         return context.json(row);
       },
@@ -433,7 +561,14 @@ export function createOrderApiRoutes(
       }),
       apiValidator('json', issueBody),
       async (context) => {
-        await authorizeOrder(context, resourceId, issueAction);
+        // 仓管用 receive / ship 也能按订单生成草稿；采购/销售用原来的动作。
+        const issueDecision = await context.get('authz').authorize({
+          resource: { type: 'composite', id: resourceId },
+          action: issueAction,
+        });
+        if (issueDecision.effect === 'deny') {
+          await authorizeOrder(context, resourceId, purchase ? 'receive' : 'ship');
+        }
         const body = context.req.valid('json');
         const row = await withMappedErrors(context, async () =>
           mutations.issue(kind, context.req.param('id'), body, actorOf(context)),

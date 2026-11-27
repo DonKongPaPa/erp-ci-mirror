@@ -14,6 +14,14 @@ import { randomUUID } from 'node:crypto';
 import type { Knex } from 'knex';
 
 import { CODE_PREFIXES, codeServiceToken, type CodeService } from './codes.js';
+import {
+  AmountRuleError,
+  computeHeaderAmounts,
+  computeLineAmounts,
+  type AmountLineResult,
+} from './doc-amounts.js';
+import { assertActiveCodes, BizDictRuleError } from './biz-dict.js';
+import { docFilesToken, type DocFiles, type DocFileView } from './doc-files.js';
 import { syncOrderProgress } from './order-progress.js';
 
 /**
@@ -40,7 +48,18 @@ export type StockRuleCode =
   | 'doc-not-found'
   | 'doc-not-draft'
   | 'insufficient'
-  | 'empty-update';
+  | 'empty-update'
+  | 'source-required'
+  | 'source-invalid'
+  | 'source-line-invalid'
+  | 'source-qty-exceeds'
+  | 'source-not-allowed'
+  | 'taker-required'
+  | 'partner-mismatch'
+  | 'line-price-invalid'
+  | 'discount-invalid'
+  | 'dict-code-invalid'
+  | 'person-invalid';
 
 export class StockRuleError extends Error {
   public constructor(
@@ -60,8 +79,12 @@ export type DocType = 'in' | 'out';
 export type DocStatus = 'draft' | 'posted' | 'void';
 export type DocReason =
   | 'purchase_receipt'
-  | 'sales_issue'
+  | 'production_receipt'
+  | 'sales_return'
   | 'other_in'
+  | 'sales_issue'
+  | 'internal_use'
+  | 'purchase_return'
   | 'other_out';
 export type SourceType = 'purchase_order' | 'sales_order';
 export type WarehouseStatus = 'active' | 'inactive';
@@ -76,6 +99,12 @@ export interface WarehouseRecord {
   readonly updatedAt: string;
 }
 
+export interface PersonRef { readonly userId: string; readonly name: string; }
+export interface PartnerRef {
+  readonly id: string; readonly code: string; readonly name: string;
+}
+export interface DepartmentRef { readonly id: string; readonly name: string; }
+
 export interface StockDocLineRecord {
   readonly id: string;
   readonly docId: string;
@@ -83,6 +112,16 @@ export interface StockDocLineRecord {
   readonly warehouseId: string;
   readonly batchNo: string;
   readonly qty: number;
+  readonly productionDate: string | null;
+  readonly expiryDate: string | null;
+  readonly note: string | null;
+  readonly taxRate: number | null;
+  /** 价格与金额只在持有 stockPriceView 时出现。 */
+  readonly taxIncludedPrice?: number | null;
+  readonly taxExcludedPrice?: number | null;
+  readonly taxExcludedAmount?: number | null;
+  readonly taxAmount?: number | null;
+  readonly taxIncludedAmount?: number | null;
 }
 
 export interface StockDocRecord {
@@ -99,6 +138,28 @@ export interface StockDocRecord {
   readonly postedById: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly docDate: string | null;
+  readonly partnerId: string | null;
+  readonly contactName: string | null;
+  readonly contactPhone: string | null;
+  readonly deliveryAddress: string | null;
+  readonly customerOrderNo: string | null;
+  readonly projectCode: string | null;
+  readonly handlerUserId: string | null;
+  readonly handler: PersonRef | null;
+  readonly takerDepartmentId: string | null;
+  readonly takerUserId: string | null;
+  readonly taker: PersonRef | null;
+  readonly takerDepartment: DepartmentRef | null;
+  readonly partner: PartnerRef | null;
+  readonly totalQty: number | null;
+  /** 价格与金额只在持有 stockPriceView 时出现。 */
+  readonly discountAmount?: number;
+  readonly taxIncludedTotal?: number | null;
+  readonly taxExcludedTotal?: number | null;
+  readonly taxTotal?: number | null;
+  readonly payableTotal?: number | null;
+  readonly files?: readonly DocFileView[];
   readonly lines: readonly StockDocLineRecord[];
 }
 
@@ -137,6 +198,12 @@ export interface DocListQuery extends PageQuery {
   readonly q?: string;
   readonly from?: string;
   readonly to?: string;
+  readonly dateField?: 'docDate';
+  readonly reason?: DocReason;
+  readonly partnerId?: string;
+  readonly projectCode?: string;
+  readonly handlerUserId?: string;
+  readonly takerDepartmentId?: string;
 }
 export interface BalanceListQuery extends PageQuery {
   readonly itemId?: string;
@@ -170,8 +237,28 @@ export interface StockLineInput {
   readonly warehouseId: string;
   readonly batchNo?: string;
   readonly qty: number;
+  readonly taxIncludedPrice?: number | null;
+  readonly taxExcludedPrice?: number | null;
+  readonly taxRate?: number | null;
+  readonly productionDate?: string | null;
+  readonly expiryDate?: string | null;
+  readonly note?: string | null;
 }
-export interface CreateDocInput {
+interface DocExtraInput {
+  readonly docDate?: string | null;
+  readonly partnerId?: string | null;
+  readonly contactName?: string | null;
+  readonly contactPhone?: string | null;
+  readonly deliveryAddress?: string | null;
+  readonly customerOrderNo?: string | null;
+  readonly projectCode?: string | null;
+  readonly handlerUserId?: string | null;
+  readonly takerDepartmentId?: string | null;
+  readonly takerUserId?: string | null;
+  readonly discountAmount?: number;
+  readonly fileIds?: readonly string[];
+}
+export interface CreateDocInput extends DocExtraInput {
   readonly docType: DocType;
   readonly reason: DocReason;
   readonly remark?: string;
@@ -179,7 +266,7 @@ export interface CreateDocInput {
   readonly sourceId?: string;
   readonly lines: readonly StockLineInput[];
 }
-export interface UpdateDocInput {
+export interface UpdateDocInput extends DocExtraInput {
   readonly remark?: string;
   readonly reason?: DocReason;
   readonly sourceType?: SourceType;
@@ -190,8 +277,8 @@ export interface UpdateDocInput {
 export interface StockReader {
   listWarehouses(query: WarehouseListQuery): Promise<Page<WarehouseRecord>>;
   detailWarehouse(id: string): Promise<WarehouseRecord | undefined>;
-  listDocs(query: DocListQuery): Promise<Page<Omit<StockDocRecord, 'lines'>>>;
-  detailDoc(id: string): Promise<StockDocRecord | undefined>;
+  listDocs(query: DocListQuery, withPrice?: boolean): Promise<Page<Omit<StockDocRecord, 'lines'>>>;
+  detailDoc(id: string, withPrice?: boolean): Promise<StockDocRecord | undefined>;
   listBalances(query: BalanceListQuery): Promise<Page<BalanceRecord>>;
   listTransactions(query: TransactionListQuery): Promise<Page<TransactionRecord>>;
 }
@@ -204,7 +291,7 @@ export interface StockMutations {
     byUserId: string,
     transaction?: DatabaseConnection,
   ): Promise<StockDocRecord>;
-  updateDoc(id: string, input: UpdateDocInput): Promise<StockDocRecord>;
+  updateDoc(id: string, input: UpdateDocInput, byUserId: string): Promise<StockDocRecord>;
   post(id: string, byUserId: string, transaction?: DatabaseConnection): Promise<StockDocRecord>;
   void(id: string, byUserId: string): Promise<StockDocRecord>;
 }
@@ -216,6 +303,21 @@ const iso = (value: string | Date | null | undefined): string | null =>
       ? value.toISOString()
       : String(value);
 const num = (value: unknown): number => Number(value);
+
+/** pg 把 DATE 读成本地零点的 Date；用本地年月日取回 YYYY-MM-DD。 */
+function dayString(value: string | Date): string {
+  if (typeof value === 'string') return value.slice(0, 10);
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${value.getFullYear()}-${month}-${day}`;
+}
+
+/** 新建不传单据日期时按 Asia/Shanghai 的当天填；不依赖进程时区。 */
+function today(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+}
 
 /** knex 的 clone()/raw() 都回 any；在边界处显式标注形状，不让 any 流进业务代码。 */
 async function countOf(base: Knex.QueryBuilder): Promise<number> {
@@ -248,6 +350,22 @@ interface DocRow {
   posted_by_id: string | null;
   created_at: string | Date;
   updated_at: string | Date;
+  doc_date: string | Date | null;
+  partner_id: string | null;
+  contact_name: string | null;
+  contact_phone: string | null;
+  delivery_address: string | null;
+  customer_order_no: string | null;
+  project_code: string | null;
+  handler_user_id: string | null;
+  taker_department_id: string | null;
+  taker_user_id: string | null;
+  discount_amount: string | number;
+  total_qty: string | number | null;
+  tax_included_total: string | number | null;
+  tax_excluded_total: string | number | null;
+  tax_total: string | number | null;
+  payable_total: string | number | null;
 }
 interface LineRow {
   id: string;
@@ -256,6 +374,21 @@ interface LineRow {
   warehouse_id: string;
   batch_no: string;
   qty: string | number;
+  production_date: string | Date | null;
+  expiry_date: string | Date | null;
+  note: string | null;
+  tax_rate: string | number | null;
+  tax_included_price: string | number | null;
+  tax_excluded_price: string | number | null;
+  tax_excluded_amount: string | number | null;
+  tax_amount: string | number | null;
+  tax_included_amount: string | number | null;
+}
+interface RefRow { id: string; name: string | null; code?: string; }
+interface Refs {
+  handlers: Map<string, PersonRef>;
+  partners: Map<string, PartnerRef>;
+  departments: Map<string, DepartmentRef>;
 }
 interface BalanceRow {
   item_id: string;
@@ -289,7 +422,12 @@ function warehouseView(row: WarehouseRow): WarehouseRecord {
   };
 }
 
-function lineView(row: LineRow): StockDocLineRecord {
+const nullIfDate = (value: string | Date | null | undefined): string | null =>
+  value === null || value === undefined ? null : dayString(value);
+const nullableNum = (value: string | number | null | undefined): number | null =>
+  value === null || value === undefined ? null : num(value);
+
+function lineView(row: LineRow, withPrice: boolean): StockDocLineRecord {
   return {
     id: row.id,
     docId: row.doc_id,
@@ -297,10 +435,59 @@ function lineView(row: LineRow): StockDocLineRecord {
     warehouseId: row.warehouse_id,
     batchNo: row.batch_no,
     qty: num(row.qty),
+    productionDate: nullIfDate(row.production_date),
+    expiryDate: nullIfDate(row.expiry_date),
+    note: row.note ?? null,
+    taxRate: nullableNum(row.tax_rate),
+    ...(withPrice
+      ? {
+          taxIncludedPrice: nullableNum(row.tax_included_price),
+          taxExcludedPrice: nullableNum(row.tax_excluded_price),
+          taxExcludedAmount: nullableNum(row.tax_excluded_amount),
+          taxAmount: nullableNum(row.tax_amount),
+          taxIncludedAmount: nullableNum(row.tax_included_amount),
+        }
+      : {}),
   };
 }
 
-function docView(row: DocRow, lines: readonly LineRow[]): StockDocRecord {
+/** 人员只回账号标识与姓名，部门只回标识与名称，往来单位只回三列。 */
+async function refsOf(knex: Knex, rows: readonly DocRow[]): Promise<Refs> {
+  const ids = (pick: (row: DocRow) => string | null): string[] =>
+    [...new Set(rows.map(pick).filter((id): id is string => typeof id === 'string' && id !== ''))];
+  const handlerIds = [
+    ...new Set([...ids((row) => row.handler_user_id), ...ids((row) => row.taker_user_id)]),
+  ];
+  const partnerIds = ids((row) => row.partner_id);
+  const departmentIds = ids((row) => row.taker_department_id);
+  const [users, partners, departments] = await Promise.all([
+    handlerIds.length === 0
+      ? []
+      : knex<RefRow>('user').select('id', 'name').whereIn('id', handlerIds),
+    partnerIds.length === 0
+      ? []
+      : knex<RefRow & { code: string }>('partners').select('id', 'code', 'name').whereIn('id', partnerIds),
+    departmentIds.length === 0
+      ? []
+      : knex<{ id: string; title: string }>('departments').select('id', 'title').whereIn('id', departmentIds),
+  ]);
+  const handlerMap = new Map(users.map((row) => [row.id, { userId: row.id, name: row.name ?? row.id }]));
+  for (const id of handlerIds) {
+    if (!handlerMap.has(id)) handlerMap.set(id, { userId: id, name: id });
+  }
+  return {
+    handlers: handlerMap,
+    partners: new Map(partners.map((row) => [row.id, { id: row.id, code: row.code, name: row.name ?? '' }])),
+    departments: new Map(departments.map((row) => [row.id, { id: row.id, name: row.title }])),
+  };
+}
+
+function docView(
+  row: DocRow,
+  lines: readonly LineRow[],
+  refs: Refs,
+  withPrice: boolean,
+): StockDocRecord {
   return {
     id: row.id,
     docNo: row.doc_no,
@@ -315,13 +502,37 @@ function docView(row: DocRow, lines: readonly LineRow[]): StockDocRecord {
     postedById: row.posted_by_id,
     createdAt: String(iso(row.created_at)),
     updatedAt: String(iso(row.updated_at)),
-    lines: lines.map(lineView),
+    docDate: nullIfDate(row.doc_date),
+    partnerId: row.partner_id,
+    contactName: row.contact_name,
+    contactPhone: row.contact_phone,
+    deliveryAddress: row.delivery_address,
+    customerOrderNo: row.customer_order_no,
+    projectCode: row.project_code,
+    handlerUserId: row.handler_user_id,
+    handler: refs.handlers.get(row.handler_user_id ?? '') ?? null,
+    takerDepartmentId: row.taker_department_id,
+    takerUserId: row.taker_user_id,
+    taker: refs.handlers.get(row.taker_user_id ?? '') ?? null,
+    takerDepartment: refs.departments.get(row.taker_department_id ?? '') ?? null,
+    partner: refs.partners.get(row.partner_id ?? '') ?? null,
+    totalQty: nullableNum(row.total_qty),
+    ...(withPrice
+      ? {
+          discountAmount: num(row.discount_amount ?? 0),
+          taxIncludedTotal: nullableNum(row.tax_included_total),
+          taxExcludedTotal: nullableNum(row.tax_excluded_total),
+          taxTotal: nullableNum(row.tax_total),
+          payableTotal: nullableNum(row.payable_total),
+        }
+      : {}),
+    lines: lines.map((line) => lineView(line, withPrice)),
   };
 }
 
 /** 列表行不带明细：详情才带。两处视图不共用，免得列表无意间把明细也带出来。 */
-function docSummaryView(row: DocRow): Omit<StockDocRecord, 'lines'> {
-  const { lines: _lines, ...summary } = docView(row, []);
+function docSummaryView(row: DocRow, refs: Refs, withPrice: boolean): Omit<StockDocRecord, 'lines'> {
+  const { lines: _lines, ...summary } = docView(row, [], refs, withPrice);
   return summary;
 }
 
@@ -352,11 +563,19 @@ function transactionView(row: TransactionRow): TransactionRecord {
 
 const WAREHOUSE_CODE = /^[A-Z0-9][A-Z0-9_-]{0,31}$/u;
 const DOC_TYPES = ['in', 'out'] as const;
-const REASONS = ['purchase_receipt', 'sales_issue', 'other_in', 'other_out'] as const;
+const REASONS = [
+  'purchase_receipt', 'production_receipt', 'sales_return', 'other_in',
+  'sales_issue', 'internal_use', 'purchase_return', 'other_out',
+] as const;
 const SOURCE_TYPES = ['purchase_order', 'sales_order'] as const;
 const WAREHOUSE_STATUSES = ['active', 'inactive'] as const;
-const IN_REASONS: readonly DocReason[] = ['purchase_receipt', 'other_in'];
-const OUT_REASONS: readonly DocReason[] = ['sales_issue', 'other_out'];
+const IN_REASONS: readonly DocReason[] = [
+  'purchase_receipt', 'production_receipt', 'sales_return', 'other_in',
+];
+const OUT_REASONS: readonly DocReason[] = [
+  'sales_issue', 'internal_use', 'purchase_return', 'other_out',
+];
+const SOURCE_ALLOWED: readonly DocReason[] = ['purchase_receipt', 'sales_issue'];
 
 function validateWarehouseCode(input: string): string {
   const code = input.trim();
@@ -416,9 +635,124 @@ function validateLines(lines: readonly StockLineInput[]): void {
       typeof line.qty !== 'number' ||
       !Number.isFinite(line.qty) ||
       line.qty <= 0 ||
-      (line.batchNo ?? '').length > 64
+      (line.batchNo ?? '').length > 64 ||
+      (line.note ?? '').length > 500
     ) {
       return fail('line-invalid');
+    }
+    if (
+      line.productionDate !== undefined && line.productionDate !== null &&
+      line.expiryDate !== undefined && line.expiryDate !== null &&
+      line.expiryDate < line.productionDate
+    ) {
+      return fail('line-invalid', 'expiry-before-production');
+    }
+  }
+}
+
+function amountError(error: unknown): never {
+  if (error instanceof AmountRuleError) fail(error.code, error.detail);
+  throw error;
+}
+
+function computedAmounts(lines: readonly StockLineInput[]): readonly AmountLineResult[] {
+  try {
+    return lines.map((line) => computeLineAmounts({
+      qty: line.qty,
+      price: line.taxIncludedPrice,
+      taxExcludedPrice: line.taxExcludedPrice,
+      taxRate: line.taxRate,
+    }));
+  } catch (error) {
+    return amountError(error);
+  }
+}
+
+function headerTotals(lines: readonly AmountLineResult[], discount: number) {
+  try {
+    return computeHeaderAmounts(lines, discount);
+  } catch (error) {
+    return amountError(error);
+  }
+}
+
+async function assertStockDicts(tx: DatabaseConnection, projectCode?: string | null): Promise<void> {
+  if (!projectCode) return;
+  try {
+    await assertActiveCodes(tx, 'project', [projectCode]);
+  } catch (error) {
+    if (error instanceof BizDictRuleError) fail('dict-code-invalid', error.code);
+    throw error;
+  }
+}
+
+async function requireActivePerson(knex: Knex, userId: string): Promise<void> {
+  const row = await knex<{ user_id: string; status: string }>('employees')
+    .select('user_id', 'status').where({ user_id: userId }).first();
+  if (row === undefined || row.status !== 'active') fail('person-invalid', userId);
+}
+
+async function requireDepartment(knex: Knex, departmentId: string): Promise<void> {
+  const row = await knex<{ id: string; active: boolean }>('departments')
+    .select('id', 'active').where({ id: departmentId }).first();
+  if (row === undefined || row.active !== true) fail('person-invalid', departmentId);
+}
+
+/** 对方与原因必须相合；内部领用与生产入库不允许带往来单位。 */
+async function assertPartnerReason(
+  knex: Knex,
+  reason: DocReason,
+  partnerId?: string | null,
+): Promise<void> {
+  if (partnerId === undefined || partnerId === null) return;
+  const partner = await knex<{ id: string; is_supplier: boolean; is_customer: boolean }>('partners')
+    .select('is_supplier', 'is_customer').where({ id: partnerId }).first();
+  if (partner === undefined) return fail('partner-mismatch', partnerId);
+  const supplier = ['purchase_receipt', 'purchase_return'].includes(reason);
+  const customer = ['sales_issue', 'sales_return'].includes(reason);
+  const forbidden = ['production_receipt', 'internal_use'].includes(reason);
+  if (forbidden || (supplier && partner.is_supplier !== true) ||
+      (customer && partner.is_customer !== true) ||
+      (!supplier && !customer && partner.is_supplier !== true && partner.is_customer !== true)) {
+    return fail('partner-mismatch', partnerId);
+  }
+}
+
+/** R2：带来源的单据，行必须在来源订单里，累计数量不超过订单剩余。 */
+async function assertSourceRules(
+  knex: Knex,
+  input: CreateDocInput | UpdateDocInput,
+  excludeDocId?: string,
+): Promise<void> {
+  if (input.reason !== undefined && !SOURCE_ALLOWED.includes(input.reason) && input.sourceType !== undefined) {
+    return fail('source-not-allowed', input.reason);
+  }
+  if (input.sourceType === undefined || input.sourceId === undefined) return;
+  const config = input.sourceType === 'purchase_order'
+    ? { header: 'purchase_orders', lines: 'purchase_order_lines' }
+    : { header: 'sales_orders', lines: 'sales_order_lines' };
+  const header = await knex<{ id: string; status: string }>(config.header)
+    .select('id', 'status').where({ id: input.sourceId }).first();
+  if (header === undefined || header.status === 'cancelled') return fail('source-invalid', input.sourceId);
+  const orderLines = await knex<{ item_id: string; order_id: string; qty: string | number }>(config.lines)
+    .select('item_id', 'qty').where({ order_id: input.sourceId });
+  const ordered = new Map(orderLines.map((line) => [line.item_id, num(line.qty)]));
+  const issuedRows = await knex.raw<{ rows?: readonly { item_id: string; qty: string | number }[] }>(
+    `select l.item_id, sum(l.qty) as qty
+       from stock_doc_lines l join stock_docs d on d.id = l.doc_id
+      where d.source_type = ? and d.source_id = ? and d.status <> 'void' and d.id <> ?
+      group by l.item_id`,
+    [input.sourceType, input.sourceId, excludeDocId ?? ''],
+  );
+  const issued = new Map((issuedRows.rows ?? []).map((row) => [row.item_id, num(row.qty)]));
+  const wanted = new Map<string, number>();
+  for (const line of input.lines) {
+    if (!ordered.has(line.itemId)) return fail('source-line-invalid', line.itemId);
+    wanted.set(line.itemId, (wanted.get(line.itemId) ?? 0) + line.qty);
+  }
+  for (const [itemId, qty] of wanted) {
+    if (qty > Math.max(0, (ordered.get(itemId) ?? 0) - (issued.get(itemId) ?? 0))) {
+      return fail('source-qty-exceeds', itemId);
     }
   }
 }
@@ -445,7 +779,10 @@ async function assertItemsActive(
 }
 
 export class DatabaseStockReader implements StockReader {
-  public constructor(private readonly database: DatabaseManager) {}
+  public constructor(
+    private readonly database: DatabaseManager,
+    private readonly docFiles: DocFiles,
+  ) {}
 
   private async knex(): Promise<Knex> {
     return await this.database.connection().client<Knex>();
@@ -481,7 +818,10 @@ export class DatabaseStockReader implements StockReader {
     return row === undefined ? undefined : warehouseView(row);
   }
 
-  public async listDocs(query: DocListQuery): Promise<Page<Omit<StockDocRecord, 'lines'>>> {
+  public async listDocs(
+    query: DocListQuery,
+    withPrice = false,
+  ): Promise<Page<Omit<StockDocRecord, 'lines'>>> {
     const knex = await this.knex();
     const base = knex<DocRow>('stock_docs').modify((builder) => {
       if (query.docType !== undefined) void builder.where('doc_type', query.docType);
@@ -493,8 +833,14 @@ export class DatabaseStockReader implements StockReader {
             .orWhereILike('remark', `%${query.q}%`);
         });
       }
-      if (query.from !== undefined) void builder.where('created_at', '>=', query.from);
-      if (query.to !== undefined) void builder.where('created_at', '<=', query.to);
+      const dateColumn = query.dateField === 'docDate' ? 'doc_date' : 'created_at';
+      if (query.from !== undefined) void builder.where(dateColumn, '>=', query.from);
+      if (query.to !== undefined) void builder.where(dateColumn, '<=', query.to);
+      if (query.reason !== undefined) void builder.where('reason', query.reason);
+      if (query.partnerId !== undefined) void builder.where('partner_id', query.partnerId);
+      if (query.projectCode !== undefined) void builder.where('project_code', query.projectCode);
+      if (query.handlerUserId !== undefined) void builder.where('handler_user_id', query.handlerUserId);
+      if (query.takerDepartmentId !== undefined) void builder.where('taker_department_id', query.takerDepartmentId);
     });
     const total = await countOf(base);
     const rows = (await base
@@ -502,17 +848,20 @@ export class DatabaseStockReader implements StockReader {
       .orderBy('created_at', 'desc')
       .limit(query.pageSize)
       .offset((query.page - 1) * query.pageSize)) as DocRow[];
-    return { items: rows.map(docSummaryView), total };
+    const refs = await refsOf(knex, rows);
+    return { items: rows.map((row) => docSummaryView(row, refs, withPrice)), total };
   }
 
-  public async detailDoc(id: string): Promise<StockDocRecord | undefined> {
+  public async detailDoc(id: string, withPrice = false): Promise<StockDocRecord | undefined> {
     const knex = await this.knex();
     const row = await knex<DocRow>('stock_docs').where({ id }).first();
     if (row === undefined) return undefined;
     const lines = await knex<LineRow>('stock_doc_lines')
       .where({ doc_id: id })
       .orderBy('id', 'asc');
-    return docView(row, lines);
+    const refs = await refsOf(knex, [row]);
+    const doc = docView(row, lines, refs, withPrice);
+    return { ...doc, files: await this.docFiles.filesOf(knex, 'stock_doc', id) };
   }
 
   public async listBalances(query: BalanceListQuery): Promise<Page<BalanceRecord>> {
@@ -557,6 +906,7 @@ export class DatabaseStockMutations implements StockMutations {
   public constructor(
     private readonly database: DatabaseManager,
     private readonly codes: CodeService,
+    private readonly docFiles: DocFiles,
   ) {}
 
   private async knex(tx?: DatabaseConnection): Promise<Knex> {
@@ -633,6 +983,21 @@ export class DatabaseStockMutations implements StockMutations {
       const knex = await this.knex(tx);
       await this.requireWarehouses(knex, input.lines);
       await assertItemsActive(knex, input.lines.map((line) => line.itemId));
+      await assertPartnerReason(knex, input.reason, input.partnerId);
+      await assertSourceRules(knex, input);
+      await assertStockDicts(tx, input.projectCode);
+      const handlerUserId = input.handlerUserId ?? byUserId;
+      if (input.handlerUserId !== undefined && input.handlerUserId !== null) {
+        await requireActivePerson(knex, handlerUserId);
+      }
+      if (input.takerUserId !== undefined && input.takerUserId !== null) {
+        await requireActivePerson(knex, input.takerUserId);
+      }
+      if (input.takerDepartmentId !== undefined && input.takerDepartmentId !== null) {
+        await requireDepartment(knex, input.takerDepartmentId);
+      }
+      const amounts = computedAmounts(input.lines);
+      const totals = headerTotals(amounts, input.discountAmount ?? 0);
       const now = new Date();
       const docNo = await this.codes.nextCode(
         tx,
@@ -649,15 +1014,36 @@ export class DatabaseStockMutations implements StockMutations {
         source_type: input.sourceType ?? null,
         source_id: input.sourceId ?? null,
         created_by_id: byUserId,
+        doc_date: input.docDate ?? today(),
+        partner_id: input.partnerId ?? null,
+        contact_name: input.contactName ?? null,
+        contact_phone: input.contactPhone ?? null,
+        delivery_address: input.deliveryAddress ?? null,
+        customer_order_no: input.customerOrderNo ?? null,
+        project_code: input.projectCode ?? null,
+        handler_user_id: handlerUserId,
+        taker_department_id: input.takerDepartmentId ?? null,
+        taker_user_id: input.takerUserId ?? null,
+        discount_amount: totals.discountAmount,
+        total_qty: totals.totalQty,
+        tax_included_total: totals.taxIncludedTotal,
+        tax_excluded_total: totals.taxExcludedTotal,
+        tax_total: totals.taxTotal,
+        payable_total: totals.payableTotal,
         created_at: now,
         updated_at: now,
       });
-      await this.insertLines(knex, id, input.lines);
-      return await this.detailIn(tx, id);
+      await this.insertLines(knex, id, input.lines, amounts);
+      await this.docFiles.bind(knex, 'stock_doc', id, input.fileIds, byUserId);
+      return await this.detailIn(tx, id, true, this.docFiles);
     });
   }
 
-  public async updateDoc(id: string, input: UpdateDocInput): Promise<StockDocRecord> {
+  public async updateDoc(
+    id: string,
+    input: UpdateDocInput,
+    byUserId: string,
+  ): Promise<StockDocRecord> {
     return await this.inTransaction(undefined, async (tx) => {
       const knex = await this.knex(tx);
       // 先看单据状态，再校验内容：已过账的草稿无论带什么内容都回 doc-not-draft。
@@ -665,16 +1051,66 @@ export class DatabaseStockMutations implements StockMutations {
       validateDoc(input);
       await this.requireWarehouses(knex, input.lines);
       await assertItemsActive(knex, input.lines.map((line) => line.itemId));
+      const current = await knex<DocRow>('stock_docs').where({ id }).first();
+      if (current === undefined) return fail('doc-not-found');
+      const effectiveReason: DocReason = input.reason ?? (current.reason as DocReason);
+      const effectiveSourceType = input.sourceType === undefined
+        ? current.source_type as SourceType | undefined
+        : input.sourceType;
+      const effectiveSourceId = input.sourceId === undefined ? (current.source_id ?? undefined) : input.sourceId;
+      await assertPartnerReason(knex, effectiveReason,
+        input.partnerId === undefined ? current.partner_id : input.partnerId);
+      await assertSourceRules(
+        knex,
+        { ...input, reason: effectiveReason, sourceType: effectiveSourceType, sourceId: effectiveSourceId },
+        id,
+      );
+      await assertStockDicts(tx, input.projectCode);
+      if (input.handlerUserId !== undefined && input.handlerUserId !== null) {
+        await requireActivePerson(knex, input.handlerUserId);
+      }
+      if (input.takerUserId !== undefined && input.takerUserId !== null) {
+        await requireActivePerson(knex, input.takerUserId);
+      }
+      if (input.takerDepartmentId !== undefined && input.takerDepartmentId !== null) {
+        await requireDepartment(knex, input.takerDepartmentId);
+      }
       await knex('stock_docs').where({ id }).update({
         ...(input.reason === undefined ? {} : { reason: input.reason }),
         ...(input.remark === undefined ? {} : { remark: input.remark }),
         ...(input.sourceType === undefined ? {} : { source_type: input.sourceType }),
         ...(input.sourceId === undefined ? {} : { source_id: input.sourceId }),
+        ...(input.docDate === undefined ? {} : { doc_date: input.docDate }),
+        ...(input.partnerId === undefined ? {} : { partner_id: input.partnerId }),
+        ...(input.contactName === undefined ? {} : { contact_name: input.contactName }),
+        ...(input.contactPhone === undefined ? {} : { contact_phone: input.contactPhone }),
+        ...(input.deliveryAddress === undefined ? {} : { delivery_address: input.deliveryAddress }),
+        ...(input.customerOrderNo === undefined ? {} : { customer_order_no: input.customerOrderNo }),
+        ...(input.projectCode === undefined ? {} : { project_code: input.projectCode }),
+        ...(input.handlerUserId === undefined ? {} : { handler_user_id: input.handlerUserId }),
+        ...(input.takerDepartmentId === undefined ? {} : { taker_department_id: input.takerDepartmentId }),
+        ...(input.takerUserId === undefined ? {} : { taker_user_id: input.takerUserId }),
         updated_at: new Date(),
       });
       await knex('stock_doc_lines').where({ doc_id: id }).delete();
-      await this.insertLines(knex, id, input.lines);
-      return await this.detailIn(tx, id);
+      await this.insertLines(knex, id, input.lines, computedAmounts(input.lines));
+      const finalLines = await this.linesAsInputs(knex, id);
+      const header = await knex<DocRow>('stock_docs').where({ id }).first();
+      if (header === undefined) return fail('doc-not-found');
+      const totals = headerTotals(
+        computedAmounts(finalLines),
+        input.discountAmount ?? num(header.discount_amount ?? 0),
+      );
+      await knex('stock_docs').where({ id }).update({
+        discount_amount: totals.discountAmount,
+        total_qty: totals.totalQty,
+        tax_included_total: totals.taxIncludedTotal,
+        tax_excluded_total: totals.taxExcludedTotal,
+        tax_total: totals.taxTotal,
+        payable_total: totals.payableTotal,
+      });
+      await this.docFiles.bind(knex, 'stock_doc', id, input.fileIds, byUserId);
+      return await this.detailIn(tx, id, true, this.docFiles);
     });
   }
 
@@ -686,6 +1122,22 @@ export class DatabaseStockMutations implements StockMutations {
     return await this.inTransaction(transaction, async (tx) => {
       const knex = await this.knex(tx);
       const header = await this.requireDraft(knex, id);
+      // R1：销售出库过账必须有来源销售订单，而且订单还在可发货状态。
+      if (header.reason === 'sales_issue') {
+        if (header.source_type !== 'sales_order' || header.source_id === null) {
+          return fail('source-required', id);
+        }
+        const order = await knex<{ id: string; status: string }>('sales_orders')
+          .select('status').where({ id: header.source_id }).first();
+        if (order === undefined || !['ordered', 'partially_shipped'].includes(order.status)) {
+          return fail('source-invalid', header.source_id);
+        }
+      }
+      // R3：内部领用必须有领用部门与领用人。
+      if (header.reason === 'internal_use' &&
+          (header.taker_department_id === null || header.taker_user_id === null)) {
+        return fail('taker-required', id);
+      }
       const lines = await knex<LineRow>('stock_doc_lines')
         .where({ doc_id: id })
         .orderBy('id', 'asc');
@@ -737,7 +1189,7 @@ export class DatabaseStockMutations implements StockMutations {
       });
       // R-021/R-022：来源单据是订单时，在同一个事务里回写订单进度。
       await syncOrderProgress(knex, header);
-      return await this.detailIn(tx, id);
+      return await this.detailIn(tx, id, true, this.docFiles);
     });
   }
 
@@ -749,7 +1201,7 @@ export class DatabaseStockMutations implements StockMutations {
         status: 'void',
         updated_at: new Date(),
       });
-      return await this.detailIn(tx, id);
+      return await this.detailIn(tx, id, true, this.docFiles);
     });
   }
 
@@ -760,19 +1212,26 @@ export class DatabaseStockMutations implements StockMutations {
     doc_no: string;
     doc_type: string;
     status: string;
+    reason: string;
     source_type: string | null;
     source_id: string | null;
+    taker_department_id: string | null;
+    taker_user_id: string | null;
   }> {
     const result = await knex.raw<{
       rows?: readonly {
         doc_no: string;
         doc_type: string;
         status: string;
+        reason: string;
         source_type: string | null;
         source_id: string | null;
+        taker_department_id: string | null;
+        taker_user_id: string | null;
       }[];
     }>(
-      'select doc_no, doc_type, status, source_type, source_id from stock_docs where id = ? for update',
+      `select doc_no, doc_type, status, reason, source_type, source_id,
+              taker_department_id, taker_user_id from stock_docs where id = ? for update`,
       [id],
     );
     const row = result.rows?.[0];
@@ -785,8 +1244,10 @@ export class DatabaseStockMutations implements StockMutations {
     knex: Knex,
     docId: string,
     lines: readonly StockLineInput[],
+    amounts: readonly AmountLineResult[],
   ): Promise<void> {
-    for (const line of lines) {
+    for (const [index, line] of lines.entries()) {
+      const amount = amounts[index];
       await knex('stock_doc_lines').insert({
         id: randomUUID(),
         doc_id: docId,
@@ -794,18 +1255,54 @@ export class DatabaseStockMutations implements StockMutations {
         warehouse_id: line.warehouseId.trim(),
         batch_no: line.batchNo ?? '',
         qty: line.qty,
+        tax_included_price: amount.taxRate === null ? null : (amount.price ?? line.taxIncludedPrice ?? null),
+        tax_excluded_price: amount.taxExcludedPrice,
+        tax_rate: amount.taxRate,
+        tax_excluded_amount: amount.taxExcludedAmount,
+        tax_amount: amount.taxAmount,
+        tax_included_amount: amount.taxIncludedAmount,
+        production_date: line.productionDate ?? null,
+        expiry_date: line.expiryDate ?? null,
+        note: line.note ?? null,
       });
     }
   }
 
-  private async detailIn(tx: DatabaseConnection, id: string): Promise<StockDocRecord> {
+  /** 从库里的最终行还原金额输入，改草稿后头上合计能重算。 */
+  private async linesAsInputs(knex: Knex, docId: string): Promise<readonly StockLineInput[]> {
+    const rows = await knex<LineRow>('stock_doc_lines')
+      .where({ doc_id: docId }).orderBy('id', 'asc');
+    return rows.map((row) => ({
+      itemId: row.item_id,
+      warehouseId: row.warehouse_id,
+      batchNo: row.batch_no,
+      qty: num(row.qty),
+      taxIncludedPrice: nullableNum(row.tax_included_price),
+      taxExcludedPrice: nullableNum(row.tax_excluded_price),
+      taxRate: nullableNum(row.tax_rate),
+      productionDate: nullIfDate(row.production_date),
+      expiryDate: nullIfDate(row.expiry_date),
+      note: row.note,
+    }));
+  }
+
+  private async detailIn(
+    tx: DatabaseConnection,
+    id: string,
+    withPrice = true,
+    docFiles?: DocFiles,
+  ): Promise<StockDocRecord> {
     const knex = await this.knex(tx);
     const row = await knex<DocRow>('stock_docs').where({ id }).first();
     if (row === undefined) return fail('doc-not-found');
     const lines = await knex<LineRow>('stock_doc_lines')
       .where({ doc_id: id })
       .orderBy('id', 'asc');
-    return docView(row, lines);
+    const refs = await refsOf(knex, [row]);
+    const doc = docView(row, lines, refs, withPrice);
+    return docFiles === undefined
+      ? doc
+      : { ...doc, files: await docFiles.filesOf(knex, 'stock_doc', id) };
   }
 }
 
@@ -820,12 +1317,12 @@ export default class InventoryProvider extends ServiceProvider<Application> {
   public override register(): void {
     this.app.container.singleton(stockReaderToken, () => {
       const database = this.app.container.resolve(databaseManagerToken);
-      return new DatabaseStockReader(database);
+      return new DatabaseStockReader(database, this.app.container.resolve(docFilesToken));
     });
     this.app.container.singleton(stockMutationsToken, () => {
       const database = this.app.container.resolve(databaseManagerToken);
       const codes = this.app.container.resolve(codeServiceToken);
-      return new DatabaseStockMutations(database, codes);
+      return new DatabaseStockMutations(database, codes, this.app.container.resolve(docFilesToken));
     });
   }
 }

@@ -36,6 +36,21 @@ export const DEMO_ACCOUNTS: readonly DemoAccountDefinition[] = [
     name: '演示 · 普通员工',
     role: 'staff',
   },
+  {
+    username: 'demo.warehouse',
+    name: '演示 · 仓管',
+    role: 'warehouse',
+  },
+  {
+    username: 'demo.purchase',
+    name: '演示 · 采购',
+    role: 'purchase',
+  },
+  {
+    username: 'demo.sales',
+    name: '演示 · 销售',
+    role: 'sales',
+  },
 ];
 
 /** 接口出参：标识、姓名、用户名、角色名。不外带邮箱等人员信息（R-028）。 */

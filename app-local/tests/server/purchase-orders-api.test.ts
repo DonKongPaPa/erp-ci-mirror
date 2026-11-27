@@ -8,11 +8,14 @@ import { expect } from 'vitest';
 import { createAppTest } from '../helpers/test-app.js';
 import { createItem } from '../helpers/inventory.js';
 import {
+  createDictEntry,
+  createEmployee,
   createOrder,
   createPartner,
   createWarehouse,
   get,
   jsonOf,
+  makeRoleUser,
   unique,
   write,
   type Row,
@@ -34,7 +37,7 @@ const test = createAppTest({
 const TIMEOUT = 30_000;
 const PATH = '/purchase-orders';
 
-test('建单自动取号：PO 前缀、供应商摘要、明细整单写入，服务端列不收', async ({
+test('建单自动取号：CG 前缀、供应商摘要、明细整单写入，服务端列不收', async ({
   testApp, connection,
 }) => {
   const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
@@ -51,7 +54,7 @@ test('建单自动取号：PO 前缀、供应商摘要、明细整单写入，�
   }));
   expect(response.status, `建单失败：${await response.clone().text()}`).toBe(201);
   const order = await jsonOf(response);
-  expect(String(order.orderNo)).toMatch(/^PO-\d{8}-\d{4,}$/u);
+  expect(String(order.orderNo)).toMatch(/^CG-\d{8}-\d{4,}$/u);
   expect(String(order.orderNo)).not.toBe('伪造的号');
   expect(order).toMatchObject({
     supplierId: supplier.id,
@@ -277,4 +280,133 @@ test('生成入库单：默认全量、指定行/部分行、超额与重复生�
       filter: { sourceType: 'purchase_order', sourceId: id },
     }),
   ).toHaveLength(2);
+}, TIMEOUT);
+
+
+test('加片金额、交期与字典：三行合计、优惠后金额、两单价以含税为准、最晚交期', async ({
+  testApp, connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const supplier = await createPartner(admin, { isSupplier: true });
+  const warehouse = await createWarehouse(admin);
+  const items = [await createItem(connection), await createItem(connection), await createItem(connection)];
+  await createDictEntry(connection, 'project', 'PROJ-A');
+  await createDictEntry(connection, 'settlement', 'SET-A');
+
+  const created = await admin.fetch(PATH, write({
+    supplierId: supplier.id,
+    orderDate: '2026-11-27',
+    warehouseId: warehouse.id,
+    contactName: '测试联系人',
+    contactPhone: '000-0000',
+    deliveryAddress: '测试交付地址',
+    settlementCode: 'SET-A',
+    projectCode: 'PROJ-A',
+    discountAmount: 30,
+    lines: [
+      { itemId: items[0], qty: 10, price: 113, taxExcludedPrice: 999, taxRate: 13, deliveryDate: '2026-12-01' },
+      { itemId: items[1], qty: 10, price: 113, taxRate: 13, deliveryDate: '2026-12-05' },
+      { itemId: items[2], qty: 10, price: 113, taxRate: 13, deliveryDate: '2026-12-03' },
+    ],
+  }));
+  expect(created.status, `建单失败：${await created.clone().text()}`).toBe(201);
+  const order = await jsonOf(created);
+  expect(order.lines).toHaveLength(3);
+  for (const line of order.lines!) {
+    expect(line).toMatchObject({
+      taxRate: 13, taxExcludedPrice: 100, taxExcludedAmount: 1000,
+      taxAmount: 130, taxIncludedAmount: 1130,
+    });
+  }
+  expect(order).toMatchObject({
+    totalQty: 30, taxIncludedTotal: 3390, taxExcludedTotal: 3000,
+    taxTotal: 390, discountAmount: 30, payableTotal: 3360,
+    latestDeliveryDate: '2026-12-05', projectCode: 'PROJ-A', settlementCode: 'SET-A',
+  });
+
+  const patched = await admin.fetch(`${PATH}/${String(order.id)}`, write({
+    latestDeliveryDate: '1999-01-01', discountAmount: 0,
+  }, 'PATCH'));
+  expect(patched.status, `改优惠失败：${await patched.clone().text()}`).toBe(200);
+  const after = await jsonOf(patched);
+  expect(after.latestDeliveryDate, '头上交期是派生列，请求带了要忽略').toBe('2026-12-05');
+  expect(after.payableTotal).toBe(3390);
+}, TIMEOUT);
+
+test('加片拒绝路径：单价、优惠、字典码、经办人四类规则码', async ({ testApp, connection }) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const supplier = await createPartner(admin, { isSupplier: true });
+  const item = await createItem(connection);
+  await createDictEntry(connection, 'project', 'PROJ-OFF', 'inactive');
+  const base = { supplierId: supplier.id, orderDate: '2026-11-27' };
+  const reject = async (body: Row, reason: string): Promise<void> => {
+    const response = await admin.fetch(PATH, write({ ...base, lines: [{ itemId: item, qty: 1 }], ...body }));
+    expect(response.status, `${reason}: ${await response.clone().text()}`).toBe(422);
+    expect((await jsonOf(response)).error?.reason).toBe(reason);
+  };
+  await reject({ lines: [{ itemId: item, qty: 1, taxExcludedPrice: 10 }] }, 'ORDER_LINE_PRICE_INVALID');
+  await reject({ lines: [{ itemId: item, qty: 1, price: 113, taxRate: 13 }], discountAmount: 200 }, 'ORDER_DISCOUNT_INVALID');
+  await reject({ projectCode: 'PROJ-OFF' }, 'ORDER_DICT_CODE_INVALID');
+  await reject({ projectCode: 'PROJ-NO-SUCH' }, 'ORDER_DICT_CODE_INVALID');
+  await reject({ handlerUserId: unique('NO-PERSON') }, 'ORDER_PERSON_INVALID');
+}, TIMEOUT);
+
+test('风险反向：只持 view 的会话读列表与详情都没有价格键；默认经办人是登录人', async ({
+  testApp, connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const item = await createItem(connection);
+
+  // 采购角色的默认授权带 viewPrice；经办人默认登录人，只回标识与姓名。
+  const username = unique('r021handler');
+  const password = 'R021-handler-123!';
+  const created = await admin.fetch('/users', write({
+    name: username, username, email: `${username.toLowerCase()}@example.test`,
+    password, roleScopes: { app: ['purchase'] },
+  }));
+  expect(created.status).toBe(201);
+  const userId = String((await jsonOf(created)).data?.id);
+  expect(userId, '前置：用户 id').toBeTruthy();
+  await createEmployee(connection, userId);
+  const buyer = await signIn(testApp, { username, password });
+  const order = await createOrder(buyer, 'purchase', {
+    lines: [{ itemId: item, qty: 10, price: 113, taxRate: 13 }],
+  });
+  expect(order.handler).toMatchObject({ userId });
+  expect(Object.keys(order.handler as Row).sort()).toEqual(['name', 'userId']);
+
+  // 只给 view、不给 viewPrice：列表与详情里所有价格与金额键必须不出现。
+  const { session: viewer } = await makeRoleUser(
+    admin, testApp, 'r021view', [
+      { resource: { type: 'composite', id: 'purchaseOrders' }, actions: [{ action: 'view' }] },
+    ],
+  );
+  const headerPriceKeys = [
+    'discountAmount', 'taxIncludedTotal', 'taxExcludedTotal', 'taxTotal', 'payableTotal',
+  ];
+  const linePriceKeys = [
+    'price', 'taxExcludedPrice', 'taxExcludedAmount', 'taxAmount', 'taxIncludedAmount',
+  ];
+  const priceKeys = [...headerPriceKeys, ...linePriceKeys];
+  for (const response of [
+    await viewer.fetch(PATH, get()),
+    await viewer.fetch(`${PATH}/${String(order.id)}`, get()),
+  ]) {
+    expect(response.status, `只持 view 应当能读：${await response.clone().text()}`).toBe(200);
+    const body = await jsonOf(response);
+    const rows: Row[] = body.items ?? [body];
+    for (const row of rows) {
+      for (const key of priceKeys) expect(Object.keys(row)).not.toContain(key);
+      for (const line of (row.lines ?? []) as Row[]) {
+        for (const key of priceKeys) expect(Object.keys(line)).not.toContain(key);
+      }
+    }
+  }
+  // 对照：持 viewPrice 的会话同一张单这些键都在，不是数据本身没有算。
+  const priced = await jsonOf(await buyer.fetch(`${PATH}/${String(order.id)}`, get()));
+  for (const key of headerPriceKeys) expect(Object.keys(priced)).toContain(key);
+  expect(priced.lines?.length).toBeGreaterThan(0);
+  for (const line of priced.lines!) {
+    for (const key of linePriceKeys) expect(Object.keys(line)).toContain(key);
+  }
 }, TIMEOUT);

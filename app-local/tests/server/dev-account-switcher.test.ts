@@ -76,6 +76,9 @@ const expectedAccounts = [
     role: 'dept_manager',
   },
   { username: 'demo.staff', name: '演示 · 普通员工', role: 'staff' },
+  { username: 'demo.warehouse', name: '演示 · 仓管', role: 'warehouse' },
+  { username: 'demo.purchase', name: '演示 · 采购', role: 'purchase' },
+  { username: 'demo.sales', name: '演示 · 销售', role: 'sales' },
 ] as const;
 
 interface AccountReader {
@@ -109,7 +112,9 @@ describe('enabled in development', () => {
     expect(
       accounts.map(({ username, name, role }) => ({ username, name, role })),
     ).toEqual(expectedAccounts);
-    expect(new Set(accounts.map((account) => account.id)).size).toBe(4);
+    expect(new Set(accounts.map((account) => account.id)).size).toBe(
+      expectedAccounts.length,
+    );
     for (const account of accounts) {
       expect(Object.keys(account).sort()).toEqual([
         'id',

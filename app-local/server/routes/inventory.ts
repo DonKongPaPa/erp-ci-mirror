@@ -44,6 +44,7 @@ import {
   WarehouseListQuery,
   WarehouseListSchema,
 } from './inventory-schemas.js';
+import { DocFileRuleError } from '../providers/doc-files.js';
 import {
   StockRuleError,
   stockMutationsToken,
@@ -57,7 +58,8 @@ type InventoryAction =
   | 'stockView'
   | 'stockWrite'
   | 'stockPost'
-  | 'stockVoid';
+  | 'stockVoid'
+  | 'stockPriceView';
 type InventoryContext = Context<AuthEnv & AuthorizationEnv>;
 type InventoryDecision = AuthorizationDecision<CompositeResourceConditions>;
 
@@ -79,6 +81,17 @@ const RULE_STATUS: Readonly<
   'doc-not-draft': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
   insufficient: { status: 'FAILED_PRECONDITION', httpStatus: 422 },
   'empty-update': { status: 'INVALID_ARGUMENT' },
+  'source-required': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
+  'source-invalid': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
+  'source-line-invalid': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
+  'source-qty-exceeds': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
+  'source-not-allowed': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
+  'taker-required': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
+  'partner-mismatch': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
+  'line-price-invalid': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
+  'discount-invalid': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
+  'dict-code-invalid': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
+  'person-invalid': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
 };
 
 /** 规则码逐项写死，不用统一前缀拼：任务书点名的是 WAREHOUSE_INACTIVE 这类名字。 */
@@ -97,6 +110,17 @@ const RULE_REASON: Readonly<Record<StockRuleCode, string>> = {
   'doc-not-draft': 'STOCK_DOC_NOT_DRAFT',
   insufficient: 'STOCK_INSUFFICIENT',
   'empty-update': 'EMPTY_UPDATE',
+  'source-required': 'STOCK_SOURCE_REQUIRED',
+  'source-invalid': 'STOCK_SOURCE_INVALID',
+  'source-line-invalid': 'STOCK_SOURCE_LINE_INVALID',
+  'source-qty-exceeds': 'STOCK_SOURCE_QTY_EXCEEDS',
+  'source-not-allowed': 'STOCK_SOURCE_NOT_ALLOWED',
+  'taker-required': 'STOCK_TAKER_REQUIRED',
+  'partner-mismatch': 'STOCK_PARTNER_MISMATCH',
+  'line-price-invalid': 'STOCK_LINE_PRICE_INVALID',
+  'discount-invalid': 'STOCK_DISCOUNT_INVALID',
+  'dict-code-invalid': 'STOCK_DICT_CODE_INVALID',
+  'person-invalid': 'STOCK_PERSON_INVALID',
 };
 
 const camelOf = (code: StockRuleCode): string =>
@@ -117,6 +141,25 @@ function inventoryApiError(
   translate: Translator,
   locale: string,
 ): ApiError {
+  if (error instanceof DocFileRuleError) {
+    const status = error.code === 'file-not-found'
+      ? 'NOT_FOUND'
+      : error.code === 'file-unavailable'
+        ? 'FAILED_PRECONDITION'
+        : 'INVALID_ARGUMENT';
+    throw new ApiError({
+      status,
+      reason: error.code === 'file-not-found'
+        ? 'FILE_NOT_FOUND'
+        : error.code === 'file-unavailable'
+          ? 'FILE_UNAVAILABLE'
+          : 'FILE_TOO_MANY',
+      domain: 'docFiles',
+      message: error.message,
+      ...(status === 'FAILED_PRECONDITION' ? { httpStatus: 422 as const } : {}),
+      cause: error,
+    });
+  }
   if (!(error instanceof StockRuleError)) throw error;
   const rule = RULE_STATUS[error.code];
   return new ApiError({
@@ -152,6 +195,17 @@ async function authorizeInventory(
 }
 
 /** 操作人。`auth.required()` 已经挡过未登录，这里是给类型收窄的兜底。 */
+async function hasAction(
+  context: InventoryContext,
+  action: InventoryAction,
+): Promise<boolean> {
+  const decision = await context.get('authz').authorize({
+    resource: { type: 'composite', id: 'inventory' },
+    action,
+  });
+  return decision.effect !== 'deny';
+}
+
 function actorOf(context: InventoryContext): string {
   const session = context.get('auth');
   if (session === null) {
@@ -351,6 +405,7 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
       apiValidator('query', DocListQuery),
       async (context) => {
         await authorizeInventory(context, 'stockView');
+        const withPrice = await hasAction(context, 'stockPriceView');
         const query = context.req.valid('query');
         const result = await reader.listDocs({
           docType: query.docType,
@@ -358,9 +413,15 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
           q: query.q,
           from: query.from,
           to: query.to,
+          dateField: query.dateField,
+          reason: query.reason,
+          partnerId: query.partnerId,
+          projectCode: query.projectCode,
+          handlerUserId: query.handlerUserId,
+          takerDepartmentId: query.takerDepartmentId,
           page: query.page,
           pageSize: query.pageSize,
-        });
+        }, withPrice);
         return context.json({ ...result, page: query.page, pageSize: query.pageSize });
       },
     );
@@ -381,7 +442,8 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
       }),
       async (context) => {
         await authorizeInventory(context, 'stockView');
-        const row = await reader.detailDoc(context.req.param('id'));
+        const withPrice = await hasAction(context, 'stockPriceView');
+        const row = await reader.detailDoc(context.req.param('id'), withPrice);
         if (row === undefined) {
           throw inventoryApiError(
             new StockRuleError('doc-not-found'),
@@ -442,7 +504,7 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
       async (context) => {
         await authorizeInventory(context, 'stockWrite');
         const row = await withMappedErrors(context, async () =>
-          mutations.updateDoc(context.req.param('id'), context.req.valid('json')),
+          mutations.updateDoc(context.req.param('id'), context.req.valid('json'), actorOf(context)),
         );
         return context.json(row);
       },

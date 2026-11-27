@@ -1337,6 +1337,7 @@ const zhCN: AppResource = {
     },
   },
   authorization: {
+    docFiles: { table: '单据附件' },
     sections: {
       quality: '质量管理',
       organization: '组织',
@@ -1412,6 +1413,7 @@ const zhCN: AppResource = {
         stockWrite: '编辑库存单据',
         stockPost: '过账库存单据',
         stockVoid: '作废库存单据',
+        stockPriceView: '查看出入库单价格',
       },
     },
     // R-021/R-022：采购与销售订单资源；本片不做页面，也不进角色编辑器目录。
@@ -1428,6 +1430,9 @@ const zhCN: AppResource = {
         submit: '提交采购订单',
         cancel: '取消采购订单',
         createReceipt: '生成入库单',
+        receive: '从采购订单收货',
+        financeView: '查看待付款采购订单',
+        viewPrice: '查看价格与金额',
       },
     },
     salesOrders: {
@@ -1443,6 +1448,8 @@ const zhCN: AppResource = {
         submit: '提交销售订单',
         cancel: '取消销售订单',
         createIssue: '生成出库单',
+        ship: '从销售订单发货',
+        viewPrice: '查看价格与金额',
       },
     },
     // R-014：客户与供应商两个业务资源，动作都是 view / create / update，没有删除。
@@ -1461,6 +1468,16 @@ const zhCN: AppResource = {
       },
     },
     partners: { tables: { partners: '往来单位', contacts: '联系人' } },
+    expenses: {
+      title: '支出记录',
+      tables: { records: '支出记录', lines: '支出记录 lines' },
+      actions: { view: '查看支出记录', create: '新建支出记录', update: '修改支出记录草稿', confirm: '登记支出记录', void: '作废支出记录' },
+    },
+    invoiceReceipts: {
+      title: '到票记录',
+      tables: { records: '到票记录', lines: '到票记录 lines' },
+      actions: { view: '查看到票记录', create: '新建到票记录', update: '修改到票记录草稿', confirm: '登记到票记录', void: '作废到票记录' },
+    },
     // R-019：物料、计量单位、物料分类合成一个业务资源；读要 view，建改要 manage。
     items: {
       title: '物料主数据',
@@ -1492,6 +1509,7 @@ const zhCN: AppResource = {
       staff: '普通员工',
       warehouse: '仓管',
       purchase: '采购',
+      finance: '财务',
       sales: '销售',
     },
   },

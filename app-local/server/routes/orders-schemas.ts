@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { FileIdsSchema } from './schemas.js';
+
 /**
  * R-021/R-022 端点的 zod schema，放在独立文件里（照 inventory-schemas.ts），
  * 不与共享 schemas.ts 撞车。
@@ -26,10 +28,36 @@ const lineInput = z.object({
   itemId: id,
   qty: z.number(),
   price: z.number().nullable().optional(),
+  taxExcludedPrice: z.number().nullable().optional(),
+  taxRate: z.number().nullable().optional(),
+  deliveryDate: day.nullable().optional(),
+  note: z.string().max(500).nullable().optional(),
 });
 const issueLineInput = z.object({ lineId: id, qty: z.number() });
 
-const commonList = { q: z.string().min(1).max(128).optional(), from: isoDate.optional(), to: isoDate.optional(), page, pageSize } as const;
+const commonList = {
+  q: z.string().min(1).max(128).optional(),
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+  dateField: z.literal('orderDate').optional(),
+  projectCode: id.optional(),
+  handlerUserId: id.optional(),
+  deliveryFrom: day.optional(),
+  deliveryTo: day.optional(),
+  page,
+  pageSize,
+} as const;
+const headerExtras = {
+  warehouseId: id.nullable().optional(),
+  contactName: z.string().max(128).nullable().optional(),
+  contactPhone: z.string().max(64).nullable().optional(),
+  deliveryAddress: z.string().max(512).nullable().optional(),
+  settlementCode: id.nullable().optional(),
+  projectCode: id.nullable().optional(),
+  handlerUserId: id.nullable().optional(),
+  discountAmount: z.number().optional(),
+  fileIds: FileIdsSchema,
+} as const;
 
 export const PurchaseOrderListQuery = z.object({
   ...commonList,
@@ -46,24 +74,30 @@ export const CreatePurchaseOrderBody = z.object({
   supplierId: id,
   orderDate: day,
   remark: remark.optional(),
+  ...headerExtras,
   lines: z.array(lineInput).default([]),
 });
 export const UpdatePurchaseOrderBody = z.object({
   supplierId: id.optional(),
   orderDate: day.optional(),
   remark: remark.optional(),
+  ...headerExtras,
   lines: z.array(lineInput).optional(),
 });
 export const CreateSalesOrderBody = z.object({
   customerId: id,
   orderDate: day,
   remark: remark.optional(),
+  customerOrderNo: z.string().max(64).nullable().optional(),
+  ...headerExtras,
   lines: z.array(lineInput).default([]),
 });
 export const UpdateSalesOrderBody = z.object({
   customerId: id.optional(),
   orderDate: day.optional(),
   remark: remark.optional(),
+  customerOrderNo: z.string().max(64).nullable().optional(),
+  ...headerExtras,
   lines: z.array(lineInput).optional(),
 });
 
@@ -85,7 +119,14 @@ const orderLine = z.object({
   orderId: z.string(),
   itemId: z.string(),
   qty: z.number(),
-  price: z.number().nullable(),
+  price: z.number().nullable().optional(),
+  taxRate: z.number().nullable().optional(),
+  taxExcludedPrice: z.number().nullable().optional(),
+  taxExcludedAmount: z.number().nullable().optional(),
+  taxAmount: z.number().nullable().optional(),
+  taxIncludedAmount: z.number().nullable().optional(),
+  deliveryDate: z.string().nullable().optional(),
+  note: z.string().nullable().optional(),
   receivedQty: z.number().optional(),
   shippedQty: z.number().optional(),
   remainingQty: z.number(),
@@ -98,6 +139,26 @@ const commonOrder = {
   submittedAt: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  warehouseId: z.string().nullable().optional(),
+  contactName: z.string().nullable().optional(),
+  contactPhone: z.string().nullable().optional(),
+  deliveryAddress: z.string().nullable().optional(),
+  settlementCode: z.string().nullable().optional(),
+  projectCode: z.string().nullable().optional(),
+  handlerUserId: z.string().nullable().optional(),
+  handler: z.object({ userId: z.string(), name: z.string() }).nullable().optional(),
+  totalQty: z.number().nullable().optional(),
+  latestDeliveryDate: z.string().nullable().optional(),
+  discountAmount: z.number().optional(),
+  taxIncludedTotal: z.number().nullable().optional(),
+  taxExcludedTotal: z.number().nullable().optional(),
+  taxTotal: z.number().nullable().optional(),
+  payableTotal: z.number().nullable().optional(),
+  paidAmount: z.number().optional(),
+  invoicedAmount: z.number().optional(),
+  files: z.array(z.object({
+    id: z.string(), name: z.string(), contentType: z.string(), size: z.number(),
+  })).optional(),
 } as const;
 const purchaseOrder = z.object({
   ...commonOrder,
@@ -110,6 +171,7 @@ const salesOrder = z.object({
   ...commonOrder,
   status: salesStatus,
   customerId: z.string(),
+  customerOrderNo: z.string().nullable().optional(),
   customer: partnerSummary.nullable(),
   lines: z.array(orderLine),
 });
@@ -129,3 +191,30 @@ export const PurchaseOrderListSchema = paged(
 export const SalesOrderListSchema = paged(
   salesOrder.omit({ lines: true, customer: true }),
 );
+
+
+/** 仓管窄形状：明确列出允许出现的键，价格、备注、经办人、项目、优惠都不在里头。 */
+const narrowItem = z.object({
+  id: z.string(), code: z.string(), name: z.string(),
+  spec: z.string().nullable(), unitCode: z.string(),
+});
+const narrowPartner = z.object({
+  id: z.string(), code: z.string(), name: z.string(),
+  contactName: z.string().nullable(), phone: z.string().nullable(),
+});
+const narrowLine = z.object({
+  id: z.string(), orderId: z.string(), itemId: z.string(),
+  qty: z.number(), remainingQty: z.number(),
+  receivedQty: z.number().optional(), shippedQty: z.number().optional(),
+  deliveryDate: z.string().nullable(), item: narrowItem,
+});
+const narrowOrder = z.object({
+  id: z.string(), orderNo: z.string(), orderDate: z.string(), status: z.string(),
+  warehouseId: z.string().nullable(), latestDeliveryDate: z.string().nullable(),
+  contactName: z.string().nullable(), contactPhone: z.string().nullable(),
+  supplier: narrowPartner.nullable().optional(),
+  customer: narrowPartner.nullable().optional(),
+  lines: z.array(narrowLine),
+});
+export const ReceivableOrderListSchema = paged(narrowOrder);
+export const ShippableOrderListSchema = ReceivableOrderListSchema;

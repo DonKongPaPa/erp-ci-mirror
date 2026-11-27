@@ -33,6 +33,9 @@ const ROLE_TITLES: Readonly<Record<string, { readonly title: string }>> = {
   quality_inspector: { title: 'permissionSets.business.qualityInspector' },
   dept_manager: { title: 'permissionSets.business.deptManager' },
   staff: { title: 'permissionSets.business.staff' },
+  warehouse: { title: 'permissionSets.business.warehouse' },
+  purchase: { title: 'permissionSets.business.purchase' },
+  sales: { title: 'permissionSets.business.sales' },
 };
 
 export function DevAccountSwitcher(): ReactElement | null {

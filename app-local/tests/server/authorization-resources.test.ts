@@ -18,7 +18,7 @@ import type {
 import { createAppTest } from '../helpers/test-app.js';
 import type { RepositoryPolicy } from '@nocobase/db';
 import { ServiceContainer } from '@nocobase/service-provider';
-import { expect } from 'vitest';
+import { expect, vi } from 'vitest';
 
 import AuthorizationResourcesProvider from '../../server/providers/authorization-resources.js';
 import {
@@ -1340,6 +1340,13 @@ test('R-013: booting the authorization resources provider twice registers once',
     'purchaseOrderLines',
     'salesOrders',
     'salesOrderLines',
+    // R-021 加片：单据附件通用表。
+    'docFiles',
+    // R-065：支出与到票各两张表。
+    'expenseRecords',
+    'expenseRecordLines',
+    'invoiceReceiptRecords',
+    'invoiceReceiptRecordLines',
     // R-072：业务字典一张表，两个只读资源各不分表。
     'bizDictEntries',
   ]);
@@ -1358,6 +1365,48 @@ test('R-013: booting the authorization resources provider twice registers once',
 
   await expect(provider.boot()).resolves.toBeUndefined();
   expect(registrationSnapshot(authz)).toEqual(registered);
+});
+
+test('R-065: financeView 只登记在采购订单资源上，销售订单的动作清单里没有', async ({
+  app,
+}) => {
+  const authz = app.container.resolve(authorizationToken);
+  const actionsOf = (id: string): readonly string[] =>
+    authz.compositeResources.list()
+      .find((resource) => resource.name === id)
+      ?.actions.map((action) => action.name)
+      .sort() ?? [];
+  expect(actionsOf('purchaseOrders')).toEqual([
+    'cancel', 'create', 'createReceipt', 'financeView', 'receive',
+    'submit', 'update', 'view', 'viewPrice',
+  ]);
+  expect(actionsOf('salesOrders')).toEqual([
+    'cancel', 'create', 'createIssue', 'ship', 'submit', 'update',
+    'view', 'viewPrice',
+  ]);
+  expect(actionsOf('purchaseOrders')).toContain('financeView');
+  expect(actionsOf('salesOrders'), '销售订单不该有借采购授权的 financeView').not.toContain('financeView');
+});
+
+test('R-065: 每个集合只登记一次，重复的清单不会写第二遍', async () => {
+  const authz = createAppAuthorization({});
+  const container = new ServiceContainer();
+  container.instance(authorizationToken, authz);
+  container.instance(departmentServiceToken, noDepartments());
+  const provider = new AuthorizationResourcesProvider({
+    container,
+  } as unknown as AppPluginApplication);
+  const add = vi.spyOn(authz.database.collections, 'add');
+  try {
+    await provider.boot();
+    const names = add.mock.calls.map(([definition]) => definition.name);
+    expect(
+      names.filter((name, index) => names.indexOf(name) !== index),
+      '同一个集合名被登记了多次',
+    ).toEqual([]);
+  } finally {
+    add.mockRestore();
+  }
 });
 
 test('R-013: root is the only unrestricted permission set; the seeded roles stay editable', async ({

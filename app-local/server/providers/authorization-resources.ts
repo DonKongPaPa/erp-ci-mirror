@@ -12,6 +12,12 @@ import {
   DEPARTMENT_COLLECTIONS,
   departments as departmentsResource,
 } from '../department-resources.js';
+import { DOC_FILE_COLLECTIONS } from '../doc-files-resources.js';
+import {
+  expenses as expenseRecordsResource,
+  FINANCE_COLLECTIONS,
+  invoiceReceipts as invoiceReceiptsResource,
+} from '../finance-resources.js';
 import { defineDepartmentRecordAccess } from '../department-record-access.js';
 import {
   EMPLOYEE_COLLECTIONS,
@@ -73,6 +79,8 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
       ...ITEM_COLLECTIONS,
       ...INVENTORY_COLLECTIONS,
       ...ORDER_COLLECTIONS,
+      ...DOC_FILE_COLLECTIONS,
+      ...FINANCE_COLLECTIONS,
       ...BIZ_DICT_COLLECTIONS,
     ]) {
       authz.database.collections.add(collection);
@@ -96,6 +104,8 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
     // R-072：字典与两个收窄的选项资源只声明，不做 ui.place —— 本片没有页面。
     authz.compositeResources.define(bizDictResource);
     authz.compositeResources.define(bizOptionsResource);
+    authz.compositeResources.define(expenseRecordsResource);
+    authz.compositeResources.define(invoiceReceiptsResource);
     const departmentService = this.app.container.resolve(
       departmentServiceToken,
     );

@@ -61,6 +61,10 @@ const enUS = {
       itemInactive: 'That item is inactive. Choose another one.',
       warehouseNotFound: 'That warehouse does not exist.',
       warehouseInactive: 'That warehouse is inactive. Choose another one.',
+      linePriceInvalid: 'A unit price or tax rate is invalid (rate 0-100, no negative price).',
+      discountInvalid: 'The discount must not be negative or exceed the tax-included total.',
+      dictCodeInvalid: 'The settlement or project code is not active in the dictionary.',
+      personInvalid: 'The handler is not an active employee.',
     },
   },
   employees: {
@@ -114,6 +118,22 @@ const enUS = {
       valueInvalid: 'A value is not valid: {{reason}}. Check the name, rate or dates.',
       codeInactive: 'That code is not an active entry of this type: {{reason}}.',
       notFound: 'That dictionary entry does not exist.',
+    },
+  },
+  // R-020 加片：库存单据规则码文案。
+  inventory: {
+    errors: {
+      sourceRequired: 'A sales issue must be posted with a source sales order.',
+      sourceInvalid: 'The source order does not exist or is no longer shippable.',
+      sourceLineInvalid: 'A line item is not on the source order.',
+      sourceQtyExceeds: 'The accumulated quantity exceeds the order remainder.',
+      sourceNotAllowed: 'This document reason cannot carry an order source.',
+      takerRequired: 'An internal issue needs both a department and a taker.',
+      partnerMismatch: 'The partner does not match the document reason.',
+      linePriceInvalid: 'A unit price or tax rate is invalid.',
+      discountInvalid: 'The discount must not be negative or exceed the tax-included total.',
+      dictCodeInvalid: 'The project code is not active in the dictionary.',
+      personInvalid: 'The handler or taker is not an active employee, or the department is inactive.',
     },
   },
   ticketNotifications: {

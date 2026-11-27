@@ -32,11 +32,27 @@ const WAREHOUSE_UPDATE = ['name', 'status', 'note'] as const;
 const DOC_READ = [
   'id', 'docNo', 'docType', 'reason', 'status', 'remark', 'sourceType',
   'sourceId', 'createdById', 'postedAt', 'postedById', 'createdAt', 'updatedAt',
+  'docDate', 'partnerId', 'contactName', 'contactPhone', 'deliveryAddress',
+  'customerOrderNo', 'projectCode', 'handlerUserId', 'takerDepartmentId',
+  'takerUserId', 'totalQty',
 ] as const;
-const DOC_WRITE = ['reason', 'remark', 'sourceType', 'sourceId', 'status'] as const;
+const DOC_PRICE_READ = [
+  'discountAmount', 'taxIncludedTotal', 'taxExcludedTotal', 'taxTotal', 'payableTotal',
+] as const;
+const DOC_WRITE = [
+  'reason', 'remark', 'sourceType', 'sourceId', 'status', 'docDate', 'partnerId',
+  'contactName', 'contactPhone', 'deliveryAddress', 'customerOrderNo', 'projectCode',
+  'handlerUserId', 'takerDepartmentId', 'takerUserId', 'discountAmount',
+  'totalQty', 'taxIncludedTotal', 'taxExcludedTotal', 'taxTotal', 'payableTotal',
+] as const;
 const LINE_READ = [
   'id', 'docId', 'itemId', 'warehouseId', 'batchNo', 'qty',
+  'productionDate', 'expiryDate', 'note', 'taxRate',
 ] as const;
+const LINE_PRICE_READ = [
+  'taxIncludedPrice', 'taxExcludedPrice', 'taxExcludedAmount', 'taxAmount', 'taxIncludedAmount',
+] as const;
+const LINE_WRITE = [...LINE_READ, ...LINE_PRICE_READ] as const;
 const BALANCE_READ = ['itemId', 'warehouseId', 'batchNo', 'qty'] as const;
 const TRANSACTION_READ = [
   'id', 'docId', 'docLineId', 'docNo', 'itemId', 'warehouseId', 'batchNo',
@@ -57,6 +73,12 @@ const manageWarehouses = defineDatabasePermission((permission) =>
 const readDocs = defineDatabasePermission((permission) =>
   permission.collection('stockDocs').title(docTitle).read(DOC_READ),
 );
+const readDocsWithPrice = defineDatabasePermission((permission) =>
+  permission.collection('stockDocs').title(docTitle).read([...DOC_READ, ...DOC_PRICE_READ]),
+);
+const readLinesWithPrice = defineDatabasePermission((permission) =>
+  permission.collection('stockDocLines').title(lineTitle).read([...LINE_READ, ...LINE_PRICE_READ]),
+);
 const writeDocs = defineDatabasePermission((permission) =>
   permission
     .collection('stockDocs')
@@ -73,7 +95,7 @@ const writeLines = defineDatabasePermission((permission) =>
     .collection('stockDocLines')
     .title(lineTitle)
     .read(LINE_READ)
-    .create(LINE_READ)
+    .create(LINE_WRITE)
     .delete(),
 );
 const readBalances = defineDatabasePermission((permission) =>
@@ -129,5 +151,11 @@ export const inventory = defineCompositeResource('inventory', (resource) =>
       action
         .title(title('authorization.inventory.actions.stockVoid'))
         .grant('stockDocs', writeDocs),
+    )
+    .action('stockPriceView', (action) =>
+      action
+        .title(title('authorization.inventory.actions.stockPriceView'))
+        .grant('stockDocs', readDocsWithPrice)
+        .grant('stockDocLines', readLinesWithPrice),
     ),
 );

@@ -15,16 +15,23 @@ import type { Knex } from 'knex';
  * （例 M-20261127-0001），四位满了自动进位到五位。个别前缀可以选 period: 'none'
  * 不带日期、不重置（例 CU-0001，现在用不到，但要能用）。
  * 日期按 Asia/Shanghai 算，不依赖进程时区。
+ *
+ * 2026-11-28 起新发的四类单据号用照旧系统（百卓轻云）的前缀：
+ * 采购订单 CG、销售订单 XS、入库单 RK、出库单 CK。已经发出去的 PO / SO / IN / OUT
+ * 号保留原值，不写迁移改库、不做重编号；形状仍是「前缀-yyyymmdd-四位序号」，规则仍不可配（Q41）。
  */
 export const CODE_PREFIXES = {
   item: 'M',
   product: 'P',
   customer: 'CU',
   supplier: 'SU',
-  purchaseOrder: 'PO',
-  salesOrder: 'SO',
-  inbound: 'IN',
-  outbound: 'OUT',
+  purchaseOrder: 'CG',
+  salesOrder: 'XS',
+  inbound: 'RK',
+  outbound: 'CK',
+  // R-065：支出单号与到票编号的占位前缀（待 R-016 待裁 a 一并定）。
+  expense: 'EXP',
+  invoiceReceipt: 'RCV',
 } as const;
 
 /** 计数器行的周期：按日重置存 yyyymmdd（列宽 8 正好），不带日期存空串。 */

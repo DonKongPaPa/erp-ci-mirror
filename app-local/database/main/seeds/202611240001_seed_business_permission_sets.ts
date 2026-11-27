@@ -257,6 +257,30 @@ const salesPriceView = {
   actions: [{ action: 'viewSalesPrice' }],
 };
 
+/** R-021/R-022 加片：订单价格管控是独立只读动作，默认给采购与销售；仓管没有。 */
+const purchaseOrderPriceView = {
+  resource: { type: 'composite', id: 'purchaseOrders' },
+  actions: [{ action: 'viewPrice' }],
+};
+const salesOrderPriceView = {
+  resource: { type: 'composite', id: 'salesOrders' },
+  actions: [{ action: 'viewPrice' }],
+};
+
+/** R-020 加片：仓管读待收货/待发货订单的窄形状，并拿库存价格只读动作。 */
+const purchaseReceiveGrant = {
+  resource: { type: 'composite', id: 'purchaseOrders' },
+  actions: [{ action: 'receive' }],
+};
+const salesShipGrant = {
+  resource: { type: 'composite', id: 'salesOrders' },
+  actions: [{ action: 'ship' }],
+};
+const stockPriceViewGrant = {
+  resource: { type: 'composite', id: 'inventory' },
+  actions: [{ action: 'stockPriceView' }],
+};
+
 /**
  * R-002：知识库的业务键是 `{ type: 'kb', id: 'kb.knowledge' }`，动作名带档位
  * （`manage.related` / `propose.related`）。`kb.knowledge/manage` 是业务键，不是授权
@@ -269,6 +293,20 @@ const knowledgeGrant = (action: 'manage.related' | 'propose.related') => ({
   resource: { type: 'kb', id: 'kb.knowledge' },
   actions: [{ action }],
 });
+
+/** R-065 第一片：财务角色的三份业务授权，外加字典与选项只读。 */
+const financeExpensesGrant = {
+  resource: { type: 'composite', id: 'expenses' },
+  actions: ['view', 'create', 'update', 'confirm', 'void'].map((action) => ({ action })),
+};
+const financeInvoiceGrant = {
+  resource: { type: 'composite', id: 'invoiceReceipts' },
+  actions: ['view', 'create', 'update', 'confirm', 'void'].map((action) => ({ action })),
+};
+const financeOrderGrant = {
+  resource: { type: 'composite', id: 'purchaseOrders' },
+  actions: [{ action: 'financeView' }],
+};
 
 export const businessPermissionSets: readonly PermissionSet[] = [
   definePermissionSet('quality_manager')
@@ -318,6 +356,9 @@ export const businessPermissionSets: readonly PermissionSet[] = [
     .grant(inboundOrdersPage)
     .grant(outboundOrdersPage)
     .grant(inventoryGrant)
+    .grant(stockPriceViewGrant)
+    .grant(purchaseReceiveGrant)
+    .grant(salesShipGrant)
     .grant(bizDictRead)
     .grant(bizOptionsRead)
     .build(),
@@ -334,6 +375,15 @@ export const businessPermissionSets: readonly PermissionSet[] = [
     .grant(bizDictRead)
     .grant(bizOptionsRead)
     .grant(salesPriceView)
+    .grant(salesOrderPriceView)
+    .build(),
+  definePermissionSet('finance')
+    .title({ key: 'permissionSets.business.finance', ns: NAMESPACE })
+    .grant(financeExpensesGrant)
+    .grant(financeInvoiceGrant)
+    .grant(financeOrderGrant)
+    .grant(bizDictRead)
+    .grant(bizOptionsRead)
     .build(),
   definePermissionSet('purchase')
     .title({ key: 'permissionSets.business.purchase', ns: NAMESPACE })
@@ -348,6 +398,7 @@ export const businessPermissionSets: readonly PermissionSet[] = [
     .grant(bizDictRead)
     .grant(bizOptionsRead)
     .grant(purchasePriceView)
+    .grant(purchaseOrderPriceView)
     .build(),
 ];
 

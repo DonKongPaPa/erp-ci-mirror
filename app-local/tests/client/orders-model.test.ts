@@ -157,7 +157,7 @@ describe('order pages: the model behind the forms', () => {
   it('validates the stock-document dialog against what is left on each line', () => {
     const order = toOrder(PURCHASE, {
       id: 'o1',
-      orderNo: 'PO-1',
+      orderNo: 'CG-1',
       status: 'ordered',
       orderDate: '2026-11-27',
       remark: '',
@@ -263,7 +263,7 @@ describe('order pages: the model behind the forms', () => {
   it('turns both order endpoints into one shape, and an unregistered status into no status', () => {
     const raw: OrderResponse = {
       id: 'o1',
-      orderNo: 'PO-1',
+      orderNo: 'CG-1',
       status: 'partially_received',
       orderDate: '2026-11-27',
       remark: '',

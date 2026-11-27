@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { FileIdsSchema } from './schemas.js';
+
 /**
  * R-020 端点的 zod schema。放在独立文件里（照 department-schemas.ts），
  * 避免和另一条分支往共享 schemas.ts 加物料 schema 时撞车。
@@ -15,13 +17,26 @@ const switchBoolean = z
 const docType = z.enum(['in', 'out']);
 const docStatus = z.enum(['draft', 'posted', 'void']);
 const docReason = z.enum([
-  'purchase_receipt',
-  'sales_issue',
-  'other_in',
-  'other_out',
+  'purchase_receipt', 'production_receipt', 'sales_return', 'other_in',
+  'sales_issue', 'internal_use', 'purchase_return', 'other_out',
 ]);
 const sourceType = z.enum(['purchase_order', 'sales_order']);
 const warehouseStatus = z.enum(['active', 'inactive']);
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u);
+const headerExtras = {
+  docDate: day.nullable().optional(),
+  partnerId: z.string().min(1).max(64).nullable().optional(),
+  contactName: z.string().max(128).nullable().optional(),
+  contactPhone: z.string().max(64).nullable().optional(),
+  deliveryAddress: z.string().max(512).nullable().optional(),
+  customerOrderNo: z.string().max(64).nullable().optional(),
+  projectCode: z.string().max(32).nullable().optional(),
+  handlerUserId: z.string().min(1).max(64).nullable().optional(),
+  takerDepartmentId: z.string().min(1).max(64).nullable().optional(),
+  takerUserId: z.string().min(1).max(64).nullable().optional(),
+  discountAmount: z.number().optional(),
+  fileIds: FileIdsSchema,
+} as const;
 
 export const WarehouseListQuery = z.object({
   status: warehouseStatus.optional(),
@@ -56,6 +71,12 @@ export const StockLineBody = z.object({
   warehouseId: z.string().min(1).max(64),
   batchNo: z.string().max(64).optional(),
   qty: z.number(),
+  taxIncludedPrice: z.number().nullable().optional(),
+  taxExcludedPrice: z.number().nullable().optional(),
+  taxRate: z.number().nullable().optional(),
+  productionDate: day.nullable().optional(),
+  expiryDate: day.nullable().optional(),
+  note: z.string().max(500).nullable().optional(),
 });
 
 export const CreateStockDocBody = z.object({
@@ -64,6 +85,7 @@ export const CreateStockDocBody = z.object({
   remark: z.string().max(1000).optional(),
   sourceType: sourceType.optional(),
   sourceId: z.string().min(1).max(64).optional(),
+  ...headerExtras,
   lines: z.array(StockLineBody).default([]),
 });
 
@@ -72,12 +94,19 @@ export const UpdateStockDocBody = z.object({
   remark: z.string().max(1000).optional(),
   sourceType: sourceType.optional(),
   sourceId: z.string().min(1).max(64).optional(),
+  ...headerExtras,
   lines: z.array(StockLineBody).default([]),
 });
 
 export const DocListQuery = z.object({
   docType: docType.optional(),
   status: docStatus.optional(),
+  reason: docReason.optional(),
+  partnerId: z.string().min(1).max(64).optional(),
+  projectCode: z.string().max(32).optional(),
+  handlerUserId: z.string().min(1).max(64).optional(),
+  takerDepartmentId: z.string().min(1).max(64).optional(),
+  dateField: z.literal('docDate').optional(),
   q: z.string().min(1).max(128).optional(),
   from: isoDate.optional(),
   to: isoDate.optional(),
@@ -120,6 +149,15 @@ const StockDocLineSchema = z.object({
   warehouseId: z.string(),
   batchNo: z.string(),
   qty: z.number(),
+  productionDate: z.string().nullable().optional(),
+  expiryDate: z.string().nullable().optional(),
+  note: z.string().nullable().optional(),
+  taxRate: z.number().nullable().optional(),
+  taxIncludedPrice: z.number().nullable().optional(),
+  taxExcludedPrice: z.number().nullable().optional(),
+  taxExcludedAmount: z.number().nullable().optional(),
+  taxAmount: z.number().nullable().optional(),
+  taxIncludedAmount: z.number().nullable().optional(),
 });
 
 const StockDocSchema = z.object({
@@ -136,6 +174,29 @@ const StockDocSchema = z.object({
   postedById: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  docDate: z.string().nullable().optional(),
+  partnerId: z.string().nullable().optional(),
+  contactName: z.string().nullable().optional(),
+  contactPhone: z.string().nullable().optional(),
+  deliveryAddress: z.string().nullable().optional(),
+  customerOrderNo: z.string().nullable().optional(),
+  projectCode: z.string().nullable().optional(),
+  handlerUserId: z.string().nullable().optional(),
+  handler: z.object({ userId: z.string(), name: z.string() }).nullable().optional(),
+  takerDepartmentId: z.string().nullable().optional(),
+  takerUserId: z.string().nullable().optional(),
+  taker: z.object({ userId: z.string(), name: z.string() }).nullable().optional(),
+  takerDepartment: z.object({ id: z.string(), name: z.string() }).nullable().optional(),
+  partner: z.object({ id: z.string(), code: z.string(), name: z.string() }).nullable().optional(),
+  totalQty: z.number().nullable().optional(),
+  discountAmount: z.number().optional(),
+  taxIncludedTotal: z.number().nullable().optional(),
+  taxExcludedTotal: z.number().nullable().optional(),
+  taxTotal: z.number().nullable().optional(),
+  payableTotal: z.number().nullable().optional(),
+  files: z.array(z.object({
+    id: z.string(), name: z.string(), contentType: z.string(), size: z.number(),
+  })).optional(),
   lines: z.array(StockDocLineSchema),
 });
 

@@ -1,4 +1,5 @@
 import { defineCompositeResource } from '@nocobase/authorization/core';
+import { financeViewOrdersPermission } from './finance-resources.js';
 import {
   defineDatabasePermission,
   type DatabaseCollectionDefinition,
@@ -25,6 +26,13 @@ const docLineTitle = title('authorization.inventory.tables.stockDocLines');
 const headerRead = (kind: 'purchase' | 'sales') => [
   'id', 'orderNo', kind === 'purchase' ? 'supplierId' : 'customerId',
   'orderDate', 'status', 'remark', 'submittedAt', 'createdAt', 'updatedAt',
+  'warehouseId', 'contactName', 'contactPhone', 'deliveryAddress',
+  'settlementCode', 'projectCode', 'handlerUserId', 'totalQty', 'latestDeliveryDate',
+  ...(kind === 'sales' ? ['customerOrderNo'] : []),
+] as const;
+/** 价格管控动作单独隔出来的列：没有它这些键在响应里不出现。 */
+const headerPriceRead = [
+  'discountAmount', 'taxIncludedTotal', 'taxExcludedTotal', 'taxTotal', 'payableTotal',
 ] as const;
 const headerWrite = (kind: 'purchase' | 'sales') => [
   ...headerRead(kind), 'createdById',
@@ -32,10 +40,25 @@ const headerWrite = (kind: 'purchase' | 'sales') => [
 const headerUpdate = (kind: 'purchase' | 'sales') => [
   kind === 'purchase' ? 'supplierId' : 'customerId',
   'orderDate', 'remark', 'status', 'submittedAt', 'updatedAt',
+  'warehouseId', 'contactName', 'contactPhone', 'deliveryAddress',
+  'settlementCode', 'projectCode', 'handlerUserId', 'discountAmount',
+  ...(kind === 'sales' ? ['customerOrderNo'] : []),
+] as const;
+const headerPriceWrite = [
+  'discountAmount', 'totalQty', 'taxIncludedTotal', 'taxExcludedTotal', 'taxTotal', 'payableTotal',
+  'latestDeliveryDate',
 ] as const;
 const lineRead = (kind: 'purchase' | 'sales') => [
   'id', 'orderId', 'itemId', 'qty', 'price',
   kind === 'purchase' ? 'receivedQty' : 'shippedQty',
+  'deliveryDate', 'taxRate', 'note',
+] as const;
+const linePriceRead = [
+  'price', 'taxExcludedPrice', 'taxExcludedAmount', 'taxAmount', 'taxIncludedAmount',
+] as const;
+const lineWrite = [
+  'id', 'orderId', 'itemId', 'qty', 'price', 'taxExcludedPrice', 'taxRate',
+  'taxExcludedAmount', 'taxAmount', 'taxIncludedAmount', 'deliveryDate', 'note',
 ] as const;
 
 const readHeader = (kind: 'purchase' | 'sales') =>
@@ -53,13 +76,28 @@ const readLines = (kind: 'purchase' | 'sales') =>
       .read(lineRead(kind)),
   );
 
+const readHeaderWithPrice = (kind: 'purchase' | 'sales') =>
+  defineDatabasePermission((permission) =>
+    permission
+      .collection(kind === 'purchase' ? 'purchaseOrders' : 'salesOrders')
+      .title(kind === 'purchase' ? purchaseHeaderTitle : salesHeaderTitle)
+      .read([...headerRead(kind), ...headerPriceRead]),
+  );
+const readLinesWithPrice = (kind: 'purchase' | 'sales') =>
+  defineDatabasePermission((permission) =>
+    permission
+      .collection(kind === 'purchase' ? 'purchaseOrderLines' : 'salesOrderLines')
+      .title(kind === 'purchase' ? purchaseLineTitle : salesLineTitle)
+      .read([...lineRead(kind), ...linePriceRead]),
+  );
+
 const createHeader = (kind: 'purchase' | 'sales') =>
   defineDatabasePermission((permission) =>
     permission
       .collection(kind === 'purchase' ? 'purchaseOrders' : 'salesOrders')
       .title(kind === 'purchase' ? purchaseHeaderTitle : salesHeaderTitle)
       .read(headerRead(kind))
-      .create(headerWrite(kind)),
+      .create([...headerWrite(kind), ...headerPriceWrite]),
   );
 const createLines = (kind: 'purchase' | 'sales') =>
   defineDatabasePermission((permission) =>
@@ -67,7 +105,7 @@ const createLines = (kind: 'purchase' | 'sales') =>
       .collection(kind === 'purchase' ? 'purchaseOrderLines' : 'salesOrderLines')
       .title(kind === 'purchase' ? purchaseLineTitle : salesLineTitle)
       .read(lineRead(kind))
-      .create(lineRead(kind))
+      .create(lineWrite)
       .delete(),
   );
 const updateHeader = (kind: 'purchase' | 'sales') =>
@@ -76,7 +114,7 @@ const updateHeader = (kind: 'purchase' | 'sales') =>
       .collection(kind === 'purchase' ? 'purchaseOrders' : 'salesOrders')
       .title(kind === 'purchase' ? purchaseHeaderTitle : salesHeaderTitle)
       .read(headerRead(kind))
-      .update(headerUpdate(kind)),
+      .update([...headerUpdate(kind), ...headerPriceWrite]),
   );
 
 const readWarehouses = defineDatabasePermission((permission) =>
@@ -95,12 +133,47 @@ const createDoc = defineDatabasePermission((permission) =>
     .collection('stockDocs')
     .title(docTitle)
     .read(['id', 'docNo', 'docType', 'reason', 'status', 'sourceType', 'sourceId'])
-    .create(['docType', 'reason', 'status', 'sourceType', 'sourceId', 'createdById']),
+    .create([
+      'docType', 'reason', 'status', 'sourceType', 'sourceId', 'createdById',
+      'docDate', 'partnerId', 'contactName', 'contactPhone', 'deliveryAddress',
+      'customerOrderNo', 'projectCode', 'handlerUserId',
+    ]),
 );
 const createDocLines = defineDatabasePermission((permission) =>
   permission.collection('stockDocLines').title(docLineTitle).create([
     'id', 'docId', 'itemId', 'warehouseId', 'batchNo', 'qty',
+    'taxIncludedPrice', 'taxRate', 'taxExcludedPrice',
   ]),
+);
+const receiveHeaderRead = [
+  'id', 'orderNo', 'orderDate', 'status', 'warehouseId', 'latestDeliveryDate',
+  'contactName', 'contactPhone', 'supplierId', 'customerId', 'customerOrderNo',
+] as const;
+const receiveLineRead = [
+  'id', 'orderId', 'itemId', 'qty', 'receivedQty', 'shippedQty', 'deliveryDate',
+] as const;
+const readHeaderForReceive = (kind: 'purchase' | 'sales') =>
+  defineDatabasePermission((permission) =>
+    permission
+      .collection(kind === 'purchase' ? 'purchaseOrders' : 'salesOrders')
+      .title(kind === 'purchase' ? purchaseHeaderTitle : salesHeaderTitle)
+      .read(receiveHeaderRead),
+  );
+const readLinesForReceive = (kind: 'purchase' | 'sales') =>
+  defineDatabasePermission((permission) =>
+    permission
+      .collection(kind === 'purchase' ? 'purchaseOrderLines' : 'salesOrderLines')
+      .title(kind === 'purchase' ? purchaseLineTitle : salesLineTitle)
+      .read(receiveLineRead),
+  );
+const readPartnerForReceive = defineDatabasePermission((permission) =>
+  permission
+    .collection('partners')
+    .title(title('authorization.partners.tables.partners'))
+    .read(['id', 'code', 'name', 'contactName', 'phone']),
+);
+const readItemForReceive = defineDatabasePermission((permission) =>
+  permission.collection('items').title(itemTitle).read(['id', 'code', 'name', 'spec', 'unitCode']),
 );
 
 export const ORDER_COLLECTIONS: readonly DatabaseCollectionDefinition[] = [
@@ -130,8 +203,8 @@ export const ORDER_COLLECTIONS: readonly DatabaseCollectionDefinition[] = [
 const defineOrderResource = (kind: 'purchase' | 'sales') => {
   const id = kind === 'purchase' ? 'purchaseOrders' : 'salesOrders';
   const issueAction = kind === 'purchase' ? 'createReceipt' : 'createIssue';
-  return defineCompositeResource(id, (resource) =>
-    resource
+  return defineCompositeResource(id, (resource) => {
+    let result = resource
       .title(title(`authorization.${id}.title`))
       .action('view', (action) =>
         action
@@ -151,7 +224,21 @@ const defineOrderResource = (kind: 'purchase' | 'sales') => {
           .grant(kind === 'purchase' ? 'purchaseOrders' : 'salesOrders', updateHeader(kind))
           .grant(kind === 'purchase' ? 'purchaseOrderLines' : 'salesOrderLines', createLines(kind)),
       )
-      .action('submit', (action) =>
+      .action('viewPrice', (action) =>
+        action
+          .title(title(`authorization.${id}.actions.viewPrice`))
+          .grant(kind === 'purchase' ? 'purchaseOrders' : 'salesOrders', readHeaderWithPrice(kind))
+          .grant(kind === 'purchase' ? 'purchaseOrderLines' : 'salesOrderLines', readLinesWithPrice(kind)),
+      );
+    // R-065 只给采购订单声明财务读：销售订单不该多出一个借采购授权的入口。
+    if (kind === 'purchase') {
+      result = result.action('financeView', (action) =>
+        action
+          .title(title('authorization.purchaseOrders.actions.financeView'))
+          .grant('purchaseOrders', financeViewOrdersPermission),
+      );
+    }
+    return result.action('submit', (action) =>
         action
           .title(title(`authorization.${id}.actions.submit`))
           .grant(kind === 'purchase' ? 'purchaseOrders' : 'salesOrders', updateHeader(kind)),
@@ -170,8 +257,19 @@ const defineOrderResource = (kind: 'purchase' | 'sales') => {
           .grant('items', readItems)
           .grant('stockDocs', createDoc)
           .grant('stockDocLines', createDocLines),
-      ),
-  );
+      )
+      .action(kind === 'purchase' ? 'receive' : 'ship', (action) =>
+        action
+          .title(title(`authorization.${id}.actions.${kind === 'purchase' ? 'receive' : 'ship'}`))
+          .grant(kind === 'purchase' ? 'purchaseOrders' : 'salesOrders', readHeaderForReceive(kind))
+          .grant(kind === 'purchase' ? 'purchaseOrderLines' : 'salesOrderLines', readLinesForReceive(kind))
+          .grant('partners', readPartnerForReceive)
+          .grant('items', readItemForReceive)
+          .grant('warehouses', readWarehouses)
+          .grant('stockDocs', createDoc)
+          .grant('stockDocLines', createDocLines),
+      );
+  });
 };
 
 export const purchaseOrders = defineOrderResource('purchase');

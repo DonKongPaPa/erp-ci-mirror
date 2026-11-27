@@ -9,10 +9,13 @@ import AuthzUpgradeR014Page from './upgrade-r014-page.js';
 import AuthzUpgradeR019Page from './upgrade-r019-page.js';
 import AuthzUpgradeR019Price from './upgrade-r019-price.js';
 import AuthzUpgradeR020 from './upgrade-r020.js';
+import AuthzUpgradeR020Receive from './upgrade-r020-receive.js';
 import AuthzUpgradeR020Page from './upgrade-r020-page.js';
 import AuthzUpgradeR021 from './upgrade-r021.js';
+import AuthzUpgradeR021Price from './upgrade-r021-price.js';
 import AuthzUpgradeR021Page from './upgrade-r021-page.js';
 import AuthzUpgradeR026 from './upgrade-r026.js';
+import AuthzUpgradeR065 from './upgrade-r065.js';
 import AuthzUpgradeR072 from './upgrade-r072.js';
 import AuthzUpgradeR025 from './upgrade-r025.js';
 
@@ -48,11 +51,17 @@ const authzCli = defineCliPlugin({
     'upgrade-r025': AuthzUpgradeR025,
     // R-020：给已有环境的 warehouse 补库存授权。可单独跑、可重跑。
     'upgrade-r020': AuthzUpgradeR020,
+    // R-020 加片：给已有环境的仓管补收货/发货与库存价格只读动作。可单独跑、可重跑。
+    'upgrade-r020-receive': AuthzUpgradeR020Receive,
     // R-020 页面片：给已有环境的仓管补库存查询、入库单、出库单、仓库四页，给销售/采购补仓库页（先补业务授权）。可单独跑、可重跑。
     'upgrade-r020-page': AuthzUpgradeR020Page,
     // R-021/R-022：给已有环境的 purchase / sales 补订单授权与只读引用。可单独跑、可重跑。
     'upgrade-r021': AuthzUpgradeR021,
+    // R-021/R-022 加片：给已有环境的采购/销售补订单价格只读动作。可单独跑、可重跑。
+    'upgrade-r021-price': AuthzUpgradeR021Price,
     // R-072：给已有环境的 purchase / sales / warehouse 补字典与选项的读授权。可单独跑、可重跑。
+    // R-065：给已有环境建财务角色并补三份业务授权。可单独跑、可重跑。
+    'upgrade-r065': AuthzUpgradeR065,
     'upgrade-r072': AuthzUpgradeR072,
     // R-021 / R-022 页面片：给已有环境的采购/销售补订单页的页面授权（先补业务授权）。可单独跑、可重跑。
     'upgrade-r021-page': AuthzUpgradeR021Page,
