@@ -76,6 +76,8 @@ const BASELINE_TABLES = [
   'lifecycle_effect_runs',
   'lifecycle_transitions',
   'mutation_receipts',
+  'partner_contacts',
+  'partners',
   'positions',
   'shifts',
 ];
