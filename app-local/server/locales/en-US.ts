@@ -5,6 +5,35 @@ import type { LocaleResource } from '@nocobase/i18n';
  * messages through the request translator; plugins keep their own namespaces.
  */
 const enUS = {
+  partners: {
+    errors: {
+      kindRequired: 'A partner must be a customer, a supplier, or both.',
+      invalidName: 'The name is required.',
+      codeTaken: 'That code is already in use.',
+      partnerNotFound: 'That partner does not exist.',
+      partnerInactive: 'That partner is inactive; reactivate it first.',
+      contactNotFound: 'That contact does not exist on this partner.',
+      invalidUpdate: 'Give at least one field to change.',
+    },
+  },
+  items: {
+    errors: {
+      'invalidInput': 'Some values are not valid: {{reason}}. Check the field and try again.',
+      'itemNotFound': 'That item does not exist. Reload and try again.',
+      'unitNotFound': 'That unit of measure does not exist. Reload and try again.',
+      'categoryNotFound': 'That item category does not exist. Reload and try again.',
+      'codeTaken': 'That item code is already in use; retry the request.',
+      'unitCodeTaken': 'That unit code is already in use. Choose another.',
+      'categoryCodeTaken': 'That category code is already in use. Choose another.',
+      'itemCodeImmutable': 'An item code cannot be changed after it is issued.',
+      'emptyPatch': 'Give at least one field to change.',
+      'unitInUse': 'An item still uses that unit. Reassign the item first.',
+      'unitInactive': 'That unit is inactive. Choose another one.',
+      'categoryInactive': 'That category is inactive. Choose another one.',
+      'itemInactive': 'That item is inactive. Reactivate it before changing other fields.',
+      'invalidParent': 'A category cannot be its own parent.',
+    },
+  },
   employees: {
     errors: {
       'target-user-not-found': 'That account does not exist.',

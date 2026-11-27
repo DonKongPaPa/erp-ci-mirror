@@ -1,6 +1,35 @@
 import type { AppServerResource } from './en-US.js';
 
 const zhCN: AppServerResource = {
+  partners: {
+    errors: {
+      kindRequired: '往来单位必须至少是客户或供应商之一。',
+      invalidName: '名称必填。',
+      codeTaken: '这个编码已经被占用。',
+      partnerNotFound: '这个往来单位不存在。',
+      partnerInactive: '这个往来单位已停用，请先启用。',
+      contactNotFound: '这个往来单位下没有这条联系人。',
+      invalidUpdate: '至少要给一项要改的内容。',
+    },
+  },
+  items: {
+    errors: {
+      'invalidInput': '有内容不合规（{{reason}}），请检查后重试。',
+      'itemNotFound': '这条物料不存在，请刷新后重试。',
+      'unitNotFound': '这个计量单位不存在，请刷新后重试。',
+      'categoryNotFound': '这个物料分类不存在，请刷新后重试。',
+      'codeTaken': '物料编码已被占用，请重试。',
+      'unitCodeTaken': '这个单位编码已经被占用，请换一个。',
+      'categoryCodeTaken': '这个分类编码已经被占用，请换一个。',
+      'itemCodeImmutable': '物料编码发出后不能改。',
+      'emptyPatch': '请至少填写一项要改的内容。',
+      'unitInUse': '还有物料在用这个单位，请先改那些物料。',
+      'unitInactive': '这个单位已经停用，请换一个。',
+      'categoryInactive': '这个分类已经停用，请换一个。',
+      'itemInactive': '这条物料已经停用，请先启用再改其它字段。',
+      'invalidParent': '分类不能把自己的父分类设成自己。',
+    },
+  },
   employees: {
     errors: {
       'target-user-not-found': '这个账号不存在。',

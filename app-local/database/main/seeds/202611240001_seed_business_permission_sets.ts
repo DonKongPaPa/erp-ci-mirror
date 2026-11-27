@@ -10,7 +10,7 @@ import { defineSeed, type QueryAdapter } from '@nocobase/db';
 import { randomUUID } from 'node:crypto';
 
 /**
- * R-013 的四个业务角色（seed）。
+ * R-013 的四个业务角色加 R-014 的销售、采购（seed）。
  *
  * 授权内容照设计文档的角色表：
  * - 质量主管、质量员：FQC 查看与处理、处理工单、质量页、知识库；R-026 再加反馈单页、
@@ -22,7 +22,7 @@ import { randomUUID } from 'node:crypto';
  * 「提交反馈」按设计只给「仅本人」（`recordsIOwn`，比的是 `ownerId`）。两把部门
  * 范围键已经注册，部门表有数据、业务表带 `departmentId` 后会自动开始生效。
  *
- * 四个角色都不授予「用户」资源的任何动作（R-028）：读人员信息只做选择性暴露。
+ * 六个角色都不授予「用户」资源的任何动作（R-028）：读人员信息只做选择性暴露。
  *
  * 写入照框架的存储形态：`grants` 列里是再包了一层的 JSON 字符串，`title` 存
  * `{ key, ns }`，`ns` 是客户端注册的包名 `app-local`。已经存在的 key 一律跳过，
@@ -121,6 +121,33 @@ const shiftsView = {
 };
 
 /**
+ * R-020：仓管拿仓库读、单据读写、过账与作废五个动作，**不拿 warehouseManage**
+ * （建改仓库只给 root）；其余业务角色一份都不给。没有页面授权（本片不做页面）。
+ */
+const inventoryGrant = {
+  resource: { type: 'composite', id: 'inventory' },
+  actions: [
+    { action: 'warehouseView' },
+    { action: 'stockView' },
+    { action: 'stockWrite' },
+    { action: 'stockPost' },
+    { action: 'stockVoid' },
+  ],
+};
+
+/**
+ * R-014：客户与供应商各一份业务资源，动作都是 view / create / update（没有删除）。
+ * 销售只持 customers，采购只持 suppliers；数据范围初期用全部，授权不带 policy。
+ * 页面授权不在这条 seed 里：页面与路由由前端片登记，届时再由前端片补页面授权。
+ */
+const PARTNER_ACTIONS = ['view', 'create', 'update'] as const;
+
+const partnerGrant = (id: 'customers' | 'suppliers') => ({
+  resource: { type: 'composite', id },
+  actions: PARTNER_ACTIONS.map((action) => ({ action })),
+});
+
+/**
  * R-002：知识库的业务键是 `{ type: 'kb', id: 'kb.knowledge' }`，动作名带档位
  * （`manage.related` / `propose.related`）。`kb.knowledge/manage` 是业务键，不是授权
  * 动作名；知识库插件登记到授权插件的才是这些档位。
@@ -174,10 +201,22 @@ export const businessPermissionSets: readonly PermissionSet[] = [
     // R-025：只读班次定义，没有写、没有页面授权。
     .grant(shiftsView)
     .build(),
+  definePermissionSet('warehouse')
+    .title({ key: 'permissionSets.business.warehouse', ns: NAMESPACE })
+    .grant(inventoryGrant)
+    .build(),
+  definePermissionSet('sales')
+    .title({ key: 'permissionSets.business.sales', ns: NAMESPACE })
+    .grant(partnerGrant('customers'))
+    .build(),
+  definePermissionSet('purchase')
+    .title({ key: 'permissionSets.business.purchase', ns: NAMESPACE })
+    .grant(partnerGrant('suppliers'))
+    .build(),
 ];
 
 /**
- * 把四个角色写进权限集表，返回这一次新建的 key。
+ * 把七个角色写进权限集表，返回这一次新建的 key。
  *
  * seed 的 run 只做这一件事：开发服务器可能在文件写入后立刻执行这颗 seed，
  * 逻辑放在这里，单元测试可以直接断言它写入的形状与幂等行为。

@@ -13,6 +13,16 @@ import {
   employees as employeesResource,
 } from '../employees-resources.js';
 import { FQC_COLLECTIONS, fqc } from '../fqc-resources.js';
+import {
+  INVENTORY_COLLECTIONS,
+  inventory as inventoryResource,
+} from '../inventory-resources.js';
+import {
+  PARTNER_COLLECTIONS,
+  customers as customersResource,
+  suppliers as suppliersResource,
+} from '../partner-resources.js';
+import { ITEM_COLLECTIONS, items as itemsResource } from '../items-resources.js';
 import { SHIFT_COLLECTIONS, shifts as shiftsResource } from '../shift-resources.js';
 import { departmentServiceToken } from './departments.js';
 
@@ -24,8 +34,9 @@ import { departmentServiceToken } from './departments.js';
  * 声明在 server/fqc-resources.ts、server/department-resources.ts、
  * server/employees-resources.ts、server/shift-resources.ts、
  * server/approvals-resources.ts 与 server/department-record-access.ts，这里只做注册：
- * 三张 FQC 表、三张部门表、四张员工表、一张班次表、三张审批表、`fqc`、`departments`、
- * `employees` 与 `shifts` 四个业务资源、两把部门范围键、工作区的分节与条目。
+ * FQC、部门、员工、班次、物料、往来单位、审批、库存的表，以及 `fqc`、`departments`、`employees`、
+ * `shifts`、`items`、`customers`、`suppliers` 与 `inventory` 业务资源、两把部门范围键、工作区分节。
+ * R-019 的物料三张表与 `items` 资源在这里登记，默认不给任何业务角色授权（只有 root）。
  * 注册只描述能做什么，不给任何人授权；初始角色由 seed 建。
  */
 export default class AuthorizationResourcesProvider extends ServiceProvider<AppPluginApplication> {
@@ -47,6 +58,9 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
       ...EMPLOYEE_COLLECTIONS,
       ...APPROVAL_COLLECTIONS,
       ...SHIFT_COLLECTIONS,
+      ...PARTNER_COLLECTIONS,
+      ...ITEM_COLLECTIONS,
+      ...INVENTORY_COLLECTIONS,
     ]) {
       authz.database.collections.add(collection);
     }
@@ -58,6 +72,11 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
       employeesResource,
     );
     const shiftsReference = authz.compositeResources.define(shiftsResource);
+    const customersReference = authz.compositeResources.define(customersResource);
+    const suppliersReference = authz.compositeResources.define(suppliersResource);
+    const itemsReference = authz.compositeResources.define(itemsResource);
+    // R-020：库存资源只声明，不 ui.place —— 本片没有页面，也不改角色编辑器目录。
+    authz.compositeResources.define(inventoryResource);
     const departmentService = this.app.container.resolve(
       departmentServiceToken,
     );
@@ -74,10 +93,18 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
       title: { key: 'authorization.sections.organization', ns: 'app-local' },
       parent: 'business',
     });
+    authz.ui.sections.add({
+      name: 'materials',
+      title: { key: 'authorization.sections.materials', ns: 'app-local' },
+      parent: 'business',
+    });
     authz.ui.place(reference, { section: 'quality' });
     authz.ui.place(departmentsReference, { section: 'organization' });
     authz.ui.place(employeesReference, { section: 'organization' });
     authz.ui.place(shiftsReference, { section: 'organization' });
+    authz.ui.place(customersReference, { section: 'organization' });
+    authz.ui.place(suppliersReference, { section: 'organization' });
+    authz.ui.place(itemsReference, { section: 'materials' });
     this.registered = true;
     return Promise.resolve();
   }

@@ -747,18 +747,57 @@ const zhCN: AppResource = {
         manage: '管理班次',
       },
     },
+    // R-020：库存是独立业务资源；本片不做页面，也不进角色编辑器目录。
+    inventory: {
+      title: '库存',
+      tables: {
+        warehouses: '仓库',
+        stockDocs: '库存单据',
+        stockDocLines: '单据明细',
+        stockBalances: '现存量',
+        stockTransactions: '库存流水',
+      },
+      actions: {
+        warehouseView: '查看仓库',
+        warehouseManage: '管理仓库',
+        stockView: '查看库存单据与现存量',
+        stockWrite: '编辑库存单据',
+        stockPost: '过账库存单据',
+        stockVoid: '作废库存单据',
+      },
+    },
     recordAccess: {
       myDepartments: '本部门',
       myDepartmentsAndBelow: '本部门及下级',
     },
   },
-  // R-013：seed 建的四个业务角色的名称。
+  // R-013：seed 建的业务角色的名称。
   permissionSets: {
     business: {
       qualityManager: '质量主管',
       qualityInspector: '质量员',
       deptManager: '部门主管',
       staff: '普通员工',
+      warehouse: '仓管',
+    },
+  },
+  // R-020：规则码文案；端点在缺键时用 defaultValue 兜底。
+  inventory: {
+    errors: {
+      warehouseInvalid: '仓库编码或名称不合法。',
+      warehouseCodeExists: '仓库编码已被占用。',
+      warehouseNotFound: '仓库不存在。',
+      warehouseCodeImmutable: '仓库编码不可修改。',
+      warehouseInactive: '仓库已停用。',
+      itemInactive: '物料已停用。',
+      itemNotFound: '物料不存在。',
+      lineInvalid: '单据明细不合法。',
+      docInvalid: '单据不合法。',
+      docReasonInvalid: '事由与单据类型不相配。',
+      docNotFound: '单据不存在。',
+      docNotDraft: '只有草稿单据可以修改。',
+      insufficient: '现存量不足，整单已回滚。',
+      emptyUpdate: '至少要带一项要改的字段。',
     },
   },
   // R-037：头像菜单里那段开发环境专用的账户切换。

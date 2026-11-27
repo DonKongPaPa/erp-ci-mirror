@@ -1,14 +1,18 @@
 import ApiKeysPolicyProvider from './api-keys-policy.js';
 import AuthorizationResourcesProvider from './authorization-resources.js';
+import CodesProvider from './codes.js';
 import DepartmentMutationsProvider from './department-mutations.js';
 import DepartmentProvider from './departments.js';
 import DevAccountSwitcherProvider from './dev-account-switcher.js';
 import EmployeesProvider from './employee-service.js';
 import EmployeeMutationsProvider from './employees.js';
 import FeedbackReminderProvider from './feedback-reminder.js';
+import InventoryProvider from './inventory.js';
+import ItemsProvider from './items.js';
 import KnowledgeAccessProvider from './knowledge-access.js';
 import LifecycleProvider from './lifecycles.js';
 import NotificationManagementProvider from './notification-management.js';
+import PartnersProvider from './partners.js';
 import QualityDraftingProvider from './quality-drafting.js';
 import QualityModelGatewayProvider from './quality-model-gateway.js';
 import QualityScreeningProvider from './quality-screening.js';
@@ -20,6 +24,8 @@ import type { ApplicationServiceProviderConstructor } from '@nocobase/app-server
 
 const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
   SubmissionProvider,
+  // R-016：统一发号器，内部服务；没有页面与端点，顺序无关。
+  CodesProvider,
   // R-026：七天提醒，进程内每天一次的扫单任务。
   FeedbackReminderProvider,
   DepartmentProvider,
@@ -29,6 +35,12 @@ const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
   EmployeeMutationsProvider,
   // R-025：内部只读服务、HTTP 读服务与写服务。无调用方时也能被容器解析。
   ShiftsProvider,
+  // R-014：往来单位的读服务与写服务；发号器由 CodesProvider 提供，顺序无关。
+  PartnersProvider,
+  // R-019：物料、单位、分类的读服务与写服务；发号器由 CodesProvider 提供。
+  ItemsProvider,
+  // R-020：仓库、单据、现存量与流水的读服务与写服务；过账在写服务里取行锁。
+  InventoryProvider,
   AuthorizationResourcesProvider,
   NotificationManagementProvider,
   QualityScreeningProvider,

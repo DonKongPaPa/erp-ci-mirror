@@ -4,6 +4,8 @@ import AuthzExport from './export.js';
 import AuthzImport from './import.js';
 import AuthzUpgradeR002 from './upgrade-r002.js';
 import AuthzUpgradeR003 from './upgrade-r003.js';
+import AuthzUpgradeR014 from './upgrade-r014.js';
+import AuthzUpgradeR020 from './upgrade-r020.js';
 import AuthzUpgradeR026 from './upgrade-r026.js';
 import AuthzUpgradeR025 from './upgrade-r025.js';
 
@@ -25,10 +27,14 @@ const authzCli = defineCliPlugin({
     'upgrade-r002': AuthzUpgradeR002,
     // R-003：给已有环境补「处理工单」与「维护派单规则」，可单独跑、可重跑。
     'upgrade-r003': AuthzUpgradeR003,
+    // R-014：给已有环境的销售/采购补客户/供应商授权。可单独跑、可重跑。
+    'upgrade-r014': AuthzUpgradeR014,
     // R-026：给三个角色补反馈单页与两个新动作，给存量的人补 staff。可单独跑、可重跑。
     'upgrade-r026': AuthzUpgradeR026,
     // R-025：给已有环境的 staff 补班次只读授权。可单独跑、可重跑。
     'upgrade-r025': AuthzUpgradeR025,
+    // R-020：给已有环境的 warehouse 补库存授权。可单独跑、可重跑。
+    'upgrade-r020': AuthzUpgradeR020,
   },
 });
 

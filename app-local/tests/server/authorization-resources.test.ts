@@ -1320,6 +1320,19 @@ test('R-013: booting the authorization resources provider twice registers once',
     ...APPROVAL_TABLES,
     // R-025 S1：班次定义一张表，独立 composite 资源。
     'shifts',
+    // R-014：往来单位两张表（main 已并入，这里的钉子此前漏了）。
+    'partners',
+    'partnerContacts',
+    // R-019：物料三张表（main 已并入，这里的钉子此前漏了）。
+    'units',
+    'itemCategories',
+    'items',
+    // R-020：仓库与库存五张表。
+    'warehouses',
+    'stockDocs',
+    'stockDocLines',
+    'stockBalances',
+    'stockTransactions',
   ]);
   expect(registered.composites.map((composite) => composite.name)).toContain(
     'fqc',

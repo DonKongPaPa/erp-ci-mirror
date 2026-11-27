@@ -799,18 +799,57 @@ const enUS = {
         manage: 'Manage shifts',
       },
     },
+    // R-020: inventory is its own business resource; no page placement in this MVP.
+    inventory: {
+      title: 'Inventory',
+      tables: {
+        warehouses: 'Warehouses',
+        stockDocs: 'Stock documents',
+        stockDocLines: 'Stock document lines',
+        stockBalances: 'Stock balances',
+        stockTransactions: 'Stock transactions',
+      },
+      actions: {
+        warehouseView: 'View warehouses',
+        warehouseManage: 'Manage warehouses',
+        stockView: 'View stock documents and balances',
+        stockWrite: 'Write stock documents',
+        stockPost: 'Post stock documents',
+        stockVoid: 'Void stock documents',
+      },
+    },
     recordAccess: {
       myDepartments: 'My departments',
       myDepartmentsAndBelow: 'My departments and below',
     },
   },
-  // R-013: the names of the four business permission sets the seed creates.
+  // R-013: the names of the business permission sets the seed creates.
   permissionSets: {
     business: {
       qualityManager: 'Quality manager',
       qualityInspector: 'Quality inspector',
       deptManager: 'Department manager',
       staff: 'Staff',
+      warehouse: 'Warehouse keeper',
+    },
+  },
+  // R-020: rule-code messages; defaultValue in the route covers any missing key.
+  inventory: {
+    errors: {
+      warehouseInvalid: 'The warehouse code or name is invalid.',
+      warehouseCodeExists: 'The warehouse code is already in use.',
+      warehouseNotFound: 'The warehouse does not exist.',
+      warehouseCodeImmutable: 'The warehouse code cannot be changed.',
+      warehouseInactive: 'The warehouse is inactive.',
+      itemInactive: 'The item is inactive.',
+      itemNotFound: 'The item does not exist.',
+      lineInvalid: 'A document line is invalid.',
+      docInvalid: 'The document is invalid.',
+      docReasonInvalid: 'The reason does not match the document type.',
+      docNotFound: 'The document does not exist.',
+      docNotDraft: 'Only a draft document can be changed.',
+      insufficient: 'Insufficient stock; the whole document was rolled back.',
+      emptyUpdate: 'At least one field is required.',
     },
   },
   // R-037: the development-only account switch in the avatar menu.

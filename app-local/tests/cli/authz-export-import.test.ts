@@ -8,6 +8,8 @@ import { expect, test, vi } from 'vitest';
 import AuthzExport from '../../cli/authz/export.js';
 import AuthzImport from '../../cli/authz/import.js';
 import AuthzUpgradeR002 from '../../cli/authz/upgrade-r002.js';
+import AuthzUpgradeR014 from '../../cli/authz/upgrade-r014.js';
+import AuthzUpgradeR020 from '../../cli/authz/upgrade-r020.js';
 import AuthzUpgradeR025 from '../../cli/authz/upgrade-r025.js';
 import AuthzUpgradeR026 from '../../cli/authz/upgrade-r026.js';
 import cliPlugins from '../../cli/plugins.js';
@@ -33,6 +35,8 @@ test('R-013: the authz commands are registered under their own topic', () => {
     'import',
     'upgrade-r002',
     'upgrade-r003',
+    'upgrade-r014',
+    'upgrade-r020',
     'upgrade-r025',
     'upgrade-r026',
   ]);
@@ -47,6 +51,12 @@ test('R-013: the authz commands are registered under their own topic', () => {
   // R-025 的升级步骤：给已有环境的 staff 补班次只读授权，可单独跑、可重跑。
   expect(plugin!.commands['upgrade-r025']).toBe(AuthzUpgradeR025);
   expect(AuthzUpgradeR025.description).toContain('shifts.view');
+  // R-020 的升级步骤：给已有环境的 warehouse 补库存授权，可单独跑、可重跑。
+  expect(plugin!.commands['upgrade-r014']).toBe(AuthzUpgradeR014);
+  expect(plugin!.commands['upgrade-r020']).toBe(AuthzUpgradeR020);
+  expect(AuthzUpgradeR020.description).toContain('inventory');
+  // R-014 的升级步骤：给销售/采购补客户/供应商授权。
+  expect(AuthzUpgradeR014.description).toContain('customers');
 });
 
 test('R-013: the import help explains how to unblock rules that exchange resources', () => {
@@ -547,10 +557,13 @@ test(
       ).toEqual([
         'dept_manager',
         'member',
+        'purchase',
         'quality_inspector',
         'quality_manager',
         'root',
+        'sales',
         'staff',
+        'warehouse',
       ]);
       for (const set of document.permissionSets) {
         expect(typeof set.revision).toBe('string');

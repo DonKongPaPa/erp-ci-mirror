@@ -151,6 +151,36 @@ const shiftsViewGrant = {
   actions: [{ action: 'view' }],
 };
 
+/** R-014：销售只拿 customers，采购只拿 suppliers，各三个动作。 */
+const customerGrant = {
+  resource: { type: 'composite', id: 'customers' },
+  actions: [
+    { action: 'view' },
+    { action: 'create' },
+    { action: 'update' },
+  ],
+};
+const supplierGrant = {
+  resource: { type: 'composite', id: 'suppliers' },
+  actions: [
+    { action: 'view' },
+    { action: 'create' },
+    { action: 'update' },
+  ],
+};
+
+/** R-020：仓管五个库存动作，不含 warehouseManage，没有页面授权。 */
+const inventoryGrant = {
+  resource: { type: 'composite', id: 'inventory' },
+  actions: [
+    { action: 'warehouseView' },
+    { action: 'stockView' },
+    { action: 'stockWrite' },
+    { action: 'stockPost' },
+    { action: 'stockVoid' },
+  ],
+};
+
 const expectedRoles = {
   quality_manager: {
     title: { key: 'permissionSets.business.qualityManager', ns: 'app-local' },
@@ -189,6 +219,18 @@ const expectedRoles = {
     title: { key: 'permissionSets.business.staff', ns: 'app-local' },
     grants: [feedbackPageGrant, fqcSubmit, shiftsViewGrant],
   },
+  warehouse: {
+    title: { key: 'permissionSets.business.warehouse', ns: 'app-local' },
+    grants: [inventoryGrant],
+  },
+  sales: {
+    title: { key: 'permissionSets.business.sales', ns: 'app-local' },
+    grants: [customerGrant],
+  },
+  purchase: {
+    title: { key: 'permissionSets.business.purchase', ns: 'app-local' },
+    grants: [supplierGrant],
+  },
 } as const;
 
 const roleKeys = Object.keys(expectedRoles);
@@ -201,7 +243,7 @@ const test = createAppTest({
   },
 });
 
-test('R-013: declares the keys, titles and grants of the four designed roles', () => {
+test('R-013: declares the keys, titles and grants of the designed roles', () => {
   expect(businessPermissionSets.map((set) => set.key)).toEqual(roleKeys);
   for (const set of businessPermissionSets) {
     const expected = expectedRoles[set.key as keyof typeof expectedRoles];
@@ -210,7 +252,7 @@ test('R-013: declares the keys, titles and grants of the four designed roles', (
   }
 });
 
-test('R-013: the seed creates the four roles as the design describes them', async ({
+test('R-013: the seed creates the designed roles', async ({
   app,
 }) => {
   const sets = app.container.resolve(authorizationToken).permissionSets;
@@ -386,7 +428,7 @@ test('R-013: does not create the same role twice and keeps administrator changes
       .select(['key', 'grants'])
       .where('key', 'in', roleKeys)
       .execute();
-  expect((await rowsFor()).length).toBe(4);
+  expect((await rowsFor()).length).toBe(roleKeys.length);
 
   // 管理员改了 quality_manager 的授权，删掉另外两个角色，模拟“一部分已存在”。
   const changedGrants = [
@@ -408,7 +450,7 @@ test('R-013: does not create the same role twice and keeps administrator changes
   ).toEqual(['dept_manager', 'quality_inspector']);
 
   const rows = await rowsFor();
-  expect(rows.length).toBe(4);
+  expect(rows.length).toBe(roleKeys.length);
   expect(rows.filter((row) => row.key === 'quality_manager').length).toBe(1);
   const stored = await sets.list();
   expect(stored.find((set) => set.key === 'quality_manager')?.grants).toEqual(
@@ -429,7 +471,7 @@ test('R-013: writes no grant on the user resource for any business role', async 
     .select(['key', 'grants'])
     .where('key', 'in', roleKeys)
     .execute();
-  expect(rows.length).toBe(4);
+  expect(rows.length).toBe(roleKeys.length);
   for (const row of rows) {
     const grants = JSON.parse(String(row.grants)) as {
       resource: { type: string; id: string };

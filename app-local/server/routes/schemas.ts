@@ -757,3 +757,264 @@ export const UpdateShiftBody = z
     sortOrder: z.number().int().optional(),
   })
   .passthrough();
+
+/**
+ * R-014 MVP：往来单位。请求体不收 `code`（由底座发号器发），响应逐列列出，
+ * 始终没有 createdById（人员标识）；联系方式是业务字段，允许出现。
+ */
+const partnerName = z.string().trim().min(1).max(128);
+const nullablePartnerText = (max: number) =>
+  z.union([z.string().trim().min(1).max(max), z.null()]).optional();
+
+export const PartnerSchema = z.object({
+  id: z.string(),
+  code: z.string(),
+  name: z.string(),
+  isCustomer: z.boolean(),
+  isSupplier: z.boolean(),
+  status: z.enum(['active', 'inactive']),
+  contactName: z.string().nullable(),
+  phone: z.string().nullable(),
+  email: z.string().nullable(),
+  address: z.string().nullable(),
+  taxId: z.string().nullable(),
+  note: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const ContactSchema = z.object({
+  id: z.string(),
+  partnerId: z.string(),
+  name: z.string(),
+  title: z.string().nullable(),
+  phone: z.string().nullable(),
+  email: z.string().nullable(),
+  isPrimary: z.boolean(),
+});
+
+export const PartnerDetailSchema = PartnerSchema.extend({
+  contacts: z.array(ContactSchema),
+});
+
+export const PartnerListSchema = z.object({
+  items: z.array(PartnerSchema),
+  total: z.number(),
+  page: z.number(),
+  pageSize: z.number(),
+});
+
+/** kind 过滤 isCustomer / isSupplier；status 不传表示全部；q 匹配名称与编码。 */
+export const PartnerListQuery = z.object({
+  kind: z.enum(['customer', 'supplier']).optional(),
+  q: z.string().min(1).max(128).optional(),
+  status: z.enum(['active', 'inactive']).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+export type PartnerListQueryInput = z.infer<typeof PartnerListQuery>;
+
+/**
+ * 两个标志都不给时不在 schema 层拒，交给服务抛 422 PARTNER_KIND_REQUIRED，
+ * 这样无授权的人先被 403 拦下、拿不到规则码（照 routes/shifts.ts）。
+ */
+export const CreatePartnerBody = z.object({
+  name: partnerName,
+  isCustomer: z.boolean().default(false),
+  isSupplier: z.boolean().default(false),
+  contactName: nullablePartnerText(128),
+  phone: nullablePartnerText(64),
+  email: nullablePartnerText(254),
+  address: nullablePartnerText(512),
+  taxId: nullablePartnerText(64),
+  note: nullablePartnerText(2000),
+});
+export type CreatePartnerInput = z.infer<typeof CreatePartnerBody>;
+
+export const UpdatePartnerBody = z.object({
+  name: partnerName.optional(),
+  status: z.enum(['active', 'inactive']).optional(),
+  contactName: nullablePartnerText(128),
+  phone: nullablePartnerText(64),
+  email: nullablePartnerText(254),
+  address: nullablePartnerText(512),
+  taxId: nullablePartnerText(64),
+  note: nullablePartnerText(2000),
+});
+export type UpdatePartnerInput = z.infer<typeof UpdatePartnerBody>;
+
+export const CreateContactBody = z.object({
+  name: partnerName,
+  title: nullablePartnerText(128),
+  phone: nullablePartnerText(64),
+  email: nullablePartnerText(254),
+  isPrimary: z.boolean().optional(),
+});
+export type CreateContactInput = z.infer<typeof CreateContactBody>;
+
+export const UpdateContactBody = z.object({
+  name: partnerName.optional(),
+  title: nullablePartnerText(128),
+  phone: nullablePartnerText(64),
+  email: nullablePartnerText(254),
+  isPrimary: z.boolean().optional(),
+});
+export type UpdateContactInput = z.infer<typeof UpdateContactBody>;
+
+/* -------------------------------------------------------------------------- */
+/* R-019 MVP：物料主数据（物料 / 计量单位 / 物料分类）                          */
+/* -------------------------------------------------------------------------- */
+
+/** 状态与类型是封闭枚举；前端照这些字面量做筛选与表单。 */
+const itemStatus = z.enum(['active', 'inactive']);
+const itemTypeValue = z.enum(['material', 'product']);
+
+/** 可空文本：不给键是不动，null 是清掉，空串是 400（同反馈单的写法）。 */
+const itemNullableText = (max: number) =>
+  z.union([z.string().trim().min(1).max(max), z.null()]).optional();
+
+const itemCode = z.string().min(1).max(64);
+const unitCodeValue = z.string().trim().min(1).max(16);
+const categoryCodeValue = z.string().trim().min(1).max(32);
+const itemName = z.string().trim().min(1).max(128);
+const unitName = z.string().trim().min(1).max(64);
+const idValue = z.string().trim().min(1).max(64);
+const decimals = z.number().int().min(0).max(10);
+
+/** 列表共用的分页与搜索；q 是不区分大小写的包含匹配。 */
+const listPaging = {
+  q: z.string().min(1).max(64).optional(),
+  status: itemStatus.optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+};
+
+export const ItemListQuery = z.object({
+  ...listPaging,
+  itemType: itemTypeValue.optional(),
+  categoryCode: z.string().min(1).max(32).optional(),
+});
+export type ItemListQueryInput = z.infer<typeof ItemListQuery>;
+
+export const DictionaryListQuery = z.object(listPaging);
+export type DictionaryListQueryInput = z.infer<typeof DictionaryListQuery>;
+
+export const ItemSchema = z.object({
+  id: z.string(),
+  code: itemCode,
+  name: itemName,
+  spec: z.string().nullable(),
+  itemType: itemTypeValue,
+  categoryCode: z.string().nullable(),
+  unitCode: unitCodeValue,
+  status: itemStatus,
+  legacyCode: z.string().nullable(),
+  note: z.string().nullable(),
+  createdById: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const UnitSchema = z.object({
+  code: unitCodeValue,
+  name: unitName,
+  decimals: z.number().int(),
+  status: itemStatus,
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const CategorySchema = z.object({
+  id: z.string(),
+  code: categoryCodeValue,
+  name: unitName,
+  parentId: z.string().nullable(),
+  status: itemStatus,
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const ItemListSchema = z.object({
+  items: z.array(ItemSchema),
+  total: z.number(),
+  page: z.number(),
+  pageSize: z.number(),
+});
+export const UnitListSchema = z.object({
+  items: z.array(UnitSchema),
+  total: z.number(),
+  page: z.number(),
+  pageSize: z.number(),
+});
+export const CategoryListSchema = z.object({
+  items: z.array(CategorySchema),
+  total: z.number(),
+  page: z.number(),
+  pageSize: z.number(),
+});
+
+/**
+ * 建物料不收 code：编码由 R-016 发号服务在服务端事务里发。
+ * 请求体里带了 code 也被 z.object 剥掉，不在入库值里出现。
+ */
+export const CreateItemBody = z.object({
+  name: itemName,
+  itemType: itemTypeValue,
+  unitCode: unitCodeValue,
+  spec: itemNullableText(128),
+  categoryCode: itemNullableText(32),
+  legacyCode: itemNullableText(64),
+  note: itemNullableText(2000),
+});
+export type CreateItemInput = z.infer<typeof CreateItemBody>;
+
+/**
+ * PATCH 用 passthrough：带 code 要由端点映射成 422 ITEM_CODE_IMMUTABLE，
+ * 空请求体要映射成 422 ITEM_EMPTY_PATCH，不能在这里变成 400。
+ */
+export const UpdateItemBody = z
+  .object({
+    name: itemName.optional(),
+    itemType: itemTypeValue.optional(),
+    unitCode: unitCodeValue.optional(),
+    spec: itemNullableText(128),
+    categoryCode: itemNullableText(32),
+    status: itemStatus.optional(),
+    legacyCode: itemNullableText(64),
+    note: itemNullableText(2000),
+  })
+  .passthrough();
+export type UpdateItemInput = z.infer<typeof UpdateItemBody>;
+
+export const CreateUnitBody = z.object({
+  code: unitCodeValue,
+  name: unitName,
+  decimals: decimals.optional(),
+});
+export type CreateUnitInput = z.infer<typeof CreateUnitBody>;
+
+export const UpdateUnitBody = z
+  .object({
+    name: unitName.optional(),
+    decimals: decimals.optional(),
+    status: itemStatus.optional(),
+  })
+  .passthrough();
+export type UpdateUnitInput = z.infer<typeof UpdateUnitBody>;
+
+export const CreateCategoryBody = z.object({
+  id: idValue,
+  code: categoryCodeValue,
+  name: unitName,
+  parentId: z.string().trim().min(1).max(64).nullable().optional(),
+});
+export type CreateCategoryInput = z.infer<typeof CreateCategoryBody>;
+
+export const UpdateCategoryBody = z
+  .object({
+    name: unitName.optional(),
+    parentId: z.string().trim().min(1).max(64).nullable().optional(),
+    status: itemStatus.optional(),
+  })
+  .passthrough();
+export type UpdateCategoryInput = z.infer<typeof UpdateCategoryBody>;
