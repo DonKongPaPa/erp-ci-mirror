@@ -30,7 +30,10 @@ const enUS = {
     partners: 'Customers & suppliers',
     inventory: 'Items & inventory',
     items: 'Items',
-  },
+    stock: 'Stock',
+    inboundOrders: 'Inbound orders',
+    outboundOrders: 'Outbound orders',
+    warehouses: 'Warehouses',  },
   settings: {
     ...systemEnUS.settings,
     // The three child routes that inherit their parent's page grant still need permission titles.
@@ -843,6 +846,178 @@ const enUS = {
     },
   },
   // R-012: the department maintenance page. Rejections say what to do next, not just what failed.
+  // R-020 仓库页（《基座ERP前端设计》3.3）。仓库不设详情：字段太少，列表里已经看全。
+  warehouses: {
+    title: 'Warehouses',
+    description:
+      'Maintain the warehouse master data. The code cannot be changed once created, and a warehouse is deactivated, never deleted.',
+    new: 'New warehouse',
+    searchLabel: 'Search by code or name',
+    empty: 'No warehouses yet',
+    form: {
+      newTitle: 'New warehouse',
+      newDescription: 'The code cannot be changed later.',
+      editTitle: 'Edit warehouse',
+      editDescription: 'The code {{code}} cannot be changed.',
+      codeHint:
+        'Uppercase letters, digits, hyphens or underscores. It cannot be changed later.',
+    },
+    createdToast: 'Created warehouse "{{name}}"',
+    savedToast: 'Saved warehouse "{{name}}"',
+    activatedToast: 'Activated warehouse "{{name}}"',
+    deactivatedToast: 'Deactivated warehouse "{{name}}"',
+    deactivateTitle: 'Deactivate warehouse "{{name}}"?',
+    deactivateDescription:
+      'It can no longer be chosen on new documents. Existing documents and stock are not affected.',
+    errors: {
+      invalidCode:
+        'Use 1–32 uppercase letters, digits, hyphens or underscores, starting with a letter or digit.',
+      invalidName: 'The name must be 1–128 characters after trimming.',
+      noteTooLong: 'The note must be at most 500 characters.',
+    },
+  },
+  // R-020 库存查询（《基座ERP前端设计》3.3）：现存量、流水两个标签，只读。
+  stock: {
+    title: 'Stock',
+    description:
+      'On hand lists stock by item, warehouse and batch; the ledger holds one record per posting. Read only: stock changes only when an inbound or outbound order is posted.',
+    tabs: { balance: 'On hand', ledger: 'Ledger' },
+    empty: { balance: 'No stock on hand yet', ledger: 'No postings yet' },
+    searchLabel: 'Search by batch number',
+    filters: { item: 'Item', warehouse: 'Warehouse', from: 'From', to: 'To' },
+    columns: {
+      time: 'Time',
+      docType: 'Type',
+      docNo: 'Document',
+      item: 'Item',
+      itemCode: 'Item code',
+      itemName: 'Item name',
+      spec: 'Specification',
+      unit: 'Unit',
+      warehouse: 'Warehouse',
+      batch: 'Batch',
+      qty: 'On hand',
+      in: 'In',
+      out: 'Out',
+      balance: 'Balance',
+    },
+    docType: { in: 'Inbound order', out: 'Outbound order' },
+    lookupDenied:
+      'Item and warehouse names cannot be shown because your role cannot read their lists; identifiers are shown instead.',
+  },
+  // R-020 入库单、出库单（《基座ERP前端设计》2.4、3.3）：同一个骨架，in / out 两组是各自的那几句话。
+  stockDocs: {
+    detail: 'Stock document',
+    reasons: {
+      purchase_receipt: 'Purchase receipt',
+      sales_issue: 'Sales issue',
+      other_in: 'Other inbound',
+      other_out: 'Other outbound',
+    },
+    source: {
+      purchase_order: 'From purchase order',
+      sales_order: 'From sales order',
+      manual: 'Entered manually',
+    },
+    status: { draft: 'Draft', posted: 'Posted', void: 'Void' },
+    searchLabel: 'Search by document number or remark',
+    filters: { status: 'Status', from: 'Created from', to: 'Created to' },
+    empty: 'No documents yet',
+    noLines: 'No lines',
+    columns: {
+      docNo: 'Document',
+      typeAndSource: 'Type and source',
+      createdAt: 'Created',
+      item: 'Item',
+      warehouse: 'Warehouse',
+      batch: 'Batch',
+      qty: 'Quantity',
+      onHand: 'On hand',
+      unit: 'Unit',
+    },
+    fields: {
+      reason: 'Type',
+      source: 'Source document',
+      createdAt: 'Created',
+      postedAt: 'Posted',
+    },
+    header: 'Header',
+    lines: 'Lines',
+    lineCount: '{{lines}} line(s)',
+    post: 'Post',
+    void: 'Void',
+    saveDraft: 'Save draft',
+    cancel: 'Cancel',
+    addLine: 'Add line',
+    removeLine: 'Remove line {{row}}',
+    lineItem: 'Item, line {{row}}',
+    lineWarehouse: 'Warehouse, line {{row}}',
+    lineBatch: 'Batch, line {{row}}',
+    lineQty: 'Quantity, line {{row}}',
+    pickItem: 'Choose an item',
+    pickWarehouse: 'Choose a warehouse',
+    batchPlaceholder: 'Optional',
+    savedToast: 'Saved as a draft',
+    editDescription:
+      '{{docNo}}: only a draft can be changed, and it stays a draft after saving.',
+    voidDescription:
+      'Only a draft can be voided. A void document does not affect stock and cannot be posted.',
+    voidStatus:
+      'This document is void. It does not affect stock and cannot be posted.',
+    postedWith: 'Posted at {{time}}.',
+    viewStock: 'View stock',
+    shortage:
+      '{{lines}} line(s) exceed the on-hand quantity. Change the quantity or the warehouse first.',
+    overBy: '{{onHand}} (exceeds by {{over}})',
+    loadingStock: '…',
+    lookupDenied:
+      'Your role cannot read the list of items or warehouses, so lines cannot be chosen. Ask an administrator.',
+    in: {
+      title: 'Inbound orders',
+      new: 'New inbound order',
+      description:
+        'Stock increases only when an inbound order is posted. Types: purchase receipt (generated from a purchase order) and other inbound (entered by hand).',
+      newTitle: 'New inbound order',
+      editTitle: 'Edit inbound order',
+      formDescription: 'Saving keeps it a draft; stock does not change until it is posted.',
+      formHint:
+        'Quantities are in the item’s base unit, with at most four decimals. Leave the batch empty if there is none.',
+      draftStatus: 'This is a draft. Stock increases only when it is posted.',
+      postedStatus: 'Posted. Stock has increased.',
+      postTitle: 'Post {{docNo}}?',
+      postDescription:
+        'After posting, the document can no longer be changed or voided, and stock increases immediately.',
+      postedToast: 'Posted {{docNo}}. Stock has increased.',
+      voidTitle: 'Void {{docNo}}?',
+      voidedToast: 'Voided {{docNo}}',
+    },
+    out: {
+      title: 'Outbound orders',
+      new: 'New outbound order',
+      description:
+        'Stock decreases only when an outbound order is posted. No line may exceed the on-hand quantity of its warehouse.',
+      newTitle: 'New outbound order',
+      editTitle: 'Edit outbound order',
+      formDescription: 'Saving keeps it a draft; stock does not change until it is posted.',
+      formHint:
+        'When posted, no line may exceed the on-hand quantity of its warehouse; a line that does is marked in red and the document cannot be posted.',
+      draftStatus: 'This is a draft. Stock decreases only when it is posted.',
+      postedStatus: 'Posted. Stock has decreased.',
+      postTitle: 'Post {{docNo}}?',
+      postDescription:
+        'After posting, the document can no longer be changed or voided, and stock decreases immediately.',
+      postedToast: 'Posted {{docNo}}. Stock has decreased.',
+      voidTitle: 'Void {{docNo}}?',
+      voidedToast: 'Voided {{docNo}}',
+    },
+    errors: {
+      requiredLine: 'Add at least one line.',
+      invalidQty:
+        'Enter a quantity greater than 0, with at most four decimals.',
+      batchTooLong: 'The batch must be at most 64 characters.',
+      remarkTooLong: 'The remark must be at most 1000 characters.',
+    },
+  },
   departments: {
     tree: 'Department tree',
     details: 'Department details',

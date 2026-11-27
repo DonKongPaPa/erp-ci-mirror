@@ -68,12 +68,20 @@ const partnersPageGrant = {
   actions: [{ action: 'access' }],
 };
 
+const pageGrantOf = (id: string) => ({
+  resource: { type: 'page', id },
+  actions: [{ action: 'access' }],
+});
+/** R-020 页面片：仓库页给仓管、采购、销售；库存查询、入库单、出库单只给仓管。 */
+const warehousesPageGrant = pageGrantOf('warehouses');
+const stockPageGrant = pageGrantOf('stock');
+const inboundOrdersPageGrant = pageGrantOf('inboundOrders');
+const outboundOrdersPageGrant = pageGrantOf('outboundOrders');
 /** R-019 页面片：物料页的页面授权，销售与采购各一条；写（items.manage）不给任何业务角色。 */
 const itemsPageGrant = {
   resource: { type: 'page', id: 'items' },
   actions: [{ action: 'access' }],
 };
-
 /** R-002：知识库的业务键是 `{ type: 'kb', id: 'kb.knowledge' }`，动作名带档位。 */
 const knowledgeGrant = (action: 'manage.related' | 'propose.related') => ({
   resource: { type: 'kb', id: 'kb.knowledge' },
@@ -206,7 +214,7 @@ const orderWarehouseRead = {
   actions: [{ action: 'warehouseView' }],
 };
 
-/** R-020：仓管五个库存动作，不含 warehouseManage，没有页面授权。 */
+/** R-020：仓管五个库存动作，不含 warehouseManage。 */
 const inventoryGrant = {
   resource: { type: 'composite', id: 'inventory' },
   actions: [
@@ -258,29 +266,33 @@ const expectedRoles = {
   },
   warehouse: {
     title: { key: 'permissionSets.business.warehouse', ns: 'app-local' },
-    grants: [inventoryGrant],
+    grants: [
+      warehousesPageGrant,
+      stockPageGrant,
+      inboundOrdersPageGrant,
+      outboundOrdersPageGrant,
+      inventoryGrant,
+    ],
   },
   sales: {
     title: { key: 'permissionSets.business.sales', ns: 'app-local' },
     grants: [
       partnersPageGrant,
-      customerGrant,
+      warehousesPageGrant,      customerGrant,
       salesOrderGrant,
       orderItemRead,
       orderWarehouseRead,
-      itemsPageGrant,
-    ],
+      itemsPageGrant,    ],
   },
   purchase: {
     title: { key: 'permissionSets.business.purchase', ns: 'app-local' },
     grants: [
       partnersPageGrant,
-      supplierGrant,
+      warehousesPageGrant,      supplierGrant,
       purchaseOrderGrant,
       orderItemRead,
       orderWarehouseRead,
-      itemsPageGrant,
-    ],
+      itemsPageGrant,    ],
   },
 } as const;
 

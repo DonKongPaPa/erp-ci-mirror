@@ -23,6 +23,9 @@ export const pagePermissionTitles: PagePermissionTitles = {
   partnerEdit: 'partners.form.editTitle',
   partnerContactNew: 'partners.contact.addTitle',
   partnerContactEdit: 'partners.contact.editTitle',
+  // R-020：仓库的新建、编辑是对话框，继承列表页的页面授权；单据的子页有自己的面包屑标题。
+  warehouseNew: 'warehouses.form.newTitle',
+  warehouseEdit: 'warehouses.form.editTitle',
   // R-019：物料页的路由对话框与抽屉继承列表页的页面授权，权限清单里要有可读的名字。
   itemNew: 'items.form.newTitle',
   itemDetail: 'items.detailTitle',
@@ -30,5 +33,4 @@ export const pagePermissionTitles: PagePermissionTitles = {
   unitNew: 'items.units.newTitle',
   unitEdit: 'items.units.editTitle',
   categoryNew: 'items.categories.newTitle',
-  categoryEdit: 'items.categories.editTitle',
-};
+  categoryEdit: 'items.categories.editTitle',};

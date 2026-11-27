@@ -1,0 +1,425 @@
+import { useApiClient, usePageBreadcrumb, useToaster } from '@nocobase/app-client';
+import { useCan } from '@nocobase/app-plugin-authorization/client';
+import { useLocale, useTranslation } from '@nocobase/i18n/client';
+import type { ColumnDef } from '@tanstack/react-table';
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import {
+  Link,
+  Outlet,
+  useLocation,
+  useResolvedPath,
+  useParams,
+  type To,
+} from 'react-router';
+
+import {
+  DocumentHeaderFields,
+  DocumentPage,
+  DocumentSection,
+  DocumentStatusBar,
+  LinesTable,
+} from '#components/erp/document';
+import { ConfirmDialog } from '#components/erp/confirm';
+import type { DetailField } from '#components/erp/detail';
+import { errorText } from '#components/erp/messages';
+import { StatusBadge } from '#components/status-badge';
+import { useRecord } from '#components/erp/record';
+import { Button } from '#components/ui/button';
+import { formatDateTime, formatQty } from '../stock/format.js';
+import { ITEMS_RESOURCE, useInventoryLookup } from '../stock/lookup.js';
+import { INVENTORY_RESOURCE } from '../warehouses/page-id.js';
+import { useAncestorSearch } from '../../routing/route-context.js';
+
+import { StockDocsClient, type StockDoc, type StockDocLine } from './client.js';
+import type { StockKind } from './kind.js';
+import { stockKey, useLineStock } from './line-stock.js';
+import { isNotDraft, STOCK_DOC_LIST_KEYS } from './model.js';
+
+/** 详情交给盖在它上面的编辑子页的东西：面包屑的层级与重新取数。 */
+export interface StockDocDetailContext {
+  readonly levels: readonly {
+    readonly label: string;
+    readonly to?: To;
+  }[];
+  readonly reload: () => void;
+}
+
+const NO_LINES: readonly StockDocLine[] = [];
+const DASH = <span className='text-muted-foreground'>—</span>;
+const NUMBER = 'flex justify-end tabular-nums';
+type Action = 'post' | 'void';
+
+/**
+ * 一张入库单或出库单（`/inbound-orders/:docId`、`/outbound-orders/:docId`，《基座ERP前端设计》2.4）：
+ * 盖在列表上的子页。页头是单号与状态徽标加这一刻能做的操作，下面是状态条、表头与明细。
+ * 草稿能编辑、过账、作废；已过账、已作废的没有任何操作。
+ */
+export function StockDocDetailPage({ def }: { readonly def: StockKind }): ReactElement {
+  const { docId = '' } = useParams();
+  const { t } = useTranslation();
+  const { locale } = useLocale();
+  const api = useApiClient();
+  const toaster = useToaster();
+  const location = useLocation();
+  const client = useMemo(() => new StockDocsClient(api), [api]);
+  const view = useCan({ resource: INVENTORY_RESOURCE, action: 'stockView' });
+  const write = useCan({ resource: INVENTORY_RESOURCE, action: 'stockWrite' });
+  const posting = useCan({ resource: INVENTORY_RESOURCE, action: 'stockPost' });
+  const voiding = useCan({ resource: INVENTORY_RESOURCE, action: 'stockVoid' });
+  const itemView = useCan({ resource: ITEMS_RESOURCE, action: 'view' });
+  const warehouseView = useCan({
+    resource: INVENTORY_RESOURCE,
+    action: 'warehouseView',
+  });
+  const record = useRecord<StockDoc>(
+    `stock-docs/${encodeURIComponent(docId)}`,
+    view.can,
+  );
+  // 另一个方向的单据（拿入库单的地址打开一张出库单）当作不存在。
+  const doc = record.data?.docType === def.kind ? record.data : undefined;
+  // 出库草稿每一行旁边带现存量；入库单与其余状态不带。
+  const showHand = doc?.status === 'draft' && def.kind === 'out';
+  const hand = useLineStock(
+    doc?.lines ?? NO_LINES,
+    Boolean(showHand) && view.can,
+  );
+  const lookup = useInventoryLookup({
+    items: view.can && itemView.can,
+    warehouses: view.can && warehouseView.can,
+  });
+
+  // 面包屑：列表 › 单号。回列表的地址带着离开时的搜索、筛选与页码。
+  const owner = useResolvedPath('..').pathname;
+  const self = useResolvedPath('.').pathname;
+  const listSearch = useAncestorSearch(owner, STOCK_DOC_LIST_KEYS);
+  const selfSearch = useAncestorSearch(self, STOCK_DOC_LIST_KEYS);
+  const listLabel = t(`stockDocs.${def.words}.title`);
+  const docNo = doc?.docNo;
+  const fallback = t('stockDocs.detail');
+  const levels = useMemo(
+    () => [
+      { label: listLabel, to: { pathname: owner, search: listSearch } },
+      { label: docNo ?? fallback, to: { pathname: self, search: selfSearch } },
+    ],
+    [listLabel, owner, listSearch, docNo, fallback, self, selfSearch],
+  );
+  usePageBreadcrumb(levels);
+
+  const [confirm, setConfirm] = useState<Action>();
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string>();
+
+  /** 过账与作废。都先过下面的确认框。 */
+  const run = async (action: Action, target: StockDoc) => {
+    setBusy(true);
+    setActionError(undefined);
+    try {
+      const saved =
+        action === 'post' ? await client.post(target.id) : await client.voidDoc(target.id);
+      record.replaceData(saved);
+      toaster.show({
+        type: 'success',
+        title:
+          action === 'post'
+            ? t(`stockDocs.${def.words}.postedToast`, { docNo: saved.docNo })
+            : t(`stockDocs.${def.words}.voidedToast`, { docNo: saved.docNo }),
+      });
+      setConfirm(undefined);
+    } catch (error) {
+      if (isNotDraft(error)) {
+        // 单据已不是草稿（别处刚过账或作废）：按最新的一张重画，确认框关掉。
+        setConfirm(undefined);
+        record.reload();
+        toaster.show({ type: 'error', title: errorText(error, t) });
+      } else {
+        setActionError(errorText(error, t));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+  const runRef = useRef(run);
+  useEffect(() => {
+    runRef.current = run;
+  });
+
+  const stockOf = (line: StockDocLine): number =>
+    hand.stock?.[stockKey(line)] ?? 0;
+  // 超过现存量的行：标红，过账按钮不能用。现存量没读出来之前先不下结论。
+  const over = doc?.lines.filter((line) => line.qty > stockOf(line)) ?? [];
+  const blocked = Boolean(showHand) && hand.stock !== undefined && over.length > 0;
+
+  const lineColumns = useMemo<ColumnDef<StockDocLine>[]>(() => {
+    const columns: ColumnDef<StockDocLine>[] = [
+      {
+        id: 'index',
+        header: '#',
+        cell: ({ row }) => (
+          <span className='text-muted-foreground tabular-nums'>
+            {row.index + 1}
+          </span>
+        ),
+      },
+      {
+        id: 'item',
+        header: t('stockDocs.columns.item'),
+        cell: ({ row }) => {
+          const item = lookup.item(row.original.itemId);
+          return (
+            <span className='flex flex-wrap items-center gap-2'>
+              <span className='font-medium tabular-nums'>
+                {item?.code ?? row.original.itemId}
+              </span>
+              {item ? <span>{item.name}</span> : null}
+            </span>
+          );
+        },
+      },
+      {
+        id: 'warehouse',
+        header: t('stockDocs.columns.warehouse'),
+        cell: ({ row }) =>
+          lookup.warehouse(row.original.warehouseId)?.name ??
+          row.original.warehouseId,
+      },
+      {
+        id: 'batchNo',
+        header: t('stockDocs.columns.batch'),
+        cell: ({ row }) => row.original.batchNo || DASH,
+      },
+      {
+        id: 'qty',
+        header: t('stockDocs.columns.qty'),
+        cell: ({ row }) => (
+          <span className={NUMBER}>
+            {formatQty(row.original.qty, locale)}
+          </span>
+        ),
+      },
+    ];
+    if (!showHand) return columns;
+    return [
+      ...columns,
+      {
+        id: 'onHand',
+        header: t('stockDocs.columns.onHand'),
+        cell: ({ row }) => {
+          if (hand.stock === undefined)
+            return (
+              <span className='text-muted-foreground'>
+                {t('stockDocs.loadingStock')}
+              </span>
+            );
+          const stock = hand.stock?.[stockKey(row.original)] ?? 0;
+          return (
+            <span
+              className={
+                row.original.qty > stock
+                  ? `${NUMBER} text-destructive`
+                  : NUMBER
+              }
+            >
+              {row.original.qty > stock
+                ? t('stockDocs.overBy', {
+                    onHand: formatQty(stock, locale),
+                    over: formatQty(row.original.qty - stock, locale),
+                  })
+                : formatQty(stock, locale)}
+            </span>
+          );
+        },
+      },
+    ];
+    // stockOf 只读 hand.stock；lookup 的两个查找函数引用是稳定的。
+  }, [t, locale, lookup, showHand, hand.stock]);
+
+  // 权限没落定、单据还没读到：先画页头与一句「加载中」。没有读的权限、读不到时各自说明。
+  if (!doc)
+    return (
+      <DocumentPage
+        title={fallback}
+        status={
+          <DocumentStatusBar
+            tone={
+              !view.isPending && (!view.can || record.error !== undefined)
+                ? 'destructive'
+                : undefined
+            }
+          >
+            <span>
+              {view.isPending || (view.can && record.error === undefined)
+                ? t('status.loading')
+                : view.can
+                  ? errorText(record.error, t)
+                  : t('erp.errors.denied')}
+            </span>
+            {!view.isPending && view.can && record.error !== undefined ? (
+              <Button size='sm' variant='outline' onClick={record.reload}>
+                {t('status.retry')}
+              </Button>
+            ) : null}
+          </DocumentStatusBar>
+        }
+      >
+        {/* 编辑子页自己读单据；父页还没读到时也必须挂上，否则子页不会渲染，两边都停在「加载中」。 */}
+        <Outlet
+          context={{ levels, reload: record.reload } satisfies StockDocDetailContext}
+        />
+      </DocumentPage>
+    );
+
+  const draft = doc.status === 'draft';
+  const editing = draft && write.can;
+  const search = location.search;
+  const fields: (DetailField | false)[] = [
+    {
+      label: t('stockDocs.fields.reason'),
+      value: t(`stockDocs.reasons.${doc.reason}`),
+    },
+    {
+      label: t('stockDocs.fields.source'),
+      value: doc.sourceType
+        ? t(`stockDocs.source.${doc.sourceType}`)
+        : t('stockDocs.source.manual'),
+    },
+    {
+      label: t('stockDocs.fields.createdAt'),
+      value: formatDateTime(doc.createdAt, locale),
+    },
+    {
+      label: t('stockDocs.fields.postedAt'),
+      value: doc.postedAt ? formatDateTime(doc.postedAt, locale) : null,
+    },
+    { label: t('erp.fields.note'), value: doc.remark },
+  ];
+  const actions =
+    draft && (editing || posting.can || voiding.can) ? (
+      <span className='flex flex-wrap items-center gap-2'>
+        {voiding.can ? (
+          <Button variant='outline' disabled={busy} onClick={() => setConfirm('void')}>
+            {t('stockDocs.void')}
+          </Button>
+        ) : null}
+        {editing ? (
+          <Button
+            variant='outline'
+            nativeButton={false}
+            render={
+              <Link
+                to={{
+                  pathname: `${def.base}/${encodeURIComponent(doc.id)}/edit`,
+                  search,
+                }}
+              />
+            }
+          >
+            {t('erp.actions.edit')}
+          </Button>
+        ) : null}
+        {posting.can ? (
+          <Button
+            disabled={busy || blocked}
+            onClick={() => setConfirm('post')}
+            title={blocked ? t('stockDocs.shortage', { lines: over.length }) : undefined}
+          >
+            {t('stockDocs.post')}
+          </Button>
+        ) : null}
+      </span>
+    ) : undefined;
+
+  return (
+    <DocumentPage
+      title={doc.docNo}
+      badge={<StatusBadgeOf status={doc.status} />}
+      actions={actions}
+      status={
+        doc.status === 'posted' ? (
+          <DocumentStatusBar tone='info'>
+            <span>{t(`stockDocs.${def.words}.postedStatus`)}</span>
+            {doc.postedAt ? (
+              <span className='text-muted-foreground'>
+                {t('stockDocs.postedWith', {
+                  time: formatDateTime(doc.postedAt, locale),
+                })}
+              </span>
+            ) : null}
+            <Link
+              to='/stock'
+              className='font-medium underline-offset-4 hover:underline'
+            >
+              {t('stockDocs.viewStock')}
+            </Link>
+          </DocumentStatusBar>
+        ) : doc.status === 'void' ? (
+          <DocumentStatusBar>{t('stockDocs.voidStatus')}</DocumentStatusBar>
+        ) : blocked ? (
+          <DocumentStatusBar tone='destructive'>
+            <span>{t('stockDocs.shortage', { lines: over.length })}</span>
+            {editing ? (
+              <Link
+                to={{
+                  pathname: `${def.base}/${encodeURIComponent(doc.id)}/edit`,
+                  search,
+                }}
+                className='font-medium underline-offset-4 hover:underline'
+              >
+                {t('erp.actions.edit')}
+              </Link>
+            ) : null}
+          </DocumentStatusBar>
+        ) : (
+          <DocumentStatusBar>{t(`stockDocs.${def.words}.draftStatus`)}</DocumentStatusBar>
+        )
+      }
+    >
+      <DocumentSection title={t('stockDocs.header')}>
+        <DocumentHeaderFields fields={fields} />
+      </DocumentSection>
+      <DocumentSection title={t('stockDocs.lines')}>
+        <LinesTable<StockDocLine>
+          columns={lineColumns}
+          rows={doc.lines}
+          getRowId={(line) => line.id}
+          emptyMessage={t('stockDocs.noLines')}
+        />
+      </DocumentSection>
+      <ConfirmDialog
+        open={confirm !== undefined}
+        title={
+          confirm === 'post'
+            ? t(`stockDocs.${def.words}.postTitle`, { docNo: doc.docNo })
+            : t(`stockDocs.${def.words}.voidTitle`, { docNo: doc.docNo })
+        }
+        description={
+          confirm === 'post'
+            ? t(`stockDocs.${def.words}.postDescription`)
+            : t('stockDocs.voidDescription')
+        }
+        confirmLabel={
+          confirm === 'post' ? t('stockDocs.post') : t('stockDocs.void')
+        }
+        error={
+          actionError ? <span role='alert'>{actionError}</span> : undefined
+        }
+        busy={busy}
+        onCancel={() => setConfirm(undefined)}
+        onConfirm={() => {
+          if (confirm) void runRef.current(confirm, doc);
+        }}
+      />
+      {/* 编辑这一张单的子页从这里出来。 */}
+      <Outlet context={{ levels, reload: record.reload } satisfies StockDocDetailContext} />
+    </DocumentPage>
+  );
+}
+
+/** 单据的状态徽标：草稿、已作废是灰的，已过账是绿的。颜色只是辅助，字里已经写明。 */
+function StatusBadgeOf({ status }: { readonly status: StockDoc['status'] }): ReactElement {
+  const { t } = useTranslation();
+  return (
+    <StatusBadge size='sm' tone={status === 'posted' ? 'success' : 'neutral'}>
+      {t(`stockDocs.status.${status}`)}
+    </StatusBadge>
+  );
+}

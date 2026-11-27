@@ -122,7 +122,7 @@ const shiftsView = {
 
 /**
  * R-020：仓管拿仓库读、单据读写、过账与作废五个动作，**不拿 warehouseManage**
- * （建改仓库只给 root）；其余业务角色一份都不给。没有页面授权（本片不做页面）。
+ * （建改仓库只给 root）；其余业务角色一份都不给。
  */
 const inventoryGrant = {
   resource: { type: 'composite', id: 'inventory' },
@@ -133,6 +133,28 @@ const inventoryGrant = {
     { action: 'stockPost' },
     { action: 'stockVoid' },
   ],
+};
+
+/**
+ * R-020 页面片（《基座ERP前端设计》1.3）：页面授权 id 与路由的 `authz.resource.id` 由守门测试钉在一起。
+ * 仓库页给仓管、采购、销售（建订单、生成单据时要选仓库）；库存查询、入库单、出库单只给仓管。
+ * 存量环境跑 `pnpm nocobase authz upgrade-r020-page`。
+ */
+const warehousesPage = {
+  resource: { type: 'page', id: 'warehouses' },
+  actions: [{ action: 'access' }],
+};
+const stockPage = {
+  resource: { type: 'page', id: 'stock' },
+  actions: [{ action: 'access' }],
+};
+const inboundOrdersPage = {
+  resource: { type: 'page', id: 'inboundOrders' },
+  actions: [{ action: 'access' }],
+};
+const outboundOrdersPage = {
+  resource: { type: 'page', id: 'outboundOrders' },
+  actions: [{ action: 'access' }],
 };
 
 /**
@@ -245,11 +267,16 @@ export const businessPermissionSets: readonly PermissionSet[] = [
     .build(),
   definePermissionSet('warehouse')
     .title({ key: 'permissionSets.business.warehouse', ns: NAMESPACE })
+    .grant(warehousesPage)
+    .grant(stockPage)
+    .grant(inboundOrdersPage)
+    .grant(outboundOrdersPage)
     .grant(inventoryGrant)
     .build(),
   definePermissionSet('sales')
     .title({ key: 'permissionSets.business.sales', ns: NAMESPACE })
     .grant(partnersPage)
+    .grant(warehousesPage)
     .grant(partnerGrant('customers'))
     .grant(salesOrderGrant)
     .grant(orderItemRead)
@@ -259,6 +286,7 @@ export const businessPermissionSets: readonly PermissionSet[] = [
   definePermissionSet('purchase')
     .title({ key: 'permissionSets.business.purchase', ns: NAMESPACE })
     .grant(partnersPage)
+    .grant(warehousesPage)
     .grant(partnerGrant('suppliers'))
     .grant(purchaseOrderGrant)
     .grant(orderItemRead)

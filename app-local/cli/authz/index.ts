@@ -8,6 +8,7 @@ import AuthzUpgradeR014 from './upgrade-r014.js';
 import AuthzUpgradeR014Page from './upgrade-r014-page.js';
 import AuthzUpgradeR019Page from './upgrade-r019-page.js';
 import AuthzUpgradeR020 from './upgrade-r020.js';
+import AuthzUpgradeR020Page from './upgrade-r020-page.js';
 import AuthzUpgradeR021 from './upgrade-r021.js';
 import AuthzUpgradeR026 from './upgrade-r026.js';
 import AuthzUpgradeR025 from './upgrade-r025.js';
@@ -42,6 +43,8 @@ const authzCli = defineCliPlugin({
     'upgrade-r025': AuthzUpgradeR025,
     // R-020：给已有环境的 warehouse 补库存授权。可单独跑、可重跑。
     'upgrade-r020': AuthzUpgradeR020,
+    // R-020 页面片：给已有环境的仓管补库存查询、入库单、出库单、仓库四页，给销售/采购补仓库页（先补业务授权）。可单独跑、可重跑。
+    'upgrade-r020-page': AuthzUpgradeR020Page,
     // R-021/R-022：给已有环境的 purchase / sales 补订单授权与只读引用。可单独跑、可重跑。
     'upgrade-r021': AuthzUpgradeR021,
   },

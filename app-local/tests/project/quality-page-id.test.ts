@@ -13,8 +13,19 @@ import { SHIFTS_PAGE_ID } from '../../client/pages/shifts/page-id.js';
 
 import { EMPLOYEES_PAGE_ID } from '../../client/pages/settings/employees/page-id.js';
 import { PARTNERS_PAGE_ID as COMMAND_PARTNERS_PAGE_ID } from '../../cli/authz/upgrade-r014-page.js';
+import {
+  INBOUND_ORDERS_PAGE_ID as COMMAND_INBOUND_ORDERS_PAGE_ID,
+  OUTBOUND_ORDERS_PAGE_ID as COMMAND_OUTBOUND_ORDERS_PAGE_ID,
+  STOCK_PAGE_ID as COMMAND_STOCK_PAGE_ID,
+  WAREHOUSES_PAGE_ID as COMMAND_WAREHOUSES_PAGE_ID,
+} from '../../cli/authz/upgrade-r020-page.js';
+import {
+  INBOUND_ORDERS_PAGE_ID,
+  OUTBOUND_ORDERS_PAGE_ID,
+  STOCK_PAGE_ID,
+} from '../../client/pages/stock-docs/page-id.js';
+import { WAREHOUSES_PAGE_ID } from '../../client/pages/warehouses/page-id.js';
 import { ITEMS_PAGE_ID as COMMAND_ITEMS_PAGE_ID } from '../../cli/authz/upgrade-r019-page.js';
-
 const appRoot = path.resolve(
   fileURLToPath(new URL('.', import.meta.url)),
   '../..',
@@ -57,13 +68,22 @@ describe('R-013 质量页的授权 id', () => {
         '202611240001_seed_business_permission_sets.ts',
       ),
     );
-    // 质量页一条（R-013），知识库页一条（R-002），反馈单页一条（R-026），客户与供应商页一条字面量（R-014），
-    // 物料页一条（R-019）；销售与采购各引用一次，下面按解析后的结构数人头。
+    // 质量页一条（R-013），知识库页一条（R-002），反馈单页一条（R-026），客户与供应商页一条字面量（R-014；
+    // 销售与采购各引用它一次，下面按解析后的结构数人头），物料与库存五页各一条（R-019 物料、R-020 四页）。
     expect(
       seedPageIds.sort(),
-      'seed 里的页面授权应当有质量页、知识库页、反馈单页、客户与供应商页与物料页',
-    ).toEqual(['feedback', 'items', 'knowledge', 'partners', 'quality']);
-
+      'seed 里的页面授权应当有质量页、知识库页、反馈单页、客户与供应商页与物料与库存五页',
+    ).toEqual([
+      'feedback',
+      'inboundOrders',
+      'items',
+      'knowledge',
+      'outboundOrders',
+      'partners',
+      'quality',
+      'stock',
+      'warehouses',
+    ]);
     const routePageIds = pageGrantIds(read('client', 'routes.ts'));
     expect(
       routePageIds,
@@ -103,8 +123,17 @@ describe('R-011 员工页的授权 id', () => {
     );
     // 先钉住解析本身：其它四个页面授权必须被解析出来，否则下面的反向断言是空的。
     expect(new Set(pageGrants.map(({ id }) => id))).toEqual(
-      new Set(['quality', 'feedback', 'knowledge', 'partners', 'items']),
-    );
+      new Set([
+        'quality',
+        'feedback',
+        'knowledge',
+        'partners',
+        'stock',
+        'inboundOrders',
+        'outboundOrders',
+        'warehouses',
+        'items',
+      ]),    );
     expect(
       pageGrants.map(({ id }) => id),
       '员工页默认只有 root 能进：业务角色的 seed 不能给它授权',
@@ -144,6 +173,45 @@ describe('R-014 / R-025 页面片的授权 id', () => {
       pageGrants.map(({ id }) => id),
       '班次页默认只有 root 能进：业务角色的 seed 不能给它授权',
     ).not.toContain(SHIFTS_PAGE_ID);
+  });
+});
+
+describe('R-020 页面片的授权 id', () => {
+  const routes = read('client', 'routes.ts');
+  const holdersOf = (id: string): string[] =>
+    businessPermissionSets
+      .flatMap((set) =>
+        set.grants
+          .filter((grant) => grant.resource.type === 'page')
+          .filter((grant) => grant.resource.id === id)
+          .map(() => set.key),
+      )
+      .sort();
+
+  it('四页的路由、seed、升级命令是同一组 id', () => {
+    expect(STOCK_PAGE_ID).toBe('stock');
+    expect(INBOUND_ORDERS_PAGE_ID).toBe('inboundOrders');
+    expect(OUTBOUND_ORDERS_PAGE_ID).toBe('outboundOrders');
+    expect(WAREHOUSES_PAGE_ID).toBe('warehouses');
+    expect(COMMAND_STOCK_PAGE_ID).toBe(STOCK_PAGE_ID);
+    expect(COMMAND_INBOUND_ORDERS_PAGE_ID).toBe(INBOUND_ORDERS_PAGE_ID);
+    expect(COMMAND_OUTBOUND_ORDERS_PAGE_ID).toBe(OUTBOUND_ORDERS_PAGE_ID);
+    expect(COMMAND_WAREHOUSES_PAGE_ID).toBe(WAREHOUSES_PAGE_ID);
+    expect(routes).toContain('id: STOCK_PAGE_ID');
+    expect(routes).toContain('id: INBOUND_ORDERS_PAGE_ID');
+    expect(routes).toContain('id: OUTBOUND_ORDERS_PAGE_ID');
+    expect(routes).toContain('id: WAREHOUSES_PAGE_ID');
+  });
+
+  it('库存查询、入库单、出库单只给仓管；仓库页给仓管、采购、销售', () => {
+    expect(holdersOf(STOCK_PAGE_ID)).toEqual(['warehouse']);
+    expect(holdersOf(INBOUND_ORDERS_PAGE_ID)).toEqual(['warehouse']);
+    expect(holdersOf(OUTBOUND_ORDERS_PAGE_ID)).toEqual(['warehouse']);
+    expect(holdersOf(WAREHOUSES_PAGE_ID)).toEqual([
+      'purchase',
+      'sales',
+      'warehouse',
+    ]);
   });
 });
 

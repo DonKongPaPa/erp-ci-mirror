@@ -7,8 +7,16 @@ import { ITEMS_PAGE_ID } from './pages/items/page-id.js';
 import { PARTNERS_PAGE_ID } from './pages/partners/page-id.js';
 import { SHIFTS_PAGE_ID } from './pages/shifts/page-id.js';
 import {
-  Bot,
+  INBOUND_ORDERS_PAGE_ID,
+  OUTBOUND_ORDERS_PAGE_ID,
+  STOCK_PAGE_ID,
+} from './pages/stock-docs/page-id.js';
+import { WAREHOUSES_PAGE_ID } from './pages/warehouses/page-id.js';
+import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
   Boxes,
+  Bot,
   ChartColumn,
   Clock,
   Cpu,
@@ -20,6 +28,7 @@ import {
   Package,
   ShieldAlert,
   Users,
+  Warehouse,
   Wrench,
 } from 'lucide-react';
 import {
@@ -161,12 +170,133 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
     ],
   },
   {
-    // 物料与库存（《基座ERP前端设计》第一节）：可折叠的分组。现在只有物料一页；库存查询、入库单、
-    // 出库单、仓库是另外的片，到时直接加进这个分组。
+    // 物料与库存（《基座ERP前端设计》第一节）：可折叠的分组。这一片是库存查询、入库单、出库单、仓库四页；
+    // 物料（R-019）由另一片加进这个分组，常用的在前、主数据在后。
     auth: 'required',
     name: 'inventory',
-    navigation: { title: 'navigation.inventory', icon: Boxes },
+    navigation: { title: 'navigation.inventory', icon: Package },
     children: [
+      {
+        // R-020 库存查询：页面授权 `stock` 默认只给仓管；打开之后读要 inventory.stockView，只读。
+        auth: 'required',
+        authz: {
+          resource: { type: 'page', id: STOCK_PAGE_ID },
+          action: 'access',
+        },
+        breadcrumb: { title: 'navigation.stock' },
+        componentLoader: () => import('./pages/stock/index.js'),
+        name: 'stock',
+        navigation: { title: 'navigation.stock', icon: Boxes },
+        path: '/stock',
+      },
+      {
+        // R-020 入库单：读要 stockView，建改草稿要 stockWrite，过账要 stockPost，作废要 stockVoid。
+        auth: 'required',
+        authz: {
+          resource: { type: 'page', id: INBOUND_ORDERS_PAGE_ID },
+          action: 'access',
+        },
+        breadcrumb: { title: 'navigation.inboundOrders' },
+        componentLoader: () => import('./pages/inbound-orders/index.js'),
+        name: 'inboundOrders',
+        navigation: { title: 'navigation.inboundOrders', icon: ArrowDownToLine },
+        path: '/inbound-orders',
+        // 新建、详情、编辑都是盖在列表上的子页，从这一页继承授权。
+        children: [
+          {
+            componentLoader: () => import('./pages/inbound-orders/new.js'),
+            name: 'inboundOrderNew',
+            path: 'new',
+            breadcrumb: { title: 'stockDocs.in.newTitle' },
+            presentation: { kind: 'child-page' },
+          },
+          {
+            componentLoader: () => import('./pages/inbound-orders/detail.js'),
+            name: 'inboundOrderDetail',
+            path: ':docId',
+            breadcrumb: { title: 'stockDocs.detail' },
+            presentation: { kind: 'child-page' },
+            children: [
+              {
+                componentLoader: () => import('./pages/inbound-orders/edit.js'),
+                name: 'inboundOrderEdit',
+                path: 'edit',
+                breadcrumb: { title: 'stockDocs.in.editTitle' },
+                presentation: { kind: 'child-page' },
+              },
+            ],
+          },
+        ],
+      },
+      {
+        // R-020 出库单：授权与入库单一样。
+        auth: 'required',
+        authz: {
+          resource: { type: 'page', id: OUTBOUND_ORDERS_PAGE_ID },
+          action: 'access',
+        },
+        breadcrumb: { title: 'navigation.outboundOrders' },
+        componentLoader: () => import('./pages/outbound-orders/index.js'),
+        name: 'outboundOrders',
+        navigation: {
+          title: 'navigation.outboundOrders',
+          icon: ArrowUpFromLine,
+        },
+        path: '/outbound-orders',
+        children: [
+          {
+            componentLoader: () => import('./pages/outbound-orders/new.js'),
+            name: 'outboundOrderNew',
+            path: 'new',
+            breadcrumb: { title: 'stockDocs.out.newTitle' },
+            presentation: { kind: 'child-page' },
+          },
+          {
+            componentLoader: () => import('./pages/outbound-orders/detail.js'),
+            name: 'outboundOrderDetail',
+            path: ':docId',
+            breadcrumb: { title: 'stockDocs.detail' },
+            presentation: { kind: 'child-page' },
+            children: [
+              {
+                componentLoader: () => import('./pages/outbound-orders/edit.js'),
+                name: 'outboundOrderEdit',
+                path: 'edit',
+                breadcrumb: { title: 'stockDocs.out.editTitle' },
+                presentation: { kind: 'child-page' },
+              },
+            ],
+          },
+        ],
+      },
+      {
+        // R-020 仓库：页面授权 `warehouses` 给仓管、采购、销售；读要 warehouseView，建改要 warehouseManage（只有 root）。
+        auth: 'required',
+        authz: {
+          resource: { type: 'page', id: WAREHOUSES_PAGE_ID },
+          action: 'access',
+        },
+        breadcrumb: { title: 'navigation.warehouses' },
+        componentLoader: () => import('./pages/warehouses/index.js'),
+        name: 'warehouses',
+        navigation: { title: 'navigation.warehouses', icon: Warehouse },
+        path: '/warehouses',
+        // 新建、编辑是路由上的对话框，从这一页继承授权。
+        children: [
+          {
+            componentLoader: () => import('./pages/warehouses/new.js'),
+            name: 'warehouseNew',
+            path: 'new',
+            presentation: { kind: 'dialog', title: 'warehouses.form.newTitle' },
+          },
+          {
+            componentLoader: () => import('./pages/warehouses/edit.js'),
+            name: 'warehouseEdit',
+            path: ':warehouseId/edit',
+            presentation: { kind: 'dialog', title: 'warehouses.form.editTitle' },
+          },
+        ],
+      },
       {
         // R-019 物料：物料清单、计量单位、物料分类三个标签共用这一条路由（标签记在地址栏的 view 上）。
         // 页面授权 `items` 给销售、采购与 root；打开之后读、写再分 items 的 view / manage。
@@ -234,8 +364,7 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
             presentation: {
               kind: 'dialog',
               title: 'items.categories.editTitle',
-            },
-          },
+            },          },
         ],
       },
     ],

@@ -260,6 +260,7 @@ describe('System settings navigation', () => {
       'home',
       'hr',
       'partners',
+      // 物料与库存排在客户与供应商后面、质量工单前面（《基座ERP前端设计》1.1）。
       'inventory',
       'quality',
       'feedbacks',
