@@ -65,6 +65,19 @@ export function CategoryFields({
           />
         )}
       </FormField>
+      <FormField name='sort' label={t('items.categories.sort')}>
+        {(id, invalid) => (
+          <Input
+            id={id}
+            type='number'
+            min={0}
+            step='1'
+            aria-invalid={invalid}
+            value={values.sort}
+            onChange={(event) => form.set('sort', event.target.value)}
+          />
+        )}
+      </FormField>
       <FormField
         name='parentId'
         label={t('items.columns.parent')}

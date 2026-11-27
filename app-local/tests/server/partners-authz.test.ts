@@ -211,3 +211,88 @@ test('R-014: 销售可停用/启用客户，采购可停用/启用供应商；�
     expect(authz.compositeResources.getAction(resource, 'delete')).toBeUndefined();
   }
 });
+
+/* R-014 加片：新表声明与两条地址写端点的授权。 */
+
+test('R-014 加片: partnerAddresses 声明逐列收窄，没有 delete 动作', async ({
+  app,
+}) => {
+  const authz = app.container.resolve(authorizationToken) as {
+    database: {
+      collections: {
+        list(): readonly { name: string; actions: readonly string[] }[];
+      };
+    };
+    compositeResources: {
+      getAction(resource: string, action: string): unknown;
+    };
+  };
+  const definition = authz.database.collections
+    .list()
+    .find((collection) => collection.name === 'partnerAddresses');
+  expect(definition, 'partnerAddresses 必须登记进授权表清单').toBeDefined();
+  expect(definition?.actions).toEqual(['read', 'create', 'update']);
+  for (const resource of ['customers', 'suppliers']) {
+    expect(authz.compositeResources.getAction(resource, 'view')).toBeDefined();
+    expect(authz.compositeResources.getAction(resource, 'update')).toBeDefined();
+    expect(authz.compositeResources.getAction(resource, 'delete')).toBeUndefined();
+  }
+});
+
+test('R-014 加片: 地址写端点只认客户侧，采购侧与无关角色 403', async ({ testApp }) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const sales = await makeUser(admin, testApp, 'r014asales', ['sales']);
+  const purchase = await makeUser(admin, testApp, 'r014abuy', ['purchase']);
+  const outsider = await makeUser(admin, testApp, 'r014aout', ['staff']);
+  const customer = await createPartner(admin, unique('客户'), { isCustomer: true });
+  const supplier = await createPartner(admin, unique('供应商'), { isSupplier: true });
+  const customerId = String(customer.id);
+  const supplierId = String(supplier.id);
+
+  const add = (session: TestSession, id: string) =>
+    session.fetch(`/partners/${id}/addresses`, write({ address: `地址${unique('T')}` }));
+  expect((await add(sales.session, customerId)).status).toBe(201);
+  expect((await add(sales.session, supplierId)).status).toBe(403);
+  // 交货地址是客户侧的数据：只是供应商的单位，采购侧也是 403。
+  expect((await add(purchase.session, supplierId)).status).toBe(403);
+  expect((await add(purchase.session, customerId)).status).toBe(403);
+  expect((await add(outsider.session, customerId)).status).toBe(403);
+  expect((await add(outsider.session, supplierId)).status).toBe(403);
+
+  // 既是客户又是供应商的单位：销售能加，采购照样 403（合并前收紧，比设计原文的「所属资源」更窄）。
+  const shared = await createPartner(admin, unique('双向'), {
+    isCustomer: true,
+    isSupplier: true,
+  });
+  const sharedId = String(shared.id);
+  expect((await add(sales.session, sharedId)).status).toBe(201);
+  expect((await add(purchase.session, sharedId)).status).toBe(403);
+
+  const customerDetail = await jsonOf(
+    await sales.session.fetch(`/partners/${customerId}`, get()),
+  );
+  const addressId = String((customerDetail.addresses as { id: string }[])[0]?.id);
+  expect(addressId).toBeTruthy();
+  const patch = await purchase.session.fetch(
+    `/partners/${customerId}/addresses/${addressId}`,
+    write({ status: 'inactive' }, 'PATCH'),
+  );
+  expect(patch.status).toBe(403);
+  const sharedDetail = await jsonOf(
+    await sales.session.fetch(`/partners/${sharedId}`, get()),
+  );
+  const sharedAddressId = String(
+    (sharedDetail.addresses as { id: string }[])[0]?.id,
+  );
+  expect(sharedAddressId).toBeTruthy();
+  const sharedPatch = await purchase.session.fetch(
+    `/partners/${sharedId}/addresses/${sharedAddressId}`,
+    write({ status: 'inactive' }, 'PATCH'),
+  );
+  expect(sharedPatch.status).toBe(403);
+  const ownPatch = await sales.session.fetch(
+    `/partners/${customerId}/addresses/${addressId}`,
+    write({ status: 'inactive' }, 'PATCH'),
+  );
+  expect(ownPatch.status).toBe(200);
+});

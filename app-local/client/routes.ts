@@ -4,6 +4,7 @@ import { readAppClientRuntimeConfig } from '@nocobase/app-client/runtime';
 import { includeNotificationTemplateRoutes } from './pages/settings/notification-routes.js';
 import notificationLogRoutes from './pages/settings/notification-log-routes.js';
 import { ITEMS_PAGE_ID } from './pages/items/page-id.js';
+import { BIZ_DICT_PAGE_ID } from './pages/biz-dict/page-id.js';
 import { PURCHASE_ORDERS_PAGE_ID } from './pages/purchase-orders/page-id.js';
 import { SALES_ORDERS_PAGE_ID } from './pages/sales-orders/page-id.js';
 import { PARTNERS_PAGE_ID } from './pages/partners/page-id.js';
@@ -17,6 +18,7 @@ import { WAREHOUSES_PAGE_ID } from './pages/warehouses/page-id.js';
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
+  BookOpen,
   Boxes,
   Bot,
   ChartColumn,
@@ -167,6 +169,25 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
             presentation: {
               kind: 'dialog',
               title: 'partners.contact.editTitle',
+            },
+          },
+          {
+            // R-014 加片：交货地址是客户侧的数据，两条写端点只认 customers.update。
+            componentLoader: () => import('./pages/partners/address-new.js'),
+            name: 'partnerAddressNew',
+            path: 'addresses/new',
+            presentation: {
+              kind: 'dialog',
+              title: 'partners.address.addTitle',
+            },
+          },
+          {
+            componentLoader: () => import('./pages/partners/address-edit.js'),
+            name: 'partnerAddressEdit',
+            path: 'addresses/:addressId/edit',
+            presentation: {
+              kind: 'dialog',
+              title: 'partners.address.editTitle',
             },
           },
         ],
@@ -476,6 +497,34 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
             componentLoader: () => import('./pages/sales-orders/receipt.js'),
           },
         ],
+      },
+    ],
+  },
+  {
+    // R-072 业务字典：九个类型一页，标签记在地址栏的 type 上。页面授权 `bizDict` 只给 root
+    // （维护入口）；采购、销售、仓管持 bizDict.view 在单据里用下拉选值，默认不进这一页。
+    auth: 'required',
+    authz: {
+      resource: { type: 'page', id: BIZ_DICT_PAGE_ID },
+      action: 'access',
+    },
+    breadcrumb: { title: 'navigation.bizDict' },
+    componentLoader: () => import('./pages/biz-dict/index.js'),
+    name: 'bizDict',
+    navigation: { title: 'navigation.bizDict', icon: BookOpen },
+    path: '/biz-dict',
+    children: [
+      {
+        componentLoader: () => import('./pages/biz-dict/new.js'),
+        name: 'bizDictNew',
+        path: 'new',
+        presentation: { kind: 'dialog', title: 'bizDict.form.newTitle' },
+      },
+      {
+        componentLoader: () => import('./pages/biz-dict/edit.js'),
+        name: 'bizDictEdit',
+        path: ':entryId/edit',
+        presentation: { kind: 'dialog', title: 'bizDict.form.editTitle' },
       },
     ],
   },

@@ -65,6 +65,10 @@ export const UNIT_CODE_MAX = 16;
 export const CATEGORY_CODE_MAX = 32;
 export const SPEC_MAX = 128;
 export const LEGACY_CODE_MAX = 64;
+export const ENGLISH_NAME_MAX = 128;
+export const BARCODE_MAX = 64;
+export const BRAND_MAX = 64;
+export const MANUFACTURER_MODEL_MAX = 128;
 export const NOTE_MAX = 2000;
 
 const lengthOf = (text: string): number => [...text].length;
@@ -88,6 +92,18 @@ export interface ItemFormValues {
   readonly categoryCode: string;
   readonly unitCode: string;
   readonly legacyCode: string;
+  readonly englishName: string;
+  /** 数字字段用字符串存表单值，空串表示没有填。 */
+  readonly stockMin: string;
+  readonly stockMax: string;
+  readonly basePurchasePrice: string;
+  readonly baseSalesPrice: string;
+  readonly barcode: string;
+  readonly brand: string;
+  readonly manufacturerModel: string;
+  readonly auxUnitCode: string;
+  readonly unitRatio: string;
+  readonly purchaseLeadDays: string;
   readonly note: string;
 }
 
@@ -98,6 +114,17 @@ export const EMPTY_ITEM_FORM: ItemFormValues = {
   categoryCode: '',
   unitCode: '',
   legacyCode: '',
+  englishName: '',
+  stockMin: '',
+  stockMax: '',
+  basePurchasePrice: '',
+  baseSalesPrice: '',
+  barcode: '',
+  brand: '',
+  manufacturerModel: '',
+  auxUnitCode: '',
+  unitRatio: '',
+  purchaseLeadDays: '',
   note: '',
 };
 
@@ -108,14 +135,77 @@ export const itemFormOf = (item: Item): ItemFormValues => ({
   categoryCode: item.categoryCode ?? '',
   unitCode: item.unitCode,
   legacyCode: item.legacyCode ?? '',
+  englishName: item.englishName ?? '',
+  stockMin: item.stockMin == null ? '' : String(item.stockMin),
+  stockMax: item.stockMax == null ? '' : String(item.stockMax),
+  basePurchasePrice:
+    item.basePurchasePrice == null ? '' : String(item.basePurchasePrice),
+  baseSalesPrice: item.baseSalesPrice == null ? '' : String(item.baseSalesPrice),
+  barcode: item.barcode ?? '',
+  brand: item.brand ?? '',
+  manufacturerModel: item.manufacturerModel ?? '',
+  auxUnitCode: item.auxUnitCode ?? '',
+  unitRatio: item.unitRatio == null ? '' : String(item.unitRatio),
+  purchaseLeadDays:
+    item.purchaseLeadDays == null ? '' : String(item.purchaseLeadDays),
   note: item.note ?? '',
 });
 
-/** 表单的值 → 请求体，新建与编辑同一个形状（编码不在里面）。调用前一定先过 `validateItem`。 */
-export function itemInput(
-  values: ItemFormValues,
-): CreateItemInput & UpdateItemInput {
+/** 数字字段：空串表示不填；新建不传这个键，编辑传 null 清空。 */
+const numeric = (text: string): number | undefined => {
+  const value = text.trim();
+  return value ? Number(value) : undefined;
+};
+
+/** 表单的值 → 建单请求体。数字没填就不带键（建单的 schema 不接受 null）；空文本也不带。 */
+export function itemCreateInput(values: ItemFormValues): CreateItemInput {
   return {
+    name: values.name.trim(),
+    itemType: values.itemType,
+    unitCode: values.unitCode,
+    spec: optional(values.spec),
+    categoryCode: optional(values.categoryCode),
+    legacyCode: optional(values.legacyCode),
+    ...(values.englishName.trim() ? { englishName: values.englishName.trim() } : {}),
+    ...(numeric(values.stockMin) === undefined
+      ? {}
+      : { stockMin: numeric(values.stockMin) }),
+    ...(numeric(values.stockMax) === undefined
+      ? {}
+      : { stockMax: numeric(values.stockMax) }),
+    ...(numeric(values.basePurchasePrice) === undefined
+      ? {}
+      : { basePurchasePrice: numeric(values.basePurchasePrice) }),
+    ...(numeric(values.baseSalesPrice) === undefined
+      ? {}
+      : { baseSalesPrice: numeric(values.baseSalesPrice) }),
+    ...(values.barcode.trim() ? { barcode: values.barcode.trim() } : {}),
+    ...(values.brand.trim() ? { brand: values.brand.trim() } : {}),
+    ...(values.manufacturerModel.trim()
+      ? { manufacturerModel: values.manufacturerModel.trim() }
+      : {}),
+    ...(values.auxUnitCode.trim()
+      ? { auxUnitCode: values.auxUnitCode.trim() }
+      : {}),
+    ...(numeric(values.unitRatio) === undefined
+      ? {}
+      : { unitRatio: numeric(values.unitRatio) }),
+    ...(numeric(values.purchaseLeadDays) === undefined
+      ? {}
+      : { purchaseLeadDays: numeric(values.purchaseLeadDays) }),
+    note: optional(values.note),
+  };
+}
+
+/**
+ * 编辑请求体：清空传 null；停用与启用仍是单独的 `{ status }`。
+ * 加片的新列只有原来有值、现在被清掉时才带 null —— 原来就没值的老物料请求体与加片前一致。
+ */
+export function itemUpdateInput(
+  values: ItemFormValues,
+  original?: Item,
+): UpdateItemInput {
+  const result: Record<string, unknown> = {
     name: values.name.trim(),
     itemType: values.itemType,
     unitCode: values.unitCode,
@@ -124,6 +214,30 @@ export function itemInput(
     legacyCode: optional(values.legacyCode),
     note: optional(values.note),
   };
+  /** 新列有值就带上；清成空时只有原来有值的才发 null（老物料的请求体与加片前一致）。 */
+  const text = (key: keyof Item, value: string): void => {
+    if (value.trim()) result[key] = value.trim();
+    else if (original?.[key] !== null && original?.[key] !== undefined)
+      result[key] = null;
+  };
+  const numberValue = (key: keyof Item, value: string): void => {
+    const parsed = numeric(value);
+    if (parsed !== undefined) result[key] = parsed;
+    else if (original?.[key] !== null && original?.[key] !== undefined)
+      result[key] = null;
+  };
+  text('englishName', values.englishName);
+  text('barcode', values.barcode);
+  text('brand', values.brand);
+  text('manufacturerModel', values.manufacturerModel);
+  text('auxUnitCode', values.auxUnitCode);
+  numberValue('stockMin', values.stockMin);
+  numberValue('stockMax', values.stockMax);
+  numberValue('basePurchasePrice', values.basePurchasePrice);
+  numberValue('baseSalesPrice', values.baseSalesPrice);
+  numberValue('unitRatio', values.unitRatio);
+  numberValue('purchaseLeadDays', values.purchaseLeadDays);
+  return result;
 }
 
 /** 提交时才校验：名称、基本单位必填，各文本不超长。错误标在对应的那一项下面。 */
@@ -141,10 +255,63 @@ export function validateItem(
     lengthOf(text.trim()) > max
       ? t('items.errors.tooLong', { max })
       : undefined;
+  const numberError = (
+    text: string,
+    min: number,
+    max: number,
+    integer = false,
+  ): string | undefined => {
+    const value = text.trim();
+    if (!value) return undefined;
+    const parsed = Number(value);
+    if (
+      !Number.isFinite(parsed) ||
+      parsed < min ||
+      parsed > max ||
+      (integer && !Number.isInteger(parsed))
+    )
+      return t('items.errors.invalidNumber', { min, max });
+    return undefined;
+  };
+  if (values.auxUnitCode && values.auxUnitCode === values.unitCode)
+    errors.auxUnitCode = t('items.errors.invalidAuxUnit');
+  // 辅助单位与换算率要成对出现：只给一个，服务端会回 ITEM_AUX_UNIT_INVALID。
+  if (Boolean(values.auxUnitCode.trim()) !== Boolean(values.unitRatio.trim()))
+    errors.unitRatio = t('items.errors.invalidPair');
+  if (
+    values.unitRatio.trim() &&
+    Number(values.unitRatio) <= 0 &&
+    !numberError(values.unitRatio, 0, Number.MAX_SAFE_INTEGER)
+  )
+    errors.unitRatio = t('items.errors.invalidRatio');
+  if (
+    values.stockMin.trim() &&
+    values.stockMax.trim() &&
+    Number(values.stockMin) > Number(values.stockMax)
+  )
+    errors.stockMax = t('items.errors.invalidLimits');
   return {
     ...errors,
     spec: limit(values.spec, SPEC_MAX),
     legacyCode: limit(values.legacyCode, LEGACY_CODE_MAX),
+    englishName: limit(values.englishName, ENGLISH_NAME_MAX),
+    barcode: limit(values.barcode, BARCODE_MAX),
+    brand: limit(values.brand, BRAND_MAX),
+    manufacturerModel: limit(values.manufacturerModel, MANUFACTURER_MODEL_MAX),
+    stockMin: numberError(values.stockMin, 0, Number.MAX_SAFE_INTEGER),
+    stockMax: numberError(values.stockMax, 0, Number.MAX_SAFE_INTEGER),
+    basePurchasePrice: numberError(
+      values.basePurchasePrice,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
+    baseSalesPrice: numberError(
+      values.baseSalesPrice,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
+    unitRatio: numberError(values.unitRatio, 0, Number.MAX_SAFE_INTEGER),
+    purchaseLeadDays: numberError(values.purchaseLeadDays, 0, 3650, true),
     note: limit(values.note, NOTE_MAX),
   };
 }
@@ -248,18 +415,22 @@ export interface CategoryFormValues {
   readonly name: string;
   /** 上级分类的 id；空串表示根分类。 */
   readonly parentId: string;
+  /** 整数字符串，小的在前。 */
+  readonly sort: string;
 }
 
 export const EMPTY_CATEGORY_FORM: CategoryFormValues = {
   code: '',
   name: '',
   parentId: '',
+  sort: '0',
 };
 
 export const categoryFormOf = (category: Category): CategoryFormValues => ({
   code: category.code,
   name: category.name,
   parentId: category.parentId ?? '',
+  sort: category.sort == null ? '0' : String(category.sort),
 });
 
 export function validateCategory(
@@ -282,6 +453,8 @@ export function validateCategory(
     errors.name = t('items.categories.errors.invalidName', {
       max: DICTIONARY_NAME_MAX,
     });
+  if (!/^\d{1,9}$/u.test(values.sort.trim()))
+    errors.sort = t('items.categories.errors.invalidSort');
   return errors;
 }
 
@@ -295,13 +468,22 @@ export function categoryCreateInput(
     code: values.code.trim(),
     name: values.name.trim(),
     parentId: values.parentId || null,
+    ...(Number(values.sort || '0') !== 0 ? { sort: Number(values.sort) } : {}),
   };
 }
 
 export function categoryUpdateInput(
   values: CategoryFormValues,
+  original?: Category,
 ): UpdateCategoryInput {
-  return { name: values.name.trim(), parentId: values.parentId || null };
+  const sort = Number(values.sort || '0');
+  return {
+    name: values.name.trim(),
+    parentId: values.parentId || null,
+    ...(sort !== 0 || (original?.sort ?? 0) !== 0
+      ? { sort }
+      : {}),
+  };
 }
 
 export function categoryFieldErrors(error: unknown): FieldErrors {

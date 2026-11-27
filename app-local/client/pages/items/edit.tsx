@@ -18,8 +18,8 @@ import { ItemFields } from './item-form.js';
 import {
   itemFieldErrors,
   itemFormOf,
-  itemInput,
   itemNoun,
+  itemUpdateInput,
   validateItem,
 } from './model.js';
 import { ITEMS_RESOURCE } from './page-id.js';
@@ -36,7 +36,19 @@ export default function ItemEditPage(): ReactElement {
   const client = useMemo(() => new ItemsClient(api), [api]);
   const view = useCan({ resource: ITEMS_RESOURCE, action: 'view' });
   const manage = useCan({ resource: ITEMS_RESOURCE, action: 'manage' });
-  const pending = view.isPending || manage.isPending;
+  const purchasePrice = useCan({
+    resource: ITEMS_RESOURCE,
+    action: 'viewPurchasePrice',
+  });
+  const salesPrice = useCan({
+    resource: ITEMS_RESOURCE,
+    action: 'viewSalesPrice',
+  });
+  const pending =
+    view.isPending ||
+    manage.isPending ||
+    purchasePrice.isPending ||
+    salesPrice.isPending;
   const record = useRecord<Item>(
     `items/${encodeURIComponent(itemId)}`,
     view.can,
@@ -62,7 +74,9 @@ export default function ItemEditPage(): ReactElement {
                   initialValues={itemFormOf(item)}
                   validate={(values) => validateItem(values, t)}
                   fieldErrors={itemFieldErrors}
-                  save={(values) => client.update(item.id, itemInput(values))}
+                  save={(values) =>
+                    client.update(item.id, itemUpdateInput(values, item))
+                  }
                   onSuccess={(saved) =>
                     toaster.show({
                       type: 'success',
@@ -74,7 +88,13 @@ export default function ItemEditPage(): ReactElement {
                   }
                 >
                   {(form) => (
-                    <ItemFields form={form} item={item} dictionaries={loaded} />
+                    <ItemFields
+                      form={form}
+                      item={item}
+                      dictionaries={loaded}
+                      canViewPurchasePrice={purchasePrice.can}
+                      canViewSalesPrice={salesPrice.can}
+                    />
                   )}
                 </FormDialog>
               )}

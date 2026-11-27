@@ -23,7 +23,7 @@ import {
   allowHoverAfterOverlayClose,
   useHoverAllowedAfterOverlayClose,
 } from '../../lib/overlay-hover-guard.js';
-import { devAccountSwitcherSectionToken } from '../user-menu-section.js';
+import { userMenuExtensionSectionToken } from '../user-menu-section.js';
 import { LanguageSwitcher } from './language-switcher.js';
 
 export function UserMenu(): ReactElement {
@@ -57,10 +57,10 @@ export function UserMenu(): ReactElement {
     cjk: Boolean(identity?.fullName),
   });
 
-  // 开发工具的头像菜单段只在开发构建里登记（client/plugins.ts）；正式构建里没有这个服务。
+  // 扩展追加的菜单段只在开发构建里登记（client/extensions/development-extensions.ts）；正式构建里没有这个服务。
   // 用 createElement 而不是在渲染里造一个组件标签：这段 UI 由扩展提供，菜单自己不认识它。
-  const section = app.container.has(devAccountSwitcherSectionToken)
-    ? createElement(app.container.resolve(devAccountSwitcherSectionToken))
+  const section = app.container.has(userMenuExtensionSectionToken)
+    ? createElement(app.container.resolve(userMenuExtensionSectionToken))
     : null;
 
   return (

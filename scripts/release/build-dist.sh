@@ -22,6 +22,49 @@ done
 [ -f "$CHECKER" ] || fail "找不到自检脚本：$CHECKER"
 [ -f "$LOCK_CHECKER" ] || fail "找不到锁文件核对脚本：$LOCK_CHECKER"
 
+# R-073：开发与演示功能不进部署产物。下面是它们在服务端产物里的模块，逐个点名；每个模块有四种产物
+# （.js、带源码的 .js.map、.d.ts、.d.ts.map）。加一样开发工具，这里、check-dist.sh 的标记、
+# app-local/tests/project/dev-tools-not-in-prod.test.ts 三处同一轮里改。
+DEV_TOOLS_DIST_MODULES=(
+  dist/server/dev-tools/demo-accounts
+  dist/server/dev-tools/register
+  dist/server/dev-tools/settings
+  dist/server/routes/dev-account-switcher
+  dist/server/providers/dev-account-switcher
+  dist/server/config/dev-tools
+)
+# 剔除之后必须是空目录、随后删掉的目录。
+DEV_TOOLS_DIST_DIR='dist/server/dev-tools'
+
+# 只删点名的文件：清单里哪个不在产物里就失败（构建产出的路径变了），模块旁边或目录里有清单之外的
+# 文件也失败（又加了开发工具，先写进清单）。不递归、不用通配。
+strip_dev_tools() {
+  local tree="$1" module base path
+  local targets=()
+  for module in "${DEV_TOOLS_DIST_MODULES[@]}"; do
+    for suffix in .js .js.map .d.ts .d.ts.map; do
+      path="$tree/$module$suffix"
+      [ -f "$path" ] || fail "剔除清单里的文件不在产物里（构建产出的路径变了？）：$module$suffix"
+      targets+=("$path")
+    done
+  done
+  for path in "${targets[@]}"; do
+    rm -- "$path"
+  done
+  for module in "${DEV_TOOLS_DIST_MODULES[@]}"; do
+    case "$module" in "$DEV_TOOLS_DIST_DIR"/*) continue ;; esac
+    base="${module##*/}"
+    while IFS= read -r -d '' extra; do
+      fail "产物里有清单之外的开发工具文件：${extra#"$tree"/}"
+    done < <(find "$tree/${module%/*}" -maxdepth 1 -name "$base.*" -print0)
+  done
+  while IFS= read -r -d '' extra; do
+    fail "产物目录 $DEV_TOOLS_DIST_DIR 里有清单之外的文件：${extra#"$tree"/}"
+  done < <(find "$tree/$DEV_TOOLS_DIST_DIR" -mindepth 1 -print0)
+  rmdir -- "$tree/$DEV_TOOLS_DIST_DIR"
+  printf '[build-dist] 已从产物里剔除开发工具：%s 个文件与目录 %s\n' "${#targets[@]}" "$DEV_TOOLS_DIST_DIR"
+}
+
 WORK="$(mktemp -d /tmp/hs-build-dist.XXXXXX)" || fail '建临时目录失败。'
 cleanup() {
   if [ -n "${WORK:-}" ] && [ -d "$WORK" ]; then
@@ -52,6 +95,23 @@ printf '[build-dist] 构建结束 %s\n' "$(date -Iseconds)"
 
 ARTIFACT="$COPY/app-local/storage/exports/dist.tar.gz"
 [ -f "$ARTIFACT" ] || fail "构建未产出 $ARTIFACT"
+
+# R-073：从产物里逐个指名剔除开发与演示功能的文件。必须在生成清单之前 —— 清单记的是每个文件的
+# 校验和，晚一步就对不上。服务端是逐文件编译的：主组合不引用的模块也会被编出来，所以只在源码里
+# 拆出去还不够。剔除之后重新打包成同名的归档（顶层条目与框架打出来的一样），再由 check-dist.sh
+# 对产物断言一次「没有」。
+STRIPPED="$WORK/stripped"
+mkdir -p "$STRIPPED"
+if ! tar --warning=no-unknown-keyword -xzf "$ARTIFACT" -C "$STRIPPED"; then
+  fail '剔除开发工具前解包产物失败。'
+fi
+strip_dev_tools "$STRIPPED"
+mapfile -t top_entries < <(find "$STRIPPED" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)
+REPACKED="$WORK/dist.tar.gz"
+if ! tar -czf "$REPACKED" -C "$STRIPPED" "${top_entries[@]}"; then
+  fail '剔除开发工具后重新打包失败。'
+fi
+mv -- "$REPACKED" "$ARTIFACT"
 
 COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD)" || fail '取不到 HEAD 提交号。'
 MANIFEST="$ARTIFACT.manifest.json"

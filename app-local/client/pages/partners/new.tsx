@@ -8,10 +8,12 @@ import { FormDialog } from '#components/erp/form-dialog';
 import { FormRoute } from '#components/erp/form-route';
 
 import { PartnersClient, type PartnerKind } from './client.js';
+import { usePartnerDictionaries } from './dictionaries.js';
 import { PartnerFields } from './form.js';
 import {
   kindNoun,
   optional,
+  partnerCreateExtras,
   partnerFieldErrors,
   partnerNoun,
   validatePartner,
@@ -40,6 +42,10 @@ export default function PartnerNewPage(): ReactElement {
     action: 'create',
   });
   const pending = customerCreate.isPending || supplierCreate.isPending;
+  const options = usePartnerDictionaries(true, pending, {
+    customer: customerCreate.can,
+    supplier: supplierCreate.can,
+  });
   // 地址栏让预选的那一种正好是建不了的：退到建得了的另一种。
   const preferred: PartnerKind | undefined =
     kind === 'supplier'
@@ -74,6 +80,13 @@ export default function PartnerNewPage(): ReactElement {
           address: '',
           taxId: '',
           note: '',
+          customerGroupCode: '',
+          salespersonUserId: '',
+          supplierGroupCode: '',
+          buyerUserId: '',
+          payeeAccountNo: '',
+          payeeBankName: '',
+          payeeBankCode: '',
         }}
         validate={(values) => validatePartner(values, t)}
         fieldErrors={partnerFieldErrors}
@@ -88,6 +101,11 @@ export default function PartnerNewPage(): ReactElement {
             address: optional(values.address),
             taxId: optional(values.taxId),
             note: optional(values.note),
+            ...partnerCreateExtras(
+              values,
+              customerCreate.can,
+              supplierCreate.can,
+            ),
           })
         }
         onSuccess={(partner) => {
@@ -107,6 +125,7 @@ export default function PartnerNewPage(): ReactElement {
         {(form) => (
           <PartnerFields
             form={form}
+            options={options}
             customerCreate={customerCreate.can}
             supplierCreate={supplierCreate.can}
           />

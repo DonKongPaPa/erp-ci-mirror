@@ -4,7 +4,7 @@ import BizDictProvider from './biz-dict.js';
 import CodesProvider from './codes.js';
 import DepartmentMutationsProvider from './department-mutations.js';
 import DepartmentProvider from './departments.js';
-import DevAccountSwitcherProvider from './dev-account-switcher.js';
+import DevToolsGuardProvider from './dev-tools-guard.js';
 import EmployeesProvider from './employee-service.js';
 import EmployeeMutationsProvider from './employees.js';
 import FeedbackReminderProvider from './feedback-reminder.js';
@@ -25,6 +25,9 @@ import TicketNotificationsProvider from './ticket-notifications.js';
 import type { ApplicationServiceProviderConstructor } from '@nocobase/app-server/application';
 
 const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
+  // R-037 / R-073：生产常驻的启动守卫，排在最前面 —— 开发工具的开关在非开发环境写了开启，
+  // 别的提供者还没启动就先失败。
+  DevToolsGuardProvider,
   SubmissionProvider,
   // R-016：统一发号器，内部服务；没有页面与端点，顺序无关。
   CodesProvider,
@@ -59,9 +62,9 @@ const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
   LifecycleProvider,
   // R-003 S8：五张站内通知模板，效果在流转/派单提交之后才发。
   TicketNotificationsProvider,
-  // R-026：建「人」的账号时指派基线角色 staff。放在建演示账户之前：它们也是建人。
+  // R-026：建「人」的账号时指派基线角色 staff。开发工具的演示账户也是建人：它们在主组合之后才登记
+  // （见 `server/embedded.ts` 的开发环境入口），所以自然排在这一项后面。
   StaffBaselineProvider,
-  DevAccountSwitcherProvider,
   ApiKeysPolicyProvider,
 ];
 

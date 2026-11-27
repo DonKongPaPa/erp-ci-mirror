@@ -6,31 +6,22 @@ import { ServiceProvider } from '@nocobase/service-provider';
 import { randomBytes } from 'node:crypto';
 
 import { DEMO_ACCOUNTS, demoAccountEmail } from '../dev-tools/demo-accounts.js';
-import {
-  isDevAccountSwitcherConfigured,
-  isDevAccountSwitcherEnabled,
-} from '../dev-tools/settings.js';
+import { isDevAccountSwitcherEnabled } from '../dev-tools/settings.js';
 import { STAFF_PERMISSION_SET } from './staff-baseline.js';
 
 /**
- * R-037 开发工具的启动逻辑。
+ * R-037 开发工具的启动逻辑：建出演示账户。
  *
- * 关着的时候什么都不做：不建账户。开着但环境不是开发时启动失败 —— 悄悄关掉会让人以为
- * 它在生效，宁可起不来。开着且是开发环境时建出演示账户；两个接口由路由贡献自己按同一个
+ * 只在开发环境被登记（`server/dev-tools/register.ts`），关着的时候什么都不做、不建账户。
+ * 「配置开着但环境不是开发就起不来」那条约束在生产常驻的启动守卫里
+ * （`server/providers/dev-tools-guard.ts`）：那个文件不能引用这一个。两个接口由路由贡献按同一个
  * 条件挂载（`server/routes/dev-account-switcher.ts`），框架不在启动之后接受新的路由贡献。
  */
 export default class DevAccountSwitcherProvider extends ServiceProvider<Application> {
   public readonly name: string = 'app.dev-account-switcher';
 
   public override async boot(): Promise<void> {
-    if (!isDevAccountSwitcherEnabled(this.app)) {
-      if (isDevAccountSwitcherConfigured(this.app)) {
-        throw new Error(
-          '开发工具不能在生产环境开启：devTools.accountSwitcher.enabled 只在开发环境（NODE_ENV=development）可用。',
-        );
-      }
-      return;
-    }
+    if (!isDevAccountSwitcherEnabled(this.app)) return;
     await this.ensureDemoAccounts();
   }
 

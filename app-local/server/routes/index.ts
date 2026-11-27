@@ -14,7 +14,6 @@ import { apiRoutes as salesOrderRoutes } from './sales-orders.js';
 import { apiRoutes as itemRoutes } from './items.js';
 import { apiRoutes as unitRoutes } from './units.js';
 import { apiRoutes as itemCategoryRoutes } from './item-categories.js';
-import { apiRoutes as devAccountSwitcherRoutes } from './dev-account-switcher.js';
 
 const routes: readonly AppRouteContribution<Application>[] = [
   bizDictRoutes,
@@ -29,7 +28,6 @@ const routes: readonly AppRouteContribution<Application>[] = [
   itemRoutes,
   unitRoutes,
   itemCategoryRoutes,
-  devAccountSwitcherRoutes,
   applicationApiKeyRoutes,
 ];
 

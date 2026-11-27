@@ -14,6 +14,9 @@ const enUS = {
       partnerInactive: 'That partner is inactive; reactivate it first.',
       contactNotFound: 'That contact does not exist on this partner.',
       invalidUpdate: 'Give at least one field to change.',
+      dictCodeInvalid: 'That group code is not an active dictionary entry: {{reason}}.',
+      personInvalid: 'That person is not an active employee: {{reason}}.',
+      addressNotFound: 'That delivery address does not exist on this partner.',
     },
   },
   items: {

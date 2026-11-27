@@ -1,6 +1,7 @@
 import fileUi from '../extensions/nocobase-file-component-ui/locales/zh-CN.js';
 import type { AppResource } from './en-US.js';
 import systemZhCN from './system/zh-CN.js';
+import devTools from '../extensions/dev-account-switcher/locales/zh-CN.js';
 
 const zhCN: AppResource = {
   // The template's own copy; see `./en-US.ts`.
@@ -30,6 +31,7 @@ const zhCN: AppResource = {
     items: '物料',
     purchaseOrders: '采购订单',
     salesOrders: '销售订单',
+    bizDict: '业务字典',
   },
   settings: {
     ...systemZhCN.settings,
@@ -687,6 +689,7 @@ const zhCN: AppResource = {
       editTitle: '编辑客户或供应商',
       editDescription: '编码 {{code}} 和类型不能修改。',
       kindsHint: '至少勾一项；两项都勾表示这家单位既是客户也是供应商。',
+      noSelection: '不选',
     },
     createdToast: '已创建{{kind}}“{{name}}”',
     savedToast: '已保存“{{name}}”',
@@ -712,6 +715,35 @@ const zhCN: AppResource = {
     errors: {
       inactive: '这条记录已停用，请先启用。',
       kindRequired: '客户与供应商至少勾一项。',
+      invalidBankCode: '联行号只能包含字母和数字。',
+    },
+    fields: {
+      customerGroup: '客户分组',
+      supplierGroup: '供应商分组',
+      salesperson: '销售员',
+      buyer: '采购员',
+      payeeAccountNo: '收款账号',
+      payeeBankName: '开户行',
+      payeeBankCode: '联行号',
+    },
+    address: {
+      title: '交货地址',
+      address: '详细地址',
+      isDefault: '默认地址',
+      default: '默认',
+      add: '添加地址',
+      addTitle: '新增交货地址',
+      editTitle: '编辑交货地址',
+      addDescription: '为“{{name}}”添加一条交货地址。',
+      editDescription: '编辑“{{name}}”的一条交货地址。',
+      setDefault: '设为默认',
+      notCustomer: '交货地址是客户侧的数据，采购侧不能维护。',
+      empty: '还没有交货地址',
+      addedToast: '已添加交货地址',
+      savedToast: '已保存交货地址',
+      defaultToast: '已把“{{address}}”设为默认地址',
+      deactivatedToast: '已停用交货地址',
+      activatedToast: '已启用交货地址',
     },
   },
   // R-020 仓库页（《基座ERP前端设计》3.3）。仓库不设详情：字段太少，列表里已经看全。
@@ -897,6 +929,17 @@ const zhCN: AppResource = {
       category: '分类',
       unit: '基本单位',
       legacyCode: '旧系统编码',
+      englishName: '英文名称',
+      stockMin: '库存下限',
+      stockMax: '库存上限',
+      basePurchasePrice: '基准采购价（含税）',
+      baseSalesPrice: '基准销售价（含税）',
+      barcode: '物品条码',
+      brand: '品牌',
+      manufacturerModel: '制造商型号',
+      auxUnit: '辅助单位',
+      unitRatio: '单位换算比',
+      purchaseLeadDays: '采购提前期（天）',
       decimals: '小数位',
       parent: '上级分类',
     },
@@ -908,6 +951,7 @@ const zhCN: AppResource = {
       editDescription: '编码 {{code}} 不能修改。',
       inactive: '这条物料已停用，请先启用再修改。',
       noCategory: '无分类',
+      noAuxUnit: '无辅助单位',
       inactiveOption: '{{label}}（已停用）',
     },
     createdToast: '已创建{{noun}}“{{name}}”',
@@ -920,6 +964,11 @@ const zhCN: AppResource = {
     errors: {
       invalidName: '名称要去掉首尾空白后 1–{{max}} 个字符。',
       tooLong: '这一项最多 {{max}} 个字符。',
+      invalidNumber: '请填 {{min}} 到 {{max}} 之间的数字。',
+      invalidAuxUnit: '辅助单位不能和基本单位相同。',
+      invalidPair: '辅助单位与换算比要一起填，或一起留空。',
+      invalidRatio: '单位换算比要大于 0。',
+      invalidLimits: '库存下限不能大于库存上限。',
     },
     units: {
       newTitle: '新建计量单位',
@@ -948,10 +997,12 @@ const zhCN: AppResource = {
       codeHint: '1–32 个字符，输入时自动转成大写；建好后不能改',
       parentHint: '不选就是根分类',
       noParent: '无（根分类）',
+      sort: '排序',
       deactivateDescription: '停用后新建物料时不能再选它。',
       errors: {
         invalidCode: '编码要去掉首尾空白后 1–{{max}} 个字符。',
         invalidName: '名称要去掉首尾空白后 1–{{max}} 个字符。',
+        invalidSort: '排序要填不小于 0 的整数。',
       },
     },
   },
@@ -1239,6 +1290,52 @@ const zhCN: AppResource = {
     },
   },
   // R-013：FQC 的资源与动作，以及两把部门范围键。
+  // R-072：业务字典维护页（九个类型一页，按会话动作显隐写操作）。
+  bizDict: {
+    title: '业务字典',
+    description: '维护单据里选择的各项取值。',
+    searchLabel: '搜索码或名称',
+    empty: '暂无字典取值',
+    fields: {
+      name: '名称',
+      rate: '税率（%）',
+      startDate: '开始日期',
+      endDate: '结束日期',
+      description: '描述',
+      isDefault: '默认值',
+      sort: '排序',
+    },
+    actions: {
+      new: '新建取值',
+      edit: '编辑',
+      moveUp: '上移',
+      moveDown: '下移',
+      activate: '启用',
+      deactivate: '停用',
+      deactivateTitle: '停用“{{name}}”？',
+      deactivateDescription: '停用后新单据里选不到它，已有单据不受影响。',
+    },
+    form: {
+      newTitle: '新建取值',
+      editTitle: '编辑取值',
+      editDescription: '码 {{code}} 与类型建成后不能修改。',
+      codeHint: '码建成后不能修改。',
+    },
+    createdToast: '已创建“{{name}}”',
+    savedToast: '已保存“{{name}}”',
+    deactivatedToast: '已停用“{{name}}”',
+    activatedToast: '已启用“{{name}}”',
+    errors: {
+      invalidCode: '码只能包含字母、数字、连字符或下划线，最多 64 位。',
+      invalidName: '名称最多 {{max}} 个字。',
+      invalidRate: '税率要在 0 到 100 之间。',
+      invalidDate: '日期格式为 YYYY-MM-DD。',
+      invalidPeriod: '结束日期不能早于开始日期。',
+      invalidDescription: '描述最多 {{max}} 个字。',
+      invalidSort: '排序要填不小于 0 的整数。',
+      invalidType: '不认识的字典类型。',
+    },
+  },
   authorization: {
     sections: {
       quality: '质量管理',
@@ -1370,6 +1467,17 @@ const zhCN: AppResource = {
       tables: { items: '物料', units: '计量单位', categories: '物料分类' },
       actions: { view: '查看物料主数据', manage: '管理物料主数据' },
     },
+    // R-072：字典与两个收窄选项端点的业务资源；D-057 补角色编辑器里的词条标题。
+    bizDict: {
+      title: '业务字典',
+      tables: { entries: '字典取值' },
+      actions: { view: '查看业务字典', manage: '维护业务字典' },
+    },
+    bizOptions: {
+      title: '业务选项',
+      tables: { departments: '部门' },
+      actions: { view: '查看业务选项' },
+    },
     recordAccess: {
       myDepartments: '本部门',
       myDepartmentsAndBelow: '本部门及下级',
@@ -1428,15 +1536,9 @@ const zhCN: AppResource = {
       warehouseInactive: '这个仓库已停用，请换一个。',
     },
   },
-  // R-037：头像菜单里那段开发环境专用的账户切换。
-  devTools: {
-    accountSwitcher: {
-      title: '切换账户',
-      developmentOnly: '仅开发环境',
-      current: '当前账户',
-      failed: '切换到「{{name}}」失败。',
-    },
-  },
+  // R-037：头像菜单里那段开发环境专用的账户切换。R-073：只在开发构建里并入 —— 生产构建把
+  // `import.meta.env.DEV` 换成常量假，这个展开连同它引入的词条表一起被摇掉；check-dist.sh 再对语言包断言一次。
+  ...(import.meta.env.DEV ? { devTools } : {}),
   // R-032 / R-034：账号菜单、两个 API 密钥页面与通知记录页。
   account: {
     ...systemZhCN.account,

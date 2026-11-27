@@ -1,4 +1,5 @@
 import { useApiClient } from '@nocobase/app-client';
+import { useCan } from '@nocobase/app-plugin-authorization/client';
 import { useTranslation } from '@nocobase/i18n/client';
 import type { CellContext, ColumnDef } from '@tanstack/react-table';
 import { useMemo, useState, type ReactElement } from 'react';
@@ -21,7 +22,7 @@ import { ItemsClient, type Item } from './client.js';
 import { categoryName, unitName, useItemDictionaries } from './dictionaries.js';
 import { EntityTable } from './entity-table.js';
 import { itemTypeLabel } from './model.js';
-import type { ListAccess } from './page-id.js';
+import { ITEMS_RESOURCE, type ListAccess } from './page-id.js';
 import { useStatusChange } from './status-change.js';
 
 const DASH = <span className='text-muted-foreground'>—</span>;
@@ -42,6 +43,14 @@ export function ItemList({
   const { t } = useTranslation();
   const api = useApiClient();
   const client = useMemo(() => new ItemsClient(api), [api]);
+  const purchasePrice = useCan({
+    resource: ITEMS_RESOURCE,
+    action: 'viewPurchasePrice',
+  });
+  const salesPrice = useCan({
+    resource: ITEMS_RESOURCE,
+    action: 'viewSalesPrice',
+  });
   const dictionaries = useItemDictionaries(canView, pending);
   const list = useEntityList<Item>({
     path: 'items',
@@ -138,6 +147,74 @@ export function ItemList({
         cell: ({ row }) => unitName(dictionaries.data, row.original.unitCode),
       },
       {
+        id: 'englishName',
+        header: t('items.columns.englishName'),
+        cell: ({ row }) => row.original.englishName ?? DASH,
+      },
+      {
+        id: 'stockMin',
+        header: t('items.columns.stockMin'),
+        cell: ({ row }) => row.original.stockMin ?? DASH,
+      },
+      {
+        id: 'stockMax',
+        header: t('items.columns.stockMax'),
+        cell: ({ row }) => row.original.stockMax ?? DASH,
+      },
+      ...(purchasePrice.can
+        ? [
+            {
+              id: 'basePurchasePrice',
+              header: t('items.columns.basePurchasePrice'),
+              cell: ({ row }: CellContext<Item, unknown>) =>
+                row.original.basePurchasePrice ?? DASH,
+            },
+          ]
+        : []),
+      ...(salesPrice.can
+        ? [
+            {
+              id: 'baseSalesPrice',
+              header: t('items.columns.baseSalesPrice'),
+              cell: ({ row }: CellContext<Item, unknown>) =>
+                row.original.baseSalesPrice ?? DASH,
+            },
+          ]
+        : []),
+      {
+        id: 'barcode',
+        header: t('items.columns.barcode'),
+        cell: ({ row }) => row.original.barcode ?? DASH,
+      },
+      {
+        id: 'brand',
+        header: t('items.columns.brand'),
+        cell: ({ row }) => row.original.brand ?? DASH,
+      },
+      {
+        id: 'manufacturerModel',
+        header: t('items.columns.manufacturerModel'),
+        cell: ({ row }) => row.original.manufacturerModel ?? DASH,
+      },
+      {
+        id: 'auxUnitCode',
+        header: t('items.columns.auxUnit'),
+        cell: ({ row }) =>
+          row.original.auxUnitCode === null
+            ? DASH
+            : unitName(dictionaries.data, row.original.auxUnitCode),
+      },
+      {
+        id: 'unitRatio',
+        header: t('items.columns.unitRatio'),
+        cell: ({ row }) => row.original.unitRatio ?? DASH,
+      },
+      {
+        id: 'purchaseLeadDays',
+        header: t('items.columns.purchaseLeadDays'),
+        cell: ({ row }) => row.original.purchaseLeadDays ?? DASH,
+      },
+      {
         id: 'status',
         header: t('erp.fields.status'),
         cell: ({ row }) => (
@@ -147,7 +224,15 @@ export function ItemList({
       // 没有写权限的人整列操作都不画。
       ...(canManage ? [actions] : []),
     ];
-  }, [t, canManage, dictionaries.data, ask, activate]);
+  }, [
+    t,
+    canManage,
+    dictionaries.data,
+    ask,
+    activate,
+    purchasePrice.can,
+    salesPrice.can,
+  ]);
 
   const typeOptions: readonly FilterOption[] = [
     { value: 'material', label: itemTypeLabel('material', t) },

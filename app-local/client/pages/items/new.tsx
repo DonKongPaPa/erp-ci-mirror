@@ -12,8 +12,8 @@ import { useItemDictionaries } from './dictionaries.js';
 import { ItemFields } from './item-form.js';
 import {
   EMPTY_ITEM_FORM,
+  itemCreateInput,
   itemFieldErrors,
-  itemInput,
   itemNoun,
   validateItem,
 } from './model.js';
@@ -30,6 +30,14 @@ export default function ItemNewPage(): ReactElement {
   const navigate = useNavigate();
   const client = useMemo(() => new ItemsClient(api), [api]);
   const manage = useCan({ resource: ITEMS_RESOURCE, action: 'manage' });
+  const purchasePrice = useCan({
+    resource: ITEMS_RESOURCE,
+    action: 'viewPurchasePrice',
+  });
+  const salesPrice = useCan({
+    resource: ITEMS_RESOURCE,
+    action: 'viewSalesPrice',
+  });
   const dictionaries = useItemDictionaries(manage.can, manage.isPending);
   const title = t('items.form.newTitle');
   return (
@@ -43,7 +51,7 @@ export default function ItemNewPage(): ReactElement {
             initialValues={EMPTY_ITEM_FORM}
             validate={(values) => validateItem(values, t)}
             fieldErrors={itemFieldErrors}
-            save={(values) => client.create(itemInput(values))}
+            save={(values) => client.create(itemCreateInput(values))}
             onSuccess={(item) => {
               // 列表按编码升序，新记录的编码最大、排在最后一页；提示里带「查看」，点开就是它的详情。
               const view = (): void =>
@@ -58,7 +66,14 @@ export default function ItemNewPage(): ReactElement {
               });
             }}
           >
-            {(form) => <ItemFields form={form} dictionaries={loaded} />}
+            {(form) => (
+              <ItemFields
+                form={form}
+                dictionaries={loaded}
+                canViewPurchasePrice={purchasePrice.can}
+                canViewSalesPrice={salesPrice.can}
+              />
+            )}
           </FormDialog>
         )}
       </RecordRoute>

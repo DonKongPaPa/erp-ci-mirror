@@ -20,9 +20,9 @@ import {
 } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import devAccountSwitcher from '../../client/extensions/dev-account-switcher/plugin.js';
+import developmentExtensions from '../../client/extensions/development-extensions.js';
 import { UserMenu } from '../../client/layouts/components/user-menu.js';
-import { devAccountSwitcherRegistration } from '../../client/plugins.js';
+import clientPlugins from '../../client/plugins.js';
 import { renderAuthenticatedClient } from '../helpers/authenticated-client.js';
 
 /**
@@ -91,11 +91,16 @@ const ROLE_ENTRIES = [
 ] as const;
 
 describe('account switcher in the avatar menu', () => {
-  it('contributes nothing outside a development build', () => {
-    const registration = devAccountSwitcher({ enabled: false });
-    expect(registration.serviceProviders).toEqual([]);
-    expect(registration.reactProviders).toEqual([]);
-    expect(registration.routes).toEqual([]);
+  it('carries the development extensions entry in the client composition', () => {
+    // 组合里以应用自己的包名登记的只有这一项：它是开发扩展唯一的入口，本身不含切换器的代码。
+    const own = clientPlugins.plugins.filter(
+      (plugin) => plugin.packageName === 'app-local',
+    );
+    expect(own).toHaveLength(1);
+    expect(own[0]?.serviceProviders).toEqual(
+      developmentExtensions().serviceProviders,
+    );
+    expect(own[0]?.serviceProviders).toHaveLength(1);
   });
 
   it('renders nothing when the server switch is off', async () => {
@@ -105,7 +110,7 @@ describe('account switcher in the avatar menu', () => {
           <UserMenu />
         </AppThemeProvider>
       </PublicConfigOverride>,
-      { plugins: [devAccountSwitcher({ enabled: true })] },
+      { plugins: [developmentExtensions()] },
     );
     await openAccountMenu();
     expect(
@@ -124,7 +129,7 @@ describe('account switcher in the avatar menu', () => {
         </AppThemeProvider>
       </PublicConfigOverride>,
       {
-        plugins: [devAccountSwitcher({ enabled: true })],
+        plugins: [developmentExtensions()],
         env: { NODE_ENV: 'development' },
         config: { devTools: { accountSwitcher: { enabled: true } } },
         afterResponse(request, response) {
@@ -180,13 +185,13 @@ describe('account switcher in the avatar menu', () => {
   });
 });
 
-// 客户端 DEV 门的行为：生产构建（DEV=false）不登记切换账户入口，开发构建才登记。
-it('registers the switcher extension only for a development build', () => {
-  const production = devAccountSwitcherRegistration(false);
-  expect(production.options, '生产构建不带扩展选项').toEqual({});
-  expect(production.serviceProviders, '生产构建不登记这段 UI').toHaveLength(0);
-
-  const development = devAccountSwitcherRegistration(true);
-  expect(development.options).toEqual({ enabled: true });
-  expect(development.serviceProviders).toHaveLength(1);
+// 客户端 DEV 门的行为：vitest 里 import.meta.env.DEV 为真（开发态），入口登记的提供者会把切换器那一段
+// 登记给头像菜单 —— 上面「列出四个演示账户」那条用例走的就是这条路（R-073）。生产构建把 DEV 换成常量假，
+// 提供者的 start() 直接返回、不引入切换器；那一半单测里跑不出来，由产物自检断言。
+it('the development extensions entry contributes exactly one provider', () => {
+  const registration = developmentExtensions();
+  expect(registration.packageName).toBe('app-local');
+  expect(registration.serviceProviders).toHaveLength(1);
+  expect(registration.reactProviders).toEqual([]);
+  expect(registration.routes).toEqual([]);
 });

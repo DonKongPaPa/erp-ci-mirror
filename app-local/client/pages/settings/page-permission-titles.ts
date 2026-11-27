@@ -23,6 +23,9 @@ export const pagePermissionTitles: PagePermissionTitles = {
   partnerEdit: 'partners.form.editTitle',
   partnerContactNew: 'partners.contact.addTitle',
   partnerContactEdit: 'partners.contact.editTitle',
+  // R-014 加片：交货地址的新建、编辑对话框继承往来单位页的页面授权。
+  partnerAddressNew: 'partners.address.addTitle',
+  partnerAddressEdit: 'partners.address.editTitle',
   // R-020：仓库的新建、编辑是对话框，继承列表页的页面授权；单据的子页有自己的面包屑标题。
   warehouseNew: 'warehouses.form.newTitle',
   warehouseEdit: 'warehouses.form.editTitle',
@@ -34,6 +37,9 @@ export const pagePermissionTitles: PagePermissionTitles = {
   unitEdit: 'items.units.editTitle',
   categoryNew: 'items.categories.newTitle',
   categoryEdit: 'items.categories.editTitle',
+  // R-072：业务字典的新建、编辑对话框继承列表页的页面授权，权限清单里要有可读的名字。
+  bizDictNew: 'bizDict.form.newTitle',
+  bizDictEdit: 'bizDict.form.editTitle',
   // R-021 / R-022：采购订单、销售订单的子页与对话框继承列表页的页面授权，权限清单里要有可读的名字。
   purchaseOrderReceipt: 'purchaseOrders.receiptTitle',
   salesOrderIssue: 'salesOrders.receiptTitle',

@@ -484,7 +484,7 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
           '403': apiErrorResponse(403),
           '404': apiErrorResponse(404),
           '422': {
-            // 422 不在框架的标准状态表里，照 dev-account-switcher 的写法显式声明。
+            // 422 不在框架的标准状态表里，要显式给 `httpStatus`。
             description:
               'The list names the root Permission Set or another unrestricted set (`PERMISSION_SET_NOT_ASSIGNABLE`); nothing was changed.',
             content: {

@@ -15,6 +15,18 @@ export interface Item {
   readonly unitCode: string;
   readonly status: ItemStatus;
   readonly legacyCode: string | null;
+  readonly englishName: string | null;
+  readonly stockMin: number | null;
+  readonly stockMax: number | null;
+  /** 没有对应价格动作时服务端不回这两个键：是 undefined，不是 null，页面不拿空值占成 0。 */
+  readonly basePurchasePrice?: number | null;
+  readonly baseSalesPrice?: number | null;
+  readonly barcode: string | null;
+  readonly brand: string | null;
+  readonly manufacturerModel: string | null;
+  readonly auxUnitCode: string | null;
+  readonly unitRatio: number | null;
+  readonly purchaseLeadDays: number | null;
   readonly note: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -35,6 +47,7 @@ export interface Category {
   readonly code: string;
   readonly name: string;
   readonly parentId: string | null;
+  readonly sort: number;
   readonly status: ItemStatus;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -48,6 +61,17 @@ export interface CreateItemInput {
   readonly spec?: string | null;
   readonly categoryCode?: string | null;
   readonly legacyCode?: string | null;
+  readonly englishName?: string | null;
+  readonly stockMin?: number;
+  readonly stockMax?: number;
+  readonly basePurchasePrice?: number;
+  readonly baseSalesPrice?: number;
+  readonly barcode?: string | null;
+  readonly brand?: string | null;
+  readonly manufacturerModel?: string | null;
+  readonly auxUnitCode?: string | null;
+  readonly unitRatio?: number;
+  readonly purchaseLeadDays?: number;
   readonly note?: string | null;
 }
 
@@ -60,6 +84,17 @@ export interface UpdateItemInput {
   readonly unitCode?: string;
   readonly status?: ItemStatus;
   readonly legacyCode?: string | null;
+  readonly englishName?: string | null;
+  readonly stockMin?: number | null;
+  readonly stockMax?: number | null;
+  readonly basePurchasePrice?: number | null;
+  readonly baseSalesPrice?: number | null;
+  readonly barcode?: string | null;
+  readonly brand?: string | null;
+  readonly manufacturerModel?: string | null;
+  readonly auxUnitCode?: string | null;
+  readonly unitRatio?: number | null;
+  readonly purchaseLeadDays?: number | null;
   readonly note?: string | null;
 }
 
@@ -82,12 +117,14 @@ export interface CreateCategoryInput {
   readonly code: string;
   readonly name: string;
   readonly parentId?: string | null;
+  readonly sort?: number;
 }
 
 /** 编码不能改；`parentId: null` 表示移到根。 */
 export interface UpdateCategoryInput {
   readonly name?: string;
   readonly parentId?: string | null;
+  readonly sort?: number;
   readonly status?: ItemStatus;
 }
 

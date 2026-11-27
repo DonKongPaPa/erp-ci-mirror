@@ -103,6 +103,11 @@ export function CategoryList({
         cell: ({ row }) => row.original.name,
       },
       {
+        id: 'sort',
+        header: t('items.categories.sort'),
+        cell: ({ row }) => row.original.sort,
+      },
+      {
         id: 'parentId',
         header: t('items.columns.parent'),
         cell: ({ row }) =>

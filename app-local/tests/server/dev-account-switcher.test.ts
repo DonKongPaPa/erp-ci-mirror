@@ -13,6 +13,7 @@ import { describe, expect, test, vi } from 'vitest';
 import { createAppTest, createTestApp } from '../helpers/test-app.js';
 import { isDevelopmentNodeEnv } from '../../server/dev-tools/settings.js';
 import DevAccountSwitcherProvider from '../../server/providers/dev-account-switcher.js';
+import DevToolsGuardProvider from '../../server/providers/dev-tools-guard.js';
 import { createStandaloneServer } from '../../server/standalone.js';
 
 /**
@@ -119,6 +120,15 @@ describe('enabled in development', () => {
     }
     // 姓名、标识之外不放任何人员信息：R-028 的选择性暴露。
     expect(JSON.stringify(accounts)).not.toContain('@');
+  });
+
+  test('publishes the switch to the client where the tools are registered', async ({
+    app,
+  }) => {
+    expect(app.config.get('devTools.accountSwitcher.enabled')).toBe(true);
+    expect(app.config.publicValues?.()).toMatchObject({
+      devTools: { accountSwitcher: { enabled: true } },
+    });
   });
 
   test('R-026: every demo person account carries the staff baseline, exactly once', async ({
@@ -452,7 +462,10 @@ describe('enabled in development', () => {
       .execute();
     expect(rows, '没有另建同名用户').toHaveLength(2);
     const byUsername = new Map(rows.map((row) => [String(row.username), row]));
-    expect(byUsername.get('demo.staff')?.deletedAt, '删除标记仍在').not.toBeNull();
+    expect(
+      byUsername.get('demo.staff')?.deletedAt,
+      '删除标记仍在',
+    ).not.toBeNull();
     expect(
       byUsername.get('demo.dept_manager')?.disabledAt,
       '停用标记仍在',
@@ -477,7 +490,10 @@ describe('off by default', () => {
     app,
     connection,
   }) => {
-    expect(app.config.get('devTools.accountSwitcher.enabled')).toBe(false);
+    // R-073：非开发环境不登记开发工具的配置节 —— 开关读不到，也不发布到公开配置。
+    // 「默认关着、开了就起不来」由生产常驻的启动守卫守（下面两条用例）。
+    expect(app.config.get('devTools.accountSwitcher.enabled')).toBeUndefined();
+    expect(app.config.publicValues?.() ?? {}).not.toHaveProperty('devTools');
     const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
     expect((await admin.fetch('/dev-tools/accounts')).status).toBe(404);
     expect(
@@ -524,15 +540,34 @@ test('refuses to start when the switch is on outside development', async () => {
   }
 });
 
-// 启动门的行为：生产配置开着开关时，provider 的 boot 真的拒绝启动（不是查源码文字）。
-test('the provider refuses to boot outside development when configured on', async () => {
-  const productionApp = {
-    nodeEnv: 'production',
-    config: { get: () => ({ accountSwitcher: { enabled: true } }) },
-  } as unknown as Application;
-  await expect(
-    new DevAccountSwitcherProvider(productionApp).boot(),
-  ).rejects.toThrow('开发工具不能在生产环境开启');
+// 启动门的行为（不是查源码文字）：生产配置写着开关时，守卫的 boot 真的拒绝启动；环境标记缺失按生产对待。
+test('the guard refuses to boot outside development when the switch is configured on', async () => {
+  for (const nodeEnv of ['production', 'test', undefined]) {
+    const app = {
+      nodeEnv,
+      config: { get: () => ({ accountSwitcher: { enabled: true } }) },
+    } as unknown as Application;
+    await expect(new DevToolsGuardProvider(app).boot()).rejects.toThrow(
+      '开发工具不能在生产环境开启',
+    );
+  }
+});
+
+test('the guard lets development, an off switch and a missing section boot', async () => {
+  for (const [nodeEnv, section] of [
+    ['development', { accountSwitcher: { enabled: true } }],
+    ['production', { accountSwitcher: { enabled: false } }],
+    ['production', {}],
+    [undefined, undefined],
+  ] as const) {
+    const app = {
+      nodeEnv,
+      config: { get: () => section },
+    } as unknown as Application;
+    await expect(
+      new DevToolsGuardProvider(app).boot(),
+    ).resolves.toBeUndefined();
+  }
 });
 
 /** 直接改库模拟停用与删除：这两条用户管理路径不属于本端点的验收范围。 */

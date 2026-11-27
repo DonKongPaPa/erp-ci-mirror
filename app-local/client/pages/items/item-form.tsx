@@ -45,11 +45,16 @@ export function ItemFields({
   form,
   item,
   dictionaries,
+  canViewPurchasePrice = false,
+  canViewSalesPrice = false,
 }: {
   readonly form: FormApi<ItemFormValues>;
   /** 传了就是编辑：只读的编码从这里出。 */
   readonly item?: Item;
   readonly dictionaries: ItemDictionaries;
+  /** 两个基准价各由自己的动作控制；没有动作时不画输入框，也不拿空值占成 0。 */
+  readonly canViewPurchasePrice?: boolean;
+  readonly canViewSalesPrice?: boolean;
 }): ReactElement {
   const { t } = useTranslation();
   const values = form.values;
@@ -69,6 +74,13 @@ export function ItemFields({
   const typeOptions: readonly FormOption[] = [
     { value: 'material', label: itemTypeLabel('material', t) },
     { value: 'product', label: itemTypeLabel('product', t) },
+  ];
+  const otherUnits = dictionaries.units.filter(
+    (unit) => unit.code !== values.unitCode,
+  );
+  const auxOptions: FormOption[] = [
+    { value: NONE, label: t('items.form.noAuxUnit') },
+    ...activeOptions(dictionaryOptions(otherUnits, t), otherUnits, values.auxUnitCode),
   ];
   return (
     <FormGrid>
@@ -144,6 +156,162 @@ export function ItemFields({
             aria-invalid={invalid}
             value={values.legacyCode}
             onChange={(event) => form.set('legacyCode', event.target.value)}
+          />
+        )}
+      </FormField>
+      <FormField name='englishName' label={t('items.columns.englishName')}>
+        {(id, invalid) => (
+          <Input
+            id={id}
+            aria-invalid={invalid}
+            value={values.englishName}
+            onChange={(event) => form.set('englishName', event.target.value)}
+          />
+        )}
+      </FormField>
+      <FormField name='stockMin' label={t('items.columns.stockMin')}>
+        {(id, invalid) => (
+          <Input
+            id={id}
+            type='number'
+            min={0}
+            step='any'
+            aria-invalid={invalid}
+            value={values.stockMin}
+            onChange={(event) => form.set('stockMin', event.target.value)}
+          />
+        )}
+      </FormField>
+      <FormField name='stockMax' label={t('items.columns.stockMax')}>
+        {(id, invalid) => (
+          <Input
+            id={id}
+            type='number'
+            min={0}
+            step='any'
+            aria-invalid={invalid}
+            value={values.stockMax}
+            onChange={(event) => form.set('stockMax', event.target.value)}
+          />
+        )}
+      </FormField>
+      {canViewPurchasePrice ? (
+        <FormField
+          name='basePurchasePrice'
+          label={t('items.columns.basePurchasePrice')}
+        >
+          {(id, invalid) => (
+            <Input
+              id={id}
+              type='number'
+              min={0}
+              step='any'
+              aria-invalid={invalid}
+              value={values.basePurchasePrice}
+              onChange={(event) =>
+                form.set('basePurchasePrice', event.target.value)
+              }
+            />
+          )}
+        </FormField>
+      ) : null}
+      {canViewSalesPrice ? (
+        <FormField
+          name='baseSalesPrice'
+          label={t('items.columns.baseSalesPrice')}
+        >
+          {(id, invalid) => (
+            <Input
+              id={id}
+              type='number'
+              min={0}
+              step='any'
+              aria-invalid={invalid}
+              value={values.baseSalesPrice}
+              onChange={(event) =>
+                form.set('baseSalesPrice', event.target.value)
+              }
+            />
+          )}
+        </FormField>
+      ) : null}
+      <FormField name='barcode' label={t('items.columns.barcode')}>
+        {(id, invalid) => (
+          <Input
+            id={id}
+            aria-invalid={invalid}
+            value={values.barcode}
+            onChange={(event) => form.set('barcode', event.target.value)}
+          />
+        )}
+      </FormField>
+      <FormField name='brand' label={t('items.columns.brand')}>
+        {(id, invalid) => (
+          <Input
+            id={id}
+            aria-invalid={invalid}
+            value={values.brand}
+            onChange={(event) => form.set('brand', event.target.value)}
+          />
+        )}
+      </FormField>
+      <FormField
+        name='manufacturerModel'
+        label={t('items.columns.manufacturerModel')}
+      >
+        {(id, invalid) => (
+          <Input
+            id={id}
+            aria-invalid={invalid}
+            value={values.manufacturerModel}
+            onChange={(event) =>
+              form.set('manufacturerModel', event.target.value)
+            }
+          />
+        )}
+      </FormField>
+      <FormField name='auxUnitCode' label={t('items.columns.auxUnit')}>
+        {(id, invalid) => (
+          <FormSelect
+            id={id}
+            invalid={invalid}
+            value={values.auxUnitCode || NONE}
+            options={auxOptions}
+            onChange={(next) =>
+              form.set('auxUnitCode', next === NONE ? '' : next)
+            }
+          />
+        )}
+      </FormField>
+      <FormField name='unitRatio' label={t('items.columns.unitRatio')}>
+        {(id, invalid) => (
+          <Input
+            id={id}
+            type='number'
+            min={0}
+            step='any'
+            aria-invalid={invalid}
+            value={values.unitRatio}
+            onChange={(event) => form.set('unitRatio', event.target.value)}
+          />
+        )}
+      </FormField>
+      <FormField
+        name='purchaseLeadDays'
+        label={t('items.columns.purchaseLeadDays')}
+      >
+        {(id, invalid) => (
+          <Input
+            id={id}
+            type='number'
+            min={0}
+            max={3650}
+            step='1'
+            aria-invalid={invalid}
+            value={values.purchaseLeadDays}
+            onChange={(event) =>
+              form.set('purchaseLeadDays', event.target.value)
+            }
           />
         )}
       </FormField>

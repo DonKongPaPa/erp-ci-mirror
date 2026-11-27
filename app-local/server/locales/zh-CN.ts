@@ -10,6 +10,9 @@ const zhCN: AppServerResource = {
       partnerInactive: '这个往来单位已停用，请先启用。',
       contactNotFound: '这个往来单位下没有这条联系人。',
       invalidUpdate: '至少要给一项要改的内容。',
+      dictCodeInvalid: '分组的码不是字典里在用的取值：{{reason}}。',
+      personInvalid: '这个人不是在职员工：{{reason}}。',
+      addressNotFound: '这个往来单位下没有这条交货地址。',
     },
   },
   items: {

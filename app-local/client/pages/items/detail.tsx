@@ -36,7 +36,16 @@ export default function ItemDetailPage(): ReactElement {
   const client = useMemo(() => new ItemsClient(api), [api]);
   const view = useCan({ resource: ITEMS_RESOURCE, action: 'view' });
   const manage = useCan({ resource: ITEMS_RESOURCE, action: 'manage' });
-  const pending = view.isPending || manage.isPending;
+  const purchasePrice = useCan({
+    resource: ITEMS_RESOURCE,
+    action: 'viewPurchasePrice',
+  });
+  const salesPrice = useCan({
+    resource: ITEMS_RESOURCE,
+    action: 'viewSalesPrice',
+  });
+  const pending =
+    view.isPending || manage.isPending || purchasePrice.isPending || salesPrice.isPending;
   const record = useRecord<Item>(
     `items/${encodeURIComponent(itemId)}`,
     view.can,
@@ -53,6 +62,8 @@ export default function ItemDetailPage(): ReactElement {
             client={client}
             reload={record.reload}
             canManage={manage.can}
+            canViewPurchasePrice={purchasePrice.can}
+            canViewSalesPrice={salesPrice.can}
             // 字典只是把编码换成名字：还没读到或读不到时照常显示这一条，编码照写。
             unit={
               dictionaries.data
@@ -76,6 +87,8 @@ function ItemDrawer({
   client,
   reload,
   canManage,
+  canViewPurchasePrice,
+  canViewSalesPrice,
   unit,
   category,
 }: {
@@ -83,6 +96,8 @@ function ItemDrawer({
   readonly client: ItemsClient;
   readonly reload: () => void;
   readonly canManage: boolean;
+  readonly canViewPurchasePrice: boolean;
+  readonly canViewSalesPrice: boolean;
   readonly unit: string;
   readonly category: string | null;
 }): ReactElement {
@@ -145,6 +160,37 @@ function ItemDrawer({
             { label: t('items.columns.category'), value: category },
             { label: t('items.columns.unit'), value: unit },
             { label: t('items.columns.legacyCode'), value: item.legacyCode },
+            { label: t('items.columns.englishName'), value: item.englishName },
+            { label: t('items.columns.stockMin'), value: item.stockMin },
+            { label: t('items.columns.stockMax'), value: item.stockMax },
+            ...(canViewPurchasePrice
+              ? [
+                  {
+                    label: t('items.columns.basePurchasePrice'),
+                    value: item.basePurchasePrice,
+                  },
+                ]
+              : []),
+            ...(canViewSalesPrice
+              ? [
+                  {
+                    label: t('items.columns.baseSalesPrice'),
+                    value: item.baseSalesPrice,
+                  },
+                ]
+              : []),
+            { label: t('items.columns.barcode'), value: item.barcode },
+            { label: t('items.columns.brand'), value: item.brand },
+            {
+              label: t('items.columns.manufacturerModel'),
+              value: item.manufacturerModel,
+            },
+            { label: t('items.columns.auxUnit'), value: item.auxUnitCode },
+            { label: t('items.columns.unitRatio'), value: item.unitRatio },
+            {
+              label: t('items.columns.purchaseLeadDays'),
+              value: item.purchaseLeadDays,
+            },
             { label: t('erp.fields.note'), value: item.note, wide: true },
           ]}
         />

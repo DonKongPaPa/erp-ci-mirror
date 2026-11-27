@@ -761,10 +761,45 @@ export const UpdateShiftBody = z
 /**
  * R-014 MVP：往来单位。请求体不收 `code`（由底座发号器发），响应逐列列出，
  * 始终没有 createdById（人员标识）；联系方式是业务字段，允许出现。
+ *
+ * 复刻波 0 加片：七个可选键（分组码、销售员/采购员账号标识、收款三列），按侧裁列后
+ * 才出现在响应里；人员只回 { userId, name }，联行号只收数字与字母（待补查 2 的默认）。
  */
 const partnerName = z.string().trim().min(1).max(128);
 const nullablePartnerText = (max: number) =>
   z.union([z.string().trim().min(1).max(max), z.null()]).optional();
+const nullableBankCode = z
+  .union([
+    z.string().trim().min(1).max(32).regex(/^[A-Za-z0-9]+$/u),
+    z.null(),
+  ])
+  .optional();
+
+/** 人员只暴露两列；邮箱、手机号、工号、部门不进任何响应。 */
+const PersonRefSchema = z.object({
+  userId: z.string(),
+  name: z.string().nullable(),
+});
+
+const partnerExtraView = {
+  customerGroupCode: z.string().nullable().optional(),
+  supplierGroupCode: z.string().nullable().optional(),
+  salesperson: PersonRefSchema.nullable().optional(),
+  buyer: PersonRefSchema.nullable().optional(),
+  payeeAccountNo: z.string().nullable().optional(),
+  payeeBankName: z.string().nullable().optional(),
+  payeeBankCode: z.string().nullable().optional(),
+} as const;
+
+const partnerExtraInput = {
+  customerGroupCode: nullablePartnerText(32),
+  supplierGroupCode: nullablePartnerText(32),
+  salespersonUserId: nullablePartnerText(64),
+  buyerUserId: nullablePartnerText(64),
+  payeeAccountNo: nullablePartnerText(64),
+  payeeBankName: nullablePartnerText(128),
+  payeeBankCode: nullableBankCode,
+} as const;
 
 export const PartnerSchema = z.object({
   id: z.string(),
@@ -781,6 +816,7 @@ export const PartnerSchema = z.object({
   note: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  ...partnerExtraView,
 });
 
 export const ContactSchema = z.object({
@@ -793,8 +829,19 @@ export const ContactSchema = z.object({
   isPrimary: z.boolean(),
 });
 
+export const AddressSchema = z.object({
+  id: z.string(),
+  partnerId: z.string(),
+  address: z.string(),
+  isDefault: z.boolean(),
+  status: z.enum(['active', 'inactive']),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
 export const PartnerDetailSchema = PartnerSchema.extend({
   contacts: z.array(ContactSchema),
+  addresses: z.array(AddressSchema).optional(),
 });
 
 export const PartnerListSchema = z.object({
@@ -809,6 +856,10 @@ export const PartnerListQuery = z.object({
   kind: z.enum(['customer', 'supplier']).optional(),
   q: z.string().min(1).max(128).optional(),
   status: z.enum(['active', 'inactive']).optional(),
+  customerGroupCode: z.string().min(1).max(32).optional(),
+  supplierGroupCode: z.string().min(1).max(32).optional(),
+  salespersonUserId: z.string().min(1).max(64).optional(),
+  buyerUserId: z.string().min(1).max(64).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
@@ -828,6 +879,7 @@ export const CreatePartnerBody = z.object({
   address: nullablePartnerText(512),
   taxId: nullablePartnerText(64),
   note: nullablePartnerText(2000),
+  ...partnerExtraInput,
 });
 export type CreatePartnerInput = z.infer<typeof CreatePartnerBody>;
 
@@ -840,6 +892,7 @@ export const UpdatePartnerBody = z.object({
   address: nullablePartnerText(512),
   taxId: nullablePartnerText(64),
   note: nullablePartnerText(2000),
+  ...partnerExtraInput,
 });
 export type UpdatePartnerInput = z.infer<typeof UpdatePartnerBody>;
 
@@ -860,6 +913,19 @@ export const UpdateContactBody = z.object({
   isPrimary: z.boolean().optional(),
 });
 export type UpdateContactInput = z.infer<typeof UpdateContactBody>;
+
+export const CreateAddressBody = z.object({
+  address: z.string().trim().min(1).max(512),
+  isDefault: z.boolean().optional(),
+});
+export type CreateAddressInput = z.infer<typeof CreateAddressBody>;
+
+export const UpdateAddressBody = z.object({
+  address: z.string().trim().min(1).max(512).optional(),
+  isDefault: z.boolean().optional(),
+  status: z.enum(['active', 'inactive']).optional(),
+});
+export type UpdateAddressInput = z.infer<typeof UpdateAddressBody>;
 
 /* -------------------------------------------------------------------------- */
 /* R-019 MVP：物料主数据（物料 / 计量单位 / 物料分类）                          */

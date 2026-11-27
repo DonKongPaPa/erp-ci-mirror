@@ -13,6 +13,7 @@ import {
 import { useRecord } from '#components/erp/record';
 
 import { PartnersClient, type PartnerDetail } from './client.js';
+import { usePartnerDictionaries } from './dictionaries.js';
 import { PartnerFields } from './form.js';
 import {
   partnerFieldErrors,
@@ -41,6 +42,10 @@ export default function PartnerEditPage(): ReactElement {
     action: 'update',
   });
   const pending = customerUpdate.isPending || supplierUpdate.isPending;
+  const options = usePartnerDictionaries(true, pending, {
+    customer: customerUpdate.can,
+    supplier: supplierUpdate.can,
+  });
   const record = useRecord<PartnerDetail>(
     `partners/${encodeURIComponent(partnerId)}`,
     pending ? undefined : customerView.can || supplierView.can,
@@ -67,7 +72,7 @@ export default function PartnerEditPage(): ReactElement {
               validate={(values) => validatePartner(values, t)}
               fieldErrors={partnerFieldErrors}
               save={(values) =>
-                client.update(partner.id, partnerUpdateOf(values))
+                client.update(partner.id, partnerUpdateOf(values, partner))
               }
               onSuccess={(saved) =>
                 toaster.show({
@@ -76,7 +81,9 @@ export default function PartnerEditPage(): ReactElement {
                 })
               }
             >
-              {(form) => <PartnerFields form={form} partner={partner} />}
+              {(form) => (
+                <PartnerFields form={form} partner={partner} options={options} />
+              )}
             </FormDialog>
           ) : (
             <OverlayNote title={title}>{t('erp.form.noWrite')}</OverlayNote>

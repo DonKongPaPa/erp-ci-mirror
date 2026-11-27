@@ -200,6 +200,9 @@ describe('app client routes', () => {
       { name: 'partnerEdit', authorizedAs: 'partners' },
       { name: 'partnerContactNew', authorizedAs: 'partners' },
       { name: 'partnerContactEdit', authorizedAs: 'partners' },
+      // R-014 加片：交货地址的两个对话框继承往来单位页的页面授权。
+      { name: 'partnerAddressNew', authorizedAs: 'partners' },
+      { name: 'partnerAddressEdit', authorizedAs: 'partners' },
       // 物料与库存（《基座ERP前端设计》1.3，R-020 页面片）：库存查询、入库单、出库单、仓库各一个页面授权 id；
       // 入库单、出库单的新建、详情、编辑是盖在列表上的子页，仓库的新建、编辑是对话框，都继承列表页的授权。
       { name: 'stock', authorizedAs: 'stock' },
@@ -235,6 +238,10 @@ describe('app client routes', () => {
       { name: 'salesOrder', authorizedAs: 'salesOrders' },
       { name: 'salesOrderEdit', authorizedAs: 'salesOrders' },
       { name: 'salesOrderIssue', authorizedAs: 'salesOrders' },
+      // R-072：业务字典维护页，页面授权 `bizDict` 只给 root；两个对话框继承它。
+      { name: 'bizDict', authorizedAs: 'bizDict' },
+      { name: 'bizDictNew', authorizedAs: 'bizDict' },
+      { name: 'bizDictEdit', authorizedAs: 'bizDict' },
       { name: 'quality', authorizedAs: 'quality' },
       { name: 'feedbacks', authorizedAs: 'feedback' },
       { name: 'feedbackNew', authorizedAs: 'feedback' },
@@ -337,6 +344,9 @@ describe('app client routes', () => {
       { name: 'partnerEdit', authorizedAs: 'partners' },
       { name: 'partnerContactNew', authorizedAs: 'partners' },
       { name: 'partnerContactEdit', authorizedAs: 'partners' },
+      // R-014 加片：交货地址的两个对话框继承往来单位页的页面授权。
+      { name: 'partnerAddressNew', authorizedAs: 'partners' },
+      { name: 'partnerAddressEdit', authorizedAs: 'partners' },
       // 物料与库存（《基座ERP前端设计》1.3，R-020 页面片）：库存查询、入库单、出库单、仓库各一个页面授权 id；
       // 入库单、出库单的新建、详情、编辑是盖在列表上的子页，仓库的新建、编辑是对话框，都继承列表页的授权。
       { name: 'stock', authorizedAs: 'stock' },
@@ -372,6 +382,10 @@ describe('app client routes', () => {
       { name: 'salesOrder', authorizedAs: 'salesOrders' },
       { name: 'salesOrderEdit', authorizedAs: 'salesOrders' },
       { name: 'salesOrderIssue', authorizedAs: 'salesOrders' },
+      // R-072：业务字典维护页，页面授权 `bizDict` 只给 root；两个对话框继承它。
+      { name: 'bizDict', authorizedAs: 'bizDict' },
+      { name: 'bizDictNew', authorizedAs: 'bizDict' },
+      { name: 'bizDictEdit', authorizedAs: 'bizDict' },
       { name: 'quality', authorizedAs: 'quality' },
       { name: 'feedbacks', authorizedAs: 'feedback' },
       { name: 'feedbackNew', authorizedAs: 'feedback' },

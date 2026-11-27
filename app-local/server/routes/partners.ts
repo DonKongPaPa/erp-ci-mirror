@@ -30,13 +30,16 @@ import {
 import { Hono, type Context } from 'hono';
 
 import {
+  AddressSchema,
   ContactSchema,
+  CreateAddressBody,
   CreateContactBody,
   CreatePartnerBody,
   PartnerDetailSchema,
   PartnerListQuery,
   PartnerListSchema,
   PartnerSchema,
+  UpdateAddressBody,
   UpdateContactBody,
   UpdatePartnerBody,
 } from './schemas.js';
@@ -63,6 +66,9 @@ const RULE_STATUS: Readonly<
   'partner-inactive': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
   'contact-not-found': { status: 'NOT_FOUND' },
   'invalid-update': { status: 'INVALID_ARGUMENT' },
+  'dict-code-invalid': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
+  'person-invalid': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
+  'address-not-found': { status: 'NOT_FOUND' },
 };
 
 const reasonOf = (code: PartnerRuleCode): string =>
@@ -174,10 +180,27 @@ const resourceOfKind = (
   kind: 'customer' | 'supplier' | undefined,
 ): PartnerKindResource => (kind === 'supplier' ? 'suppliers' : 'customers');
 
-const resourceOfPartner = (row: {
-  readonly isCustomer: boolean;
-  readonly isSupplier: boolean;
-}): PartnerKindResource => (row.isCustomer ? 'customers' : 'suppliers');
+/**
+ * 一行同时是客户与供应商时，销售与采购各按自己持有的资源读/改自己那一侧；
+ * 只有一侧的单位仍只放行对应资源。与列表端点按 allowed 逐侧匹配的口径一致。
+ */
+function requireAnyAllowed(
+  row: { readonly isCustomer: boolean; readonly isSupplier: boolean },
+  allowed: readonly PartnerKindResource[],
+  firstDeny: PartnerDecision | undefined,
+): void {
+  if (!allowed.some((resource) => matchesResource(row, resource))) {
+    if (firstDeny === undefined) {
+      throw new ApiError({
+        status: 'PERMISSION_DENIED',
+        reason: 'PARTNER_FORBIDDEN',
+        domain: 'partners',
+        message: 'You cannot access this partner.',
+      });
+    }
+    throw new AuthorizationDeniedError(firstDeny);
+  }
+}
 
 const matchesResource = (
   row: { readonly isCustomer: boolean; readonly isSupplier: boolean },
@@ -195,9 +218,9 @@ function missingPartner(): ApiError {
 }
 
 /**
- * R-014 MVP 的六个端点：客户 `customers.*`，供应商 `suppliers.*`，root 全部。
- * 没有删除端点（用停用代替）。授权在 handler 最前面完成，无授权的人即使内容非法
- * 也先拿到 403，不会从 409/422 里探出信息（同 routes/shifts.ts）。
+ * R-014 MVP 的六个端点，加片再补两条交货地址写端点：客户 `customers.*`，供应商
+ * `suppliers.*`，root 全部。没有删除端点（用停用代替）。授权在 handler 最前面完成，
+ * 无授权的人即使内容非法也先拿到 403，不会从 409/422 里探出信息（同 routes/shifts.ts）。
  */
 export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
   (app) => {
@@ -242,13 +265,20 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         if (allowed.length === 0) {
           throw new AuthorizationDeniedError(firstDeny!);
         }
-        const result = await reader.list({
-          kind: query.kind,
-          q: query.q,
-          status: query.status,
-          page: query.page,
-          pageSize: query.pageSize,
-        });
+        const result = await reader.list(
+          {
+            kind: query.kind,
+            q: query.q,
+            status: query.status,
+            customerGroupCode: query.customerGroupCode,
+            supplierGroupCode: query.supplierGroupCode,
+            salespersonUserId: query.salespersonUserId,
+            buyerUserId: query.buyerUserId,
+            page: query.page,
+            pageSize: query.pageSize,
+          },
+          allowed,
+        );
         const items =
           query.kind === undefined
             ? result.items.filter((row) =>
@@ -287,11 +317,11 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         if (allowed.length === 0) {
           throw new AuthorizationDeniedError(firstDeny!);
         }
-        const row = await reader.detail(context.req.param('id'));
+        const row = await reader.detail(context.req.param('id'), allowed);
         if (row === undefined) {
           throw missingPartner();
         }
-        requireAllowed(resourceOfPartner(row), allowed, firstDeny);
+        requireAnyAllowed(row, allowed, firstDeny);
         return context.json(row);
       },
     );
@@ -334,7 +364,7 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         }
         const session = context.get('auth');
         const row = await withMappedErrors(context, async () =>
-          mutations.create(body, session?.user?.id),
+          mutations.create(body, allowed, session?.user?.id),
         );
         return context.json(row, 201);
       },
@@ -371,9 +401,9 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         if (row === undefined) {
           throw missingPartner();
         }
-        requireAllowed(resourceOfPartner(row), allowed, firstDeny);
+        requireAnyAllowed(row, allowed, firstDeny);
         const updated = await withMappedErrors(context, async () =>
-          mutations.update(context.req.param('id'), context.req.valid('json')),
+          mutations.update(context.req.param('id'), context.req.valid('json'), allowed),
         );
         return context.json(updated);
       },
@@ -409,7 +439,7 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         if (partner === undefined) {
           throw missingPartner();
         }
-        requireAllowed(resourceOfPartner(partner), allowed, firstDeny);
+        requireAnyAllowed(partner, allowed, firstDeny);
         const contact = await withMappedErrors(context, async () =>
           mutations.createContact(context.req.param('id'), context.req.valid('json')),
         );
@@ -447,7 +477,7 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         if (partner === undefined) {
           throw missingPartner();
         }
-        requireAllowed(resourceOfPartner(partner), allowed, firstDeny);
+        requireAnyAllowed(partner, allowed, firstDeny);
         const contact = await withMappedErrors(context, async () =>
           mutations.updateContact(
             context.req.param('id'),
@@ -456,6 +486,90 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
           ),
         );
         return context.json(contact);
+      },
+    );
+
+    router.post(
+      '/partners/:id/addresses',
+      describeRoute({
+        tags: ['Partners'],
+        summary: 'Add a delivery address to an active partner',
+        operationId: 'createPartnerAddress',
+        responses: {
+          '201': objectResponse(AddressSchema, 'The created address'),
+          '400': apiErrorResponse(400),
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '404': apiErrorResponse(404),
+          '422': unprocessableResponse,
+          '500': apiErrorResponse(500),
+        },
+      }),
+      apiValidator('json', CreateAddressBody),
+      async (context) => {
+        // 交货地址是客户侧的数据：只认 customers.update。一家既是客户又是供应商的单位，采购侧
+        // 在详情里看不到地址，这里同样不放行（比「所属资源的 update」更窄；主会话合并前收紧）。
+        const { allowed, firstDeny } = await allowedResources(
+          context,
+          ['customers'],
+          'update',
+        );
+        if (allowed.length === 0) {
+          throw new AuthorizationDeniedError(firstDeny!);
+        }
+        const partner = await reader.detail(context.req.param('id'));
+        if (partner === undefined) {
+          throw missingPartner();
+        }
+        requireAnyAllowed(partner, allowed, firstDeny);
+        const address = await withMappedErrors(context, async () =>
+          mutations.createAddress(context.req.param('id'), context.req.valid('json')),
+        );
+        return context.json(address, 201);
+      },
+    );
+
+    router.patch(
+      '/partners/:id/addresses/:addressId',
+      describeRoute({
+        tags: ['Partners'],
+        summary: 'Edit, default or deactivate a delivery address of an active partner',
+        operationId: 'updatePartnerAddress',
+        responses: {
+          '200': objectResponse(AddressSchema, 'The updated address'),
+          '400': apiErrorResponse(400),
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '404': apiErrorResponse(404),
+          '422': unprocessableResponse,
+          '500': apiErrorResponse(500),
+        },
+      }),
+      apiValidator('json', UpdateAddressBody),
+      async (context) => {
+        // 交货地址是客户侧的数据：只认 customers.update。一家既是客户又是供应商的单位，采购侧
+        // 在详情里看不到地址，这里同样不放行（比「所属资源的 update」更窄；主会话合并前收紧）。
+        const { allowed, firstDeny } = await allowedResources(
+          context,
+          ['customers'],
+          'update',
+        );
+        if (allowed.length === 0) {
+          throw new AuthorizationDeniedError(firstDeny!);
+        }
+        const partner = await reader.detail(context.req.param('id'));
+        if (partner === undefined) {
+          throw missingPartner();
+        }
+        requireAnyAllowed(partner, allowed, firstDeny);
+        const address = await withMappedErrors(context, async () =>
+          mutations.updateAddress(
+            context.req.param('id'),
+            context.req.param('addressId'),
+            context.req.valid('json'),
+          ),
+        );
+        return context.json(address);
       },
     );
 

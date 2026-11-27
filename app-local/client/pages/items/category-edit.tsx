@@ -57,7 +57,7 @@ export default function CategoryEditPage(): ReactElement {
                 save={(values) =>
                   client.updateCategory(
                     category.id,
-                    categoryUpdateInput(values),
+                    categoryUpdateInput(values, category),
                   )
                 }
                 onSuccess={(saved) =>

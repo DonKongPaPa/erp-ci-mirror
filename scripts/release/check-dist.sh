@@ -134,10 +134,75 @@ EOF
 fi
 printf '%s\n' "$PLATFORM_OUT"
 
+# R-073：部署产物里不许有开发与演示功能 —— 是「没有」，不是「关着」。
+# 用户 2026-11-27：「你要在部署版本上删掉演示的功能（注意不是关闭功能而是移除）防止风险。」
+# 运行时开关与启动守卫只是第二道防线；这里落在产物内容上，命中即失败。
+# 标记逐个写死，与 scripts/release/build-dist.sh 的剔除清单、app-local/tests/project/deploy-dist-configs.test.ts
+# 的守门对得上。只认这几个标记，不认笼统的 devTools：第三方库里也有同名的无害字串（recharts 的
+# devTools），写宽了只能靠排除来放行，那是给自己留口子。
+#
+#   路径   dist/ 下不许有：文件名含 dev-account-switcher、路径含 /dev-tools/、名为 dev-tools.<扩展名>；
+#   服务端 dist/server 全文不许出现：switch-account、dev-account-switcher、四个演示账户的用户名；
+#   客户端 dist/client 全文不许出现：dev-account-switcher 与切换器的四条词条文案。
+DEV_TOOLS_PATH_FIND=(
+  -name '*dev-account-switcher*'
+  -o -path '*/dev-tools/*'
+  -o -name 'dev-tools.*'
+)
+DEV_TOOLS_SERVER_MARKERS=(
+  switch-account
+  dev-account-switcher
+  demo.quality_manager
+  demo.quality_inspector
+  demo.dept_manager
+  demo.staff
+)
+DEV_TOOLS_CLIENT_MARKERS=(
+  dev-account-switcher
+  切换账户
+  仅开发环境
+  'Switch account'
+  'Development only'
+)
+
+# 把 directory 下含某个标记的文件记进 offenders；grep 自己出错（退出码大于 1）同样让自检失败，不放行。
+dev_tools_scan() {
+  local marker="$1" directory="$2" label="$3" status=0 file
+  grep -rlaF -- "$marker" "$directory" >"$WORK/dev-tools-hits" 2>"$WORK/dev-tools-grep.err" || status=$?
+  if [ "$status" -gt 1 ]; then
+    cat "$WORK/dev-tools-grep.err" >&2 || true
+    fail "查开发工具标记 ${marker} 时 grep 出错（退出码 ${status}）。"
+  fi
+  while IFS= read -r file; do
+    dev_tools_offenders+=("${label}${file#"$TREE"/}")
+  done < "$WORK/dev-tools-hits"
+}
+
+dev_tools_offenders=()
+while IFS= read -r -d '' file; do
+  dev_tools_offenders+=("路径里有开发工具：${file#"$TREE"/}")
+done < <(find "$TREE/dist" -type f \( "${DEV_TOOLS_PATH_FIND[@]}" \) -print0)
+for marker in "${DEV_TOOLS_SERVER_MARKERS[@]}"; do
+  dev_tools_scan "$marker" "$TREE/dist/server" "服务端里有标记 ${marker}："
+done
+if [ -d "$TREE/dist/client" ]; then
+  for marker in "${DEV_TOOLS_CLIENT_MARKERS[@]}"; do
+    dev_tools_scan "$marker" "$TREE/dist/client" "客户端里有标记 ${marker}："
+  done
+fi
+if [ "${#dev_tools_offenders[@]}" -gt 0 ]; then
+  printf '[check-dist] 产物里有开发与演示功能（必须是「没有」，不是「关着」）：\n' >&2
+  printf '  %s\n' "${dev_tools_offenders[@]}" >&2
+  fail '开发与演示功能进了部署产物。'
+fi
+printf '[check-dist] 开发与演示功能：未命中（路径、服务端全文、客户端全文，共 %s 个标记）。\n' \
+  "$(( ${#DEV_TOOLS_SERVER_MARKERS[@]} + ${#DEV_TOOLS_CLIENT_MARKERS[@]} ))"
+
 # 敏感信息规则只有 scripts/dev/sensitive-scan.sh 这一份，这里不另写判定。
-# 两处排除在索引之外，主会话已接受这一收窄：
+# 三处排除在索引之外，主会话已接受这一收窄：
 #   dist/node_modules/ —— 上游依赖，pdf-parse 的图片路径（@2x.png 命名）会被邮箱规则误报；
 #   dist/client/assets/ —— 构建产物，客户端本地化资源里的示例邮箱与数字串会误报。
+#   dist/database/main/migrations/.manifest.json —— 迁移的校验和清单，数字串是内容散列不是个人信息；只点名这一个文件，同目录其它文件照扫。
 # 兜底：入库文件在每一档闸门前已由 scripts/dev/sensitive-scan.sh 扫过源文件（gate.sh 的敏感信息预检），
 # 产物根下的 config.example.yml、Dockerfile、Dockerfile.dockerignore 与 dist 元数据仍在本次扫描范围内；
 # 排除的只是上游依赖与由已扫源文件生成的构建资源，共享规则文件一字未改。
@@ -151,7 +216,7 @@ EXPECTED_LIST="$WORK/expected-files"
 for file in "${all_files[@]}"; do
   rel="${file#"$TREE"/}"
   case "$rel" in
-    dist/node_modules/* | dist/client/assets/*) continue ;;
+    dist/node_modules/* | dist/client/assets/* | dist/database/main/migrations/.manifest.json) continue ;;
   esac
   base="${rel##*/}"
   if [ "$base" = '.gitignore' ] || [ "$base" = '.gitattributes' ]; then
@@ -161,11 +226,11 @@ for file in "${all_files[@]}"; do
 done
 
 git -C "$TREE" init -q
-printf 'dist/node_modules/\ndist/client/assets/\n' >"$TREE/.git/info/exclude"
+printf 'dist/node_modules/\ndist/client/assets/\ndist/database/main/migrations/.manifest.json\n' >"$TREE/.git/info/exclude"
 # -f 压过产物里残留的忽略规则；core.excludesFile 置空，不认调用方的全局忽略文件。
 git -c core.excludesFile=/dev/null -c core.attributesFile=/dev/null -C "$TREE" add -A -f -- .
-# -f 也会把上面两条排除项加进索引，显式撤掉，保持既定的收窄范围。
-git -C "$TREE" rm -r --cached -q --ignore-unmatch -- dist/node_modules dist/client/assets
+# -f 也会把上面三条排除项加进索引，显式撤掉，保持既定的收窄范围。
+git -C "$TREE" rm -r --cached -q --ignore-unmatch -- dist/node_modules dist/client/assets dist/database/main/migrations/.manifest.json
 sort -o "$EXPECTED_LIST" "$EXPECTED_LIST"
 # 与 sensitive-scan.sh 同口径：默认 quotePath 会把非 ASCII 路径转义成带引号的八进制形式，
 # 和 find 列出的原样路径对不上，合法产物会被误判为「清单不一致」。

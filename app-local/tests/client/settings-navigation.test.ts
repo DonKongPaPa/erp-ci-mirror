@@ -264,6 +264,8 @@ describe('System settings navigation', () => {
       'inventory',
       'purchaseOrders',
       'salesOrders',
+      // R-072：业务字典维护页，只给管理入口 root；排在系统设置前面，不动已有顺序。
+      'bizDict',
       'quality',
       'feedbacks',
       'ai',

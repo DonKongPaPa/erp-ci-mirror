@@ -1323,6 +1323,8 @@ test('R-013: booting the authorization resources provider twice registers once',
     // R-014：往来单位两张表（main 已并入，这里的钉子此前漏了）。
     'partners',
     'partnerContacts',
+    // R-014 加片：交货地址表（只登记，不进角色编辑器目录）。
+    'partnerAddresses',
     // R-019：物料三张表（main 已并入，这里的钉子此前漏了）。
     'units',
     'itemCategories',

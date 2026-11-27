@@ -2,6 +2,7 @@ import fileUi from '../extensions/nocobase-file-component-ui/locales/en-US.js';
 import type { LocaleResource } from '@nocobase/i18n';
 
 import systemEnUS from './system/en-US.js';
+import devTools from '../extensions/dev-account-switcher/locales/en-US.js';
 
 const enUS = {
   // The template's own copy: the shell, the sign-in pages, shared components and the homepage. Keep it in
@@ -36,6 +37,7 @@ const enUS = {
     warehouses: 'Warehouses',
     purchaseOrders: 'Purchase orders',
     salesOrders: 'Sales orders',
+    bizDict: 'Business dictionary',
   },
   settings: {
     ...systemEnUS.settings,
@@ -738,6 +740,7 @@ const enUS = {
       editDescription: 'The code {{code}} and the type cannot be changed.',
       kindsHint:
         'Choose at least one; both means this company is both a customer and a supplier.',
+      noSelection: 'None',
     },
     createdToast: 'Created {{kind}} "{{name}}"',
     savedToast: 'Saved "{{name}}"',
@@ -764,6 +767,35 @@ const enUS = {
     errors: {
       inactive: 'This record is deactivated. Activate it first.',
       kindRequired: 'Choose customer, supplier, or both.',
+      invalidBankCode: 'The bank code may contain only letters and digits.',
+    },
+    fields: {
+      customerGroup: 'Customer group',
+      supplierGroup: 'Supplier group',
+      salesperson: 'Salesperson',
+      buyer: 'Buyer',
+      payeeAccountNo: 'Payee account',
+      payeeBankName: 'Payee bank',
+      payeeBankCode: 'Bank code',
+    },
+    address: {
+      title: 'Delivery addresses',
+      address: 'Address',
+      isDefault: 'Default address',
+      default: 'Default',
+      add: 'Add address',
+      addTitle: 'Add a delivery address',
+      editTitle: 'Edit the delivery address',
+      addDescription: 'Add a delivery address for {{name}}.',
+      editDescription: 'Edit a delivery address of {{name}}.',
+      setDefault: 'Set as default',
+      notCustomer: 'Delivery addresses belong to the customer side.',
+      empty: 'No delivery addresses yet',
+      addedToast: 'Delivery address added',
+      savedToast: 'Delivery address saved',
+      defaultToast: 'Set “{{address}}” as the default',
+      deactivatedToast: 'Delivery address deactivated',
+      activatedToast: 'Delivery address activated',
     },
   },
   // R-019: the items page. Items, units of measure and item categories are three tabs of one page.
@@ -788,6 +820,17 @@ const enUS = {
       category: 'Category',
       unit: 'Base unit',
       legacyCode: 'Legacy code',
+      englishName: 'English name',
+      stockMin: 'Minimum stock',
+      stockMax: 'Maximum stock',
+      basePurchasePrice: 'Base purchase price (incl. tax)',
+      baseSalesPrice: 'Base sales price (incl. tax)',
+      barcode: 'Barcode',
+      brand: 'Brand',
+      manufacturerModel: 'Manufacturer model',
+      auxUnit: 'Auxiliary unit',
+      unitRatio: 'Unit ratio',
+      purchaseLeadDays: 'Purchase lead time (days)',
       decimals: 'Decimals',
       parent: 'Parent category',
     },
@@ -799,6 +842,7 @@ const enUS = {
       editDescription: 'The code {{code}} cannot be changed.',
       inactive: 'This item is deactivated. Activate it before changing it.',
       noCategory: 'No category',
+      noAuxUnit: 'No auxiliary unit',
       inactiveOption: '{{label}} (deactivated)',
     },
     createdToast: 'Created {{noun}} "{{name}}"',
@@ -811,6 +855,11 @@ const enUS = {
     errors: {
       invalidName: 'The name must be 1–{{max}} characters once trimmed.',
       tooLong: 'Use at most {{max}} characters.',
+      invalidNumber: 'Enter a number between {{min}} and {{max}}.',
+      invalidAuxUnit: 'The auxiliary unit cannot be the base unit.',
+      invalidPair: 'Enter both the auxiliary unit and its ratio, or neither.',
+      invalidRatio: 'The unit ratio must be greater than zero.',
+      invalidLimits: 'The minimum stock cannot exceed the maximum stock.',
     },
     units: {
       newTitle: 'New unit of measure',
@@ -841,10 +890,12 @@ const enUS = {
         '1–32 characters, upper case as you type; it cannot be changed later',
       parentHint: 'Leave it empty for a root category',
       noParent: 'None (root category)',
+      sort: 'Sort',
       deactivateDescription: 'It can no longer be chosen for new items.',
       errors: {
         invalidCode: 'The code must be 1–{{max}} characters once trimmed.',
         invalidName: 'The name must be 1–{{max}} characters once trimmed.',
+        invalidSort: 'Sort must be a whole number of zero or more.',
       },
     },
   },
@@ -1344,6 +1395,52 @@ const enUS = {
     },
   },
   // R-013: the FQC resource, its actions and the two department record access keys.
+  // R-072: the business dictionary page (nine types on one page, writes shown by action).
+  bizDict: {
+    title: 'Business dictionary',
+    description: 'Maintain the values documents pick from.',
+    searchLabel: 'Search code or name',
+    empty: 'No dictionary entries',
+    fields: {
+      name: 'Name',
+      rate: 'Rate (%)',
+      startDate: 'Start date',
+      endDate: 'End date',
+      description: 'Description',
+      isDefault: 'Default value',
+      sort: 'Sort',
+    },
+    actions: {
+      new: 'New entry',
+      edit: 'Edit',
+      moveUp: 'Move up',
+      moveDown: 'Move down',
+      activate: 'Activate',
+      deactivate: 'Deactivate',
+      deactivateTitle: 'Deactivate “{{name}}”?',
+      deactivateDescription: 'Inactive values cannot be picked in new documents.',
+    },
+    form: {
+      newTitle: 'New entry',
+      editTitle: 'Edit entry',
+      editDescription: 'The code {{code}} and the type cannot be changed.',
+      codeHint: 'Codes cannot be changed after creation.',
+    },
+    createdToast: 'Created “{{name}}”',
+    savedToast: 'Saved “{{name}}”',
+    deactivatedToast: 'Deactivated “{{name}}”',
+    activatedToast: 'Activated “{{name}}”',
+    errors: {
+      invalidCode: 'Use letters, digits, hyphens or underscores (at most 64).',
+      invalidName: 'The name must be at most {{max}} characters.',
+      invalidRate: 'Enter a rate between 0 and 100.',
+      invalidDate: 'Enter a date as YYYY-MM-DD.',
+      invalidPeriod: 'The end date cannot be before the start date.',
+      invalidDescription: 'The description must be at most {{max}} characters.',
+      invalidSort: 'Enter a whole number of zero or more.',
+      invalidType: 'This dictionary type is not recognised.',
+    },
+  },
   authorization: {
     sections: {
       quality: 'Quality management',
@@ -1488,6 +1585,17 @@ const enUS = {
         manage: 'Manage item master data',
       },
     },
+    // R-072: the dictionary and the two narrow option resources (D-057 role editor titles).
+    bizDict: {
+      title: 'Business dictionary',
+      tables: { entries: 'Dictionary values' },
+      actions: { view: 'View business dictionary', manage: 'Manage business dictionary' },
+    },
+    bizOptions: {
+      title: 'Business options',
+      tables: { departments: 'Departments' },
+      actions: { view: 'View business options' },
+    },
     recordAccess: {
       myDepartments: 'My departments',
       myDepartmentsAndBelow: 'My departments and below',
@@ -1548,15 +1656,10 @@ const enUS = {
       warehouseInactive: 'That warehouse is inactive. Choose another one.',
     },
   },
-  // R-037: the development-only account switch in the avatar menu.
-  devTools: {
-    accountSwitcher: {
-      title: 'Switch account',
-      developmentOnly: 'Development only',
-      current: 'Current account',
-      failed: 'Could not switch to {{name}}.',
-    },
-  },
+  // R-037: the development-only account switch in the avatar menu. R-073: merged only by a development
+  // build — `import.meta.env.DEV` is a constant false in a production build, so the spread and the module
+  // it imports are dropped together, and check-dist.sh asserts the locale bundle carries none of it.
+  ...(import.meta.env.DEV ? { devTools } : {}),
   // R-032 / R-034: the account menu, the two API key pages and the notification log page.
   account: {
     ...systemEnUS.account,

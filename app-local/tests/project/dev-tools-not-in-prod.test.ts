@@ -19,13 +19,69 @@ function filesUnder(directory: string): string[] {
   });
 }
 
+function read(relative: string): string {
+  return readFileSync(path.join(appRoot, relative), 'utf8');
+}
+
+/**
+ * 静态引入的模块路径：`import … from '…'` 与 `import '…'`。`import type` 编译后不留痕迹，不算；
+ * 动态引入 `import('…')` 也不在里面，它由下面的测试单独守。
+ */
+function staticImportSpecifiers(source: string): string[] {
+  const specifiers: string[] = [];
+  for (const match of source.matchAll(
+    /\bimport\s+(type\s+)?[^'"`;]*?\bfrom\s*['"]([^'"]+)['"]/gu,
+  )) {
+    if (match[1] === undefined) specifiers.push(match[2] ?? '');
+  }
+  for (const match of source.matchAll(/\bimport\s*['"]([^'"]+)['"]/gu)) {
+    specifiers.push(match[1] ?? '');
+  }
+  return specifiers;
+}
+
+/**
+ * 开发工具自己的源码。它们互相引用不算 —— 这一片整体不进部署产物，
+ * 要守的是「删掉它们之后，别处不能还指着它们」。
+ */
+const isDevToolServerSource = (file: string): boolean =>
+  file.startsWith('server/dev-tools/') ||
+  [
+    'server/routes/dev-account-switcher.ts',
+    'server/providers/dev-account-switcher.ts',
+    'server/config/dev-tools.ts',
+  ].includes(file);
+
+const isDevToolClientSource = (file: string): boolean =>
+  file.startsWith('client/extensions/dev-account-switcher/');
+
+/** 服务端开发工具模块的引入路径（源码里写的是 `.js`）。 */
+const DEV_TOOL_SERVER_MODULE =
+  /\/dev-tools\/|\/dev-account-switcher\.js$|\/config\/dev-tools\.js$/u;
+
+/** 切换器的代码模块；它的词条表不在此列，语言包那一条另有测试。 */
+const SWITCHER_CODE_MODULE =
+  /\/dev-account-switcher\/(?:plugin|section|index)\.js$/u;
+
+/**
+ * `check-dist.sh` 对 `dist/server` 全文断言零命中的标记。源码里带着它们的注释会被原样编进产物
+ * （服务端是逐文件编译，注释不删），所以在源码这一层就不许出现。
+ */
+const SERVER_ARTIFACT_MARKERS = [
+  'switch-account',
+  'dev-account-switcher',
+  'demo.quality_manager',
+  'demo.quality_inspector',
+  'demo.dept_manager',
+  'demo.staff',
+];
+
 /**
  * R-037 开发工具不能随正式环境上线。
  *
  * 两条机器能查的边界：演示账户只由开发工具在启动时建，迁移与 seed 里不能提它 ——
  * 那两处在每个环境都会执行，写进去就等于把演示账户带上线；客户端组合在非开发构建里
- * 不登记这个扩展。第二条是源码级检查：`import.meta.env.DEV` 在生产构建里被常量折叠，
- * 登记项随之为空，构建产物里搜不到配置节路径那一半要完整构建，见 R-037 验收第 7 条。
+ * 不登记这个扩展。
  */
 describe('R-037 开发工具不进正式环境', () => {
   it('mentions no demo account in any migration or seed', () => {
@@ -38,29 +94,8 @@ describe('R-037 开发工具不进正式环境', () => {
     ).toEqual([]);
   });
 
-  it('registers the client extension only in a development build', () => {
-    const source = readFileSync(
-      path.join(appRoot, 'client', 'plugins.ts'),
-      'utf8',
-    );
-    // 应用的 Vite 插件要求组合数组里每一项都是显式的工厂调用，条件展开写在数组里会
-    // 让构建失败；所以开关包在 `devAccountSwitcherRegistration()` 里，数组里放它的调用。
-    const start = source.indexOf('function devAccountSwitcherRegistration');
-    expect(start, '组合里找不到开发工具的登记函数。').toBeGreaterThan(-1);
-    const gate = source.slice(start, source.indexOf('\n}', start));
-    expect(
-      gate,
-      '这一项只能在 import.meta.env.DEV 为真时登记扩展；否则生产构建也会带上它。',
-    ).toContain('import.meta.env.DEV');
-    expect(gate).toContain('devAccountSwitcher({ enabled: true })');
-    expect(source).toContain('devAccountSwitcherRegistration(),');
-  });
-
   it('keeps the account menu free of a static import of the extension', () => {
-    const source = readFileSync(
-      path.join(appRoot, 'client', 'layouts', 'components', 'user-menu.tsx'),
-      'utf8',
-    );
+    const source = read('client/layouts/components/user-menu.tsx');
     const imports = source
       .split('\n')
       .filter(
@@ -71,5 +106,181 @@ describe('R-037 开发工具不进正式环境', () => {
       imports.filter((line) => !/^\s*import\s+type\b/u.test(line)),
       '头像菜单只能通过 service token 拿这段 UI；静态引入会把它的代码带进生产构建。',
     ).toEqual([]);
+  });
+});
+
+/**
+ * R-073 部署产物里没有开发与演示功能 —— 是「没有」，不是「关着」。
+ *
+ * 用户 2026-11-27：「你要在部署版本上删掉演示的功能（注意不是关闭功能而是移除）防止风险。」
+ * 这里是不用构建就能跑的源码级一半：主组合不引用开发工具、切换器只经「开发期常量 + 动态引入」进模块图。
+ * 产物内容那一半由 `scripts/release/check-dist.sh` 断言，由 `deploy-dist-configs.test.ts` 守着。
+ */
+describe('R-073 部署产物里没有开发与演示功能（源码守门）', () => {
+  const clientSources = filesUnder('client').filter(
+    (file) => !isDevToolClientSource(file),
+  );
+  const serverSources = filesUnder('server').filter(
+    (file) => !isDevToolServerSource(file),
+  );
+
+  it('the client composition never statically imports the switcher code', () => {
+    for (const file of clientSources) {
+      const offenders = staticImportSpecifiers(read(file)).filter((specifier) =>
+        SWITCHER_CODE_MODULE.test(specifier),
+      );
+      expect(
+        offenders,
+        `${file} 静态引入了切换器的代码模块：静态引入会把它带进生产构建的模块图。`,
+      ).toEqual([]);
+    }
+  });
+
+  it('the switcher code is reached only by a dynamic import behind the development constant', () => {
+    const loader = 'client/extensions/development-extensions.ts';
+    const source = read(loader);
+    const gate = source.indexOf('if (!import.meta.env.DEV) return;');
+    const dynamicImport = source.search(
+      /await import\(\s*['"]\.\/dev-account-switcher\/index\.js['"]/u,
+    );
+    expect(
+      gate,
+      '开发扩展的入口没有「非开发构建直接返回」这道门。',
+    ).toBeGreaterThan(-1);
+    expect(dynamicImport, '开发扩展的入口没有动态引入切换器。').toBeGreaterThan(
+      gate,
+    );
+    for (const file of clientSources.filter((file) => file !== loader)) {
+      expect(
+        read(file),
+        `${file} 动态引入了切换器：除开发扩展的入口外不许有别处引入它。`,
+      ).not.toMatch(/\bimport\s*\(\s*['"][^'"]*dev-account-switcher/u);
+    }
+  });
+
+  it('the switcher locale entries are merged only by a development-guarded spread', () => {
+    for (const locale of ['en-US', 'zh-CN']) {
+      const source = read(`client/locales/${locale}.ts`);
+      expect(
+        source,
+        `client/locales/${locale}.ts 没有引入切换器的词条表。`,
+      ).toContain(
+        `import devTools from '../extensions/dev-account-switcher/locales/${locale}.js';`,
+      );
+      expect(
+        source,
+        `client/locales/${locale}.ts 并入 devTools 词条时没有用 import.meta.env.DEV 挡：生产构建的语言包会带上「切换账户」这些文案。`,
+      ).toMatch(/\.\.\.\(import\.meta\.env\.DEV \? \{ devTools \} : \{\}\),/u);
+    }
+    for (const file of clientSources.filter(
+      (file) => !file.startsWith('client/locales/'),
+    )) {
+      expect(
+        staticImportSpecifiers(read(file)),
+        `${file} 引入了切换器的词条表：词条只能由两份语言包并入。`,
+      ).toEqual(
+        expect.not.arrayContaining([
+          expect.stringMatching(/dev-account-switcher\/locales\//u),
+        ]),
+      );
+    }
+  });
+
+  it('the account menu and its section token name no development tool', () => {
+    for (const file of [
+      'client/layouts/user-menu-section.ts',
+      'client/layouts/components/user-menu.tsx',
+    ]) {
+      const source = read(file);
+      for (const marker of [
+        'dev-account-switcher',
+        'dev-tools',
+        'DevAccountSwitcher',
+      ]) {
+        expect(
+          source,
+          `${file} 里出现了 ${marker}：头像菜单是生产常驻代码，它的 service token 名会原样进产物。`,
+        ).not.toContain(marker);
+      }
+    }
+  });
+
+  it('the server composition never references the development tool modules', () => {
+    for (const file of [
+      'server/routes/index.ts',
+      'server/providers/index.ts',
+      'server/config/index.ts',
+    ]) {
+      const source = read(file);
+      expect(
+        staticImportSpecifiers(source).filter((specifier) =>
+          DEV_TOOL_SERVER_MODULE.test(specifier),
+        ),
+        `${file} 引用了开发工具的模块：产物里没有这些文件，引用了生产启动就崩。`,
+      ).toEqual([]);
+      // 生产常驻的启动守卫文件名里带 dev-tools，所以这里不查这个字串本身，只查上面那条引入路径。
+      expect(source, `${file} 里出现了 dev-account-switcher。`).not.toContain(
+        'dev-account-switcher',
+      );
+    }
+  });
+
+  it('nothing outside the development tool modules statically imports them', () => {
+    for (const file of serverSources) {
+      const offenders = staticImportSpecifiers(read(file)).filter((specifier) =>
+        DEV_TOOL_SERVER_MODULE.test(specifier),
+      );
+      expect(offenders, `${file} 静态引入了开发工具的模块。`).toEqual([]);
+    }
+  });
+
+  it('the development tool entry is a dynamic import behind the development check', () => {
+    const entry = 'server/embedded.ts';
+    const source = read(entry);
+    const gate = source.indexOf(
+      'if (isDevelopmentNodeEnv(runtime.env.NODE_ENV)) {',
+    );
+    const dynamicImport = source.indexOf(
+      "await import('./dev-tools/register.js')",
+    );
+    expect(
+      gate,
+      '开发工具的登记入口没有「只在开发环境」这道门。',
+    ).toBeGreaterThan(-1);
+    expect(dynamicImport, '开发工具的登记入口不是动态引入。').toBeGreaterThan(
+      gate,
+    );
+    for (const file of serverSources.filter((file) => file !== entry)) {
+      expect(
+        read(file),
+        `${file} 动态引入了开发工具的模块：除登记入口外不许有别处引入它。`,
+      ).not.toMatch(
+        /\bimport\s*\(\s*['"][^"']*(?:dev-tools|dev-account-switcher)/u,
+      );
+    }
+  });
+
+  it('production-resident server sources carry none of the artifact markers', () => {
+    for (const file of serverSources) {
+      const source = read(file);
+      for (const marker of SERVER_ARTIFACT_MARKERS) {
+        expect(
+          source,
+          `${file} 里出现了标记 ${marker}：注释也会被编进 dist/server，产物自检会在这里命中。`,
+        ).not.toContain(marker);
+      }
+    }
+  });
+
+  it('the production guard stays in the server composition', () => {
+    // 运行时守卫是第二道防线：非开发环境里配置写了开启，应用必须起不来（R-037 的约束，R-073 不动它）。
+    const composition = read('server/providers/index.ts');
+    expect(composition).toContain(
+      "import DevToolsGuardProvider from './dev-tools-guard.js';",
+    );
+    expect(composition).toContain('DevToolsGuardProvider,');
+    const guard = read('server/providers/dev-tools-guard.ts');
+    expect(guard).toContain('isDevelopmentNodeEnv(this.app.nodeEnv)');
+    expect(guard).toContain('开发工具不能在生产环境开启');
   });
 });

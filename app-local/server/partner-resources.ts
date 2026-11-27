@@ -5,18 +5,21 @@ import {
 } from '@nocobase/app-plugin-authorization/server';
 
 /**
- * R-014 MVP 的业务资源声明：客户与供应商各一份，共用 partners / partner_contacts 两张表。
+ * R-014 MVP 的业务资源声明：客户与供应商各一份，共用 partners / partner_contacts 两张表；
+ * 复刻波 0 加片再共用一张 partnerAddresses（交货地址）。
  *
  * 销售只持 customers 的三个动作，采购只持 suppliers 的三个动作；root 不受限。
  * 这样「销售读不到供应商」是授权本身的事实，不是端点记得过滤（照 R-013 的权限收窄）。
  * 数据范围初期用全部（R-013 裁定），所以授权里不带 policy。
  *
  * 授权没有字段这一层，写权限只列到端点真会写的列（同 shift-resources.ts）：
- * - `view` 读主档十四列（没有 createdById 这个人员列）与联系人七列；
+ * - `view` 读主档（没有 createdById 这个人员列）、联系人与交货地址；
  * - `create` 只建主档，建列是服务写进去的全列（编码由发号器给，建单人是调用者）；
- * - `update` 读两表、改主档的可改列、建改联系人；编码、客户/供应商标志、建单人都不在改列里。
+ * - `update` 读三表、改主档的可改列、建改联系人与地址；编码、客户/供应商标志、建单人都不在改列里。
  *
- * 动作清单写全，不登记删除：往来单位只停用不删除。两张表不进角色编辑器（没有 placement），
+ * 加片补的七列按两侧归属声明在 partners 的读/建/改列里；按侧裁列是服务层的事（授权没有
+ * 字段这一层），这里只保证「端点会写的列」都在写权限里、人员标识 createdById 不进读列。
+ * 动作清单写全，不登记删除：往来单位与地址都只停用不删除。三张表不进角色编辑器（没有 placement），
  * 只供 customers / suppliers 的业务动作展开。
  */
 const NAMESPACE = 'app-local';
@@ -27,6 +30,10 @@ const partnersTitle = {
 } as const;
 const contactsTitle = {
   key: 'authorization.partners.tables.contacts',
+  ns: NAMESPACE,
+} as const;
+const addressesTitle = {
+  key: 'authorization.partners.tables.addresses',
   ns: NAMESPACE,
 } as const;
 
@@ -46,6 +53,14 @@ const PARTNER_READ_FIELDS = [
   'note',
   'createdAt',
   'updatedAt',
+  // 复刻波 0 加片：库里存账号标识，姓名由服务从在职员工里取，其余人员列不读。
+  'customerGroupCode',
+  'supplierGroupCode',
+  'salespersonUserId',
+  'buyerUserId',
+  'payeeAccountNo',
+  'payeeBankName',
+  'payeeBankCode',
 ] as const;
 
 /** 服务建行真会写的列；编码与建单人由服务端写，仍要在建列里。 */
@@ -65,6 +80,13 @@ const PARTNER_UPDATE_FIELDS = [
   'taxId',
   'note',
   'updatedAt',
+  'customerGroupCode',
+  'supplierGroupCode',
+  'salespersonUserId',
+  'buyerUserId',
+  'payeeAccountNo',
+  'payeeBankName',
+  'payeeBankCode',
 ] as const;
 
 const CONTACT_READ_FIELDS = [
@@ -77,6 +99,18 @@ const CONTACT_READ_FIELDS = [
   'isPrimary',
 ] as const;
 const CONTACT_UPDATE_FIELDS = ['name', 'title', 'phone', 'email', 'isPrimary'] as const;
+
+/** 交货地址：读全列、建全列、改内容/默认/状态；没有删除动作。 */
+const ADDRESS_READ_FIELDS = [
+  'id',
+  'partnerId',
+  'address',
+  'isDefault',
+  'status',
+  'createdAt',
+  'updatedAt',
+] as const;
+const ADDRESS_UPDATE_FIELDS = ['address', 'isDefault', 'status', 'updatedAt'] as const;
 
 const viewPartners = defineDatabasePermission((permission) =>
   permission
@@ -121,6 +155,23 @@ const updateContacts = defineDatabasePermission((permission) =>
     .update(CONTACT_UPDATE_FIELDS),
 );
 
+const viewAddresses = defineDatabasePermission((permission) =>
+  permission
+    .collection('partnerAddresses')
+    .title(addressesTitle)
+    .read(ADDRESS_READ_FIELDS),
+);
+
+/** 地址没有独立的建动作端点：两条写端点都挂在 update 上，所以建列也写在 update 里。 */
+const updateAddresses = defineDatabasePermission((permission) =>
+  permission
+    .collection('partnerAddresses')
+    .title(addressesTitle)
+    .read(ADDRESS_READ_FIELDS)
+    .create(ADDRESS_READ_FIELDS)
+    .update(ADDRESS_UPDATE_FIELDS),
+);
+
 export const PARTNER_COLLECTIONS: readonly DatabaseCollectionDefinition[] = [
   {
     name: 'partners',
@@ -130,6 +181,11 @@ export const PARTNER_COLLECTIONS: readonly DatabaseCollectionDefinition[] = [
   {
     name: 'partnerContacts',
     title: contactsTitle,
+    actions: ['read', 'create', 'update'],
+  },
+  {
+    name: 'partnerAddresses',
+    title: addressesTitle,
     actions: ['read', 'create', 'update'],
   },
 ];
@@ -143,7 +199,8 @@ const definePartnerResource = (id: 'customers' | 'suppliers') =>
         action
           .title({ key: `authorization.${id}.actions.view`, ns: NAMESPACE })
           .grant('partners', viewPartners)
-          .grant('partnerContacts', viewContacts),
+          .grant('partnerContacts', viewContacts)
+          .grant('partnerAddresses', viewAddresses),
       )
       .action('create', (action) =>
         action
@@ -154,7 +211,8 @@ const definePartnerResource = (id: 'customers' | 'suppliers') =>
         action
           .title({ key: `authorization.${id}.actions.update`, ns: NAMESPACE })
           .grant('partners', updatePartners)
-          .grant('partnerContacts', updateContacts),
+          .grant('partnerContacts', updateContacts)
+          .grant('partnerAddresses', updateAddresses),
       ),
   );
 
