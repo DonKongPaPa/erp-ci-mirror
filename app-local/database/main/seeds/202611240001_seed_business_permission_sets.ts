@@ -226,6 +226,19 @@ const orderWarehouseRead = {
 };
 
 /**
+ * R-072：字典与两个收窄的选项端点只读；维护（bizDict.manage）只给 root。
+ * 采购、销售、仓管都要在单据里选项目、结算方式、人员与部门；别的角色这一片不给。
+ */
+const bizDictRead = {
+  resource: { type: 'composite', id: 'bizDict' },
+  actions: [{ action: 'view' }],
+};
+const bizOptionsRead = {
+  resource: { type: 'composite', id: 'bizOptions' },
+  actions: [{ action: 'view' }],
+};
+
+/**
  * R-019 加片：旧系统两个在用的子账号都勾着价格管控可见，新系统照旧把动作给采购与销售。
  * 价格没有字段级授权，只能用两个独立只读动作隔列：采购拿不到销售价、仓管两个都不给。
  */
@@ -299,6 +312,8 @@ export const businessPermissionSets: readonly PermissionSet[] = [
     .grant(inboundOrdersPage)
     .grant(outboundOrdersPage)
     .grant(inventoryGrant)
+    .grant(bizDictRead)
+    .grant(bizOptionsRead)
     .build(),
   definePermissionSet('sales')
     .title({ key: 'permissionSets.business.sales', ns: NAMESPACE })
@@ -310,6 +325,8 @@ export const businessPermissionSets: readonly PermissionSet[] = [
     .grant(orderItemRead)
     .grant(orderWarehouseRead)
     .grant(itemsPage)
+    .grant(bizDictRead)
+    .grant(bizOptionsRead)
     .grant(salesPriceView)
     .build(),
   definePermissionSet('purchase')
@@ -322,6 +339,8 @@ export const businessPermissionSets: readonly PermissionSet[] = [
     .grant(orderItemRead)
     .grant(orderWarehouseRead)
     .grant(itemsPage)
+    .grant(bizDictRead)
+    .grant(bizOptionsRead)
     .grant(purchasePriceView)
     .build(),
 ];

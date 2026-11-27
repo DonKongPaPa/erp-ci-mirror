@@ -1338,6 +1338,8 @@ test('R-013: booting the authorization resources provider twice registers once',
     'purchaseOrderLines',
     'salesOrders',
     'salesOrderLines',
+    // R-072：业务字典一张表，两个只读资源各不分表。
+    'bizDictEntries',
   ]);
   expect(registered.composites.map((composite) => composite.name)).toContain(
     'fqc',
@@ -1348,6 +1350,9 @@ test('R-013: booting the authorization resources provider twice registers once',
   expect(registered.composites.map((composite) => composite.name)).toContain(
     'shifts',
   );
+  for (const name of ['bizDict', 'bizOptions']) {
+    expect(registered.composites.map((composite) => composite.name)).toContain(name);
+  }
 
   await expect(provider.boot()).resolves.toBeUndefined();
   expect(registrationSnapshot(authz)).toEqual(registered);

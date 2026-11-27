@@ -1,5 +1,6 @@
 import ApiKeysPolicyProvider from './api-keys-policy.js';
 import AuthorizationResourcesProvider from './authorization-resources.js';
+import BizDictProvider from './biz-dict.js';
 import CodesProvider from './codes.js';
 import DepartmentMutationsProvider from './department-mutations.js';
 import DepartmentProvider from './departments.js';
@@ -44,6 +45,8 @@ const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
   InventoryProvider,
   // R-021/R-022：订单读写服务；生成单据复用库存写服务，回写由 order-progress 挂在过账事务里。
   OrdersProvider,
+  // R-072：业务字典的读服务与写服务；assertActiveCodes 供各单据片共用。无调用方时也可解析。
+  BizDictProvider,
   AuthorizationResourcesProvider,
   NotificationManagementProvider,
   QualityScreeningProvider,

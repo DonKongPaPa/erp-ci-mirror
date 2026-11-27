@@ -4,6 +4,11 @@ import { ServiceProvider } from '@nocobase/service-provider';
 
 import { APPROVAL_COLLECTIONS } from '../approvals-resources.js';
 import {
+  BIZ_DICT_COLLECTIONS,
+  bizDict as bizDictResource,
+  bizOptions as bizOptionsResource,
+} from '../biz-dict-resources.js';
+import {
   DEPARTMENT_COLLECTIONS,
   departments as departmentsResource,
 } from '../department-resources.js';
@@ -68,6 +73,7 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
       ...ITEM_COLLECTIONS,
       ...INVENTORY_COLLECTIONS,
       ...ORDER_COLLECTIONS,
+      ...BIZ_DICT_COLLECTIONS,
     ]) {
       authz.database.collections.add(collection);
     }
@@ -87,6 +93,9 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
     // R-021/R-022：采购与销售订单各一份资源，同样不做页面目录。
     authz.compositeResources.define(purchaseOrdersResource);
     authz.compositeResources.define(salesOrdersResource);
+    // R-072：字典与两个收窄的选项资源只声明，不做 ui.place —— 本片没有页面。
+    authz.compositeResources.define(bizDictResource);
+    authz.compositeResources.define(bizOptionsResource);
     const departmentService = this.app.container.resolve(
       departmentServiceToken,
     );

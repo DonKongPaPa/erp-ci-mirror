@@ -187,6 +187,16 @@ const shiftsViewGrant = {
   actions: [{ action: 'view' }],
 };
 
+/** R-072：字典与两个收窄选项端点的只读授权；维护只给 root，不进任何业务角色。 */
+const bizDictGrant = {
+  resource: { type: 'composite', id: 'bizDict' },
+  actions: [{ action: 'view' }],
+};
+const bizOptionsGrant = {
+  resource: { type: 'composite', id: 'bizOptions' },
+  actions: [{ action: 'view' }],
+};
+
 /** R-014：销售只拿 customers，采购只拿 suppliers，各三个动作。 */
 const customerGrant = {
   resource: { type: 'composite', id: 'customers' },
@@ -292,6 +302,8 @@ const expectedRoles = {
       inboundOrdersPageGrant,
       outboundOrdersPageGrant,
       inventoryGrant,
+      bizDictGrant,
+      bizOptionsGrant,
     ],
   },
   sales: {
@@ -305,6 +317,8 @@ const expectedRoles = {
       orderItemRead,
       orderWarehouseRead,
       itemsPageGrant,
+      bizDictGrant,
+      bizOptionsGrant,
       salesPriceGrant,
     ],
   },
@@ -319,6 +333,8 @@ const expectedRoles = {
       orderItemRead,
       orderWarehouseRead,
       itemsPageGrant,
+      bizDictGrant,
+      bizOptionsGrant,
       purchasePriceGrant,
     ],
   },

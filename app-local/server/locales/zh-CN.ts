@@ -85,6 +85,30 @@ const zhCN: AppServerResource = {
       'employee-no-exhausted': '工号已用到 E999999，无法继续发号。',
     },
   },
+  // R-072：业务字典的类型名称与规则码文案。
+  bizDict: {
+    types: {
+      project: '项目',
+      settlement: '结算方式',
+      supplier_group: '供应商分组',
+      customer_group: '客户分组',
+      income_type: '收入类型',
+      expense_type: '支出类型',
+      invoice_type: '发票类型',
+      tax_rate: '税率',
+      fund_account: '资金账户',
+    },
+    errors: {
+      typeInvalid: '未知的字典类型：{{reason}}。',
+      codeTaken: '这个类型下已经占用了这个码。',
+      codeImmutable: '字典的码与类型建成后不能修改。',
+      emptyPatch: '请至少填写一项要改的内容。',
+      fieldNotApplicable: '这个字典类型不适用该字段：{{reason}}。',
+      valueInvalid: '有内容不合规（{{reason}}），请检查名称、税率或日期。',
+      codeInactive: '这个码不是该类型里在用的取值：{{reason}}。',
+      notFound: '这条字典取值不存在。',
+    },
+  },
   ticketNotifications: {
     contributor: '质量工单',
     category: '质量工单',

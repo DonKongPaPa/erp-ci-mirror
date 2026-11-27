@@ -89,7 +89,31 @@ const enUS = {
       'employee-no-exhausted': 'All employee numbers up to E999999 are used; no more can be issued.',
     },
   },
- ticketNotifications: {
+  // R-072: business dictionary type labels and rule-code messages.
+  bizDict: {
+    types: {
+      project: 'Project',
+      settlement: 'Settlement method',
+      supplier_group: 'Supplier group',
+      customer_group: 'Customer group',
+      income_type: 'Income type',
+      expense_type: 'Expense type',
+      invoice_type: 'Invoice type',
+      tax_rate: 'Tax rate',
+      fund_account: 'Fund account',
+    },
+    errors: {
+      typeInvalid: 'Unknown dictionary type: {{reason}}.',
+      codeTaken: 'That code is already used by this dictionary type.',
+      codeImmutable: 'The code and type cannot be changed after creation.',
+      emptyPatch: 'Give at least one field to change.',
+      fieldNotApplicable: 'That field does not apply to this dictionary type: {{reason}}.',
+      valueInvalid: 'A value is not valid: {{reason}}. Check the name, rate or dates.',
+      codeInactive: 'That code is not an active entry of this type: {{reason}}.',
+      notFound: 'That dictionary entry does not exist.',
+    },
+  },
+  ticketNotifications: {
     contributor: 'Quality tickets',
     category: 'Quality tickets',
     businessRule: 'Sent once after the transition commits; replaying the same idempotency key does not resend.',

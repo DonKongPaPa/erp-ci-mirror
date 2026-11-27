@@ -117,6 +117,17 @@ export interface EmployeeDisplay {
   readonly positionName: string | null;
 }
 
+/**
+ * 人员选项的一行（R-072）：账号标识、姓名、部门标识与部门名称，四列。
+ * 不含邮箱、手机号、工号、用户名；只给在职员工，不做选择性暴露之外的列。
+ */
+export interface PersonOption {
+  readonly userId: string;
+  readonly name: string | null;
+  readonly departmentId: string | null;
+  readonly departmentName: string | null;
+}
+
 /** 离职前检查：返回阻止离职的理由，没有理由就放行。 */
 export type OffboardCheck = (
   userId: string,
@@ -138,6 +149,13 @@ export interface EmployeeService {
   displayByIds(
     userIds: readonly string[],
   ): Promise<Readonly<Record<string, EmployeeDisplay>>>;
+  /**
+   * 按账号批量取在职员工的姓名与部门（不传账号表示全部在职员工）。
+   * 只回四列，不含邮箱、工号、用户名；给 R-072 的 person-options 收窄端点用。
+   */
+  activePersonOptions(
+    userIds?: readonly string[],
+  ): Promise<readonly PersonOption[]>;
   reportsTo(userId: string): Promise<string | null>;
   search(
     q: string,
@@ -371,6 +389,54 @@ export class DatabaseEmployeeReader implements EmployeeReader, EmployeeService {
       };
     }
     return result;
+  }
+
+  public async activePersonOptions(
+    userIds?: readonly string[],
+  ): Promise<readonly PersonOption[]> {
+    const wanted = userIds === undefined ? undefined : new Set(userIds);
+    if (wanted !== undefined && wanted.size === 0) {
+      return [];
+    }
+    let profiles = await this.database
+      .repository<EmployeeRecord>('employees')
+      .findMany({ filter: { status: 'active' } });
+    if (wanted !== undefined) {
+      profiles = profiles.filter((profile) => wanted.has(profile.userId));
+    }
+    if (profiles.length === 0) {
+      return [];
+    }
+    // 姓名走共用的账号读服务，只取三列，邮箱根本不进这次查询。
+    const people = await this.people.byIds(profiles.map((profile) => profile.userId));
+    const peopleById = new Map(people.map((person) => [person.id, person] as const));
+    const departmentIds = await Promise.all(
+      profiles.map(async (profile) => ({
+        userId: profile.userId,
+        departmentId: await this.departments.primaryDepartmentOf(profile.userId),
+      })),
+    );
+    const titles = await this.departments.titlesByIds(
+      [
+        ...new Set(
+          departmentIds
+            .map((entry) => entry.departmentId)
+            .filter((id): id is string => id !== null),
+        ),
+      ],
+    );
+    return profiles.map((profile) => {
+      const departmentId =
+        departmentIds.find((entry) => entry.userId === profile.userId)?.departmentId ??
+        null;
+      return {
+        userId: profile.userId,
+        name: peopleById.get(profile.userId)?.name ?? null,
+        departmentId,
+        departmentName:
+          departmentId === null ? null : (titles[departmentId] ?? null),
+      };
+    });
   }
 
   public async reportsTo(userId: string): Promise<string | null> {
