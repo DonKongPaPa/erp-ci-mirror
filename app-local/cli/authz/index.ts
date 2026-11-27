@@ -7,6 +7,7 @@ import AuthzUpgradeR003 from './upgrade-r003.js';
 import AuthzUpgradeR014 from './upgrade-r014.js';
 import AuthzUpgradeR014Page from './upgrade-r014-page.js';
 import AuthzUpgradeR019Page from './upgrade-r019-page.js';
+import AuthzUpgradeR019Price from './upgrade-r019-price.js';
 import AuthzUpgradeR020 from './upgrade-r020.js';
 import AuthzUpgradeR020Page from './upgrade-r020-page.js';
 import AuthzUpgradeR021 from './upgrade-r021.js';
@@ -38,6 +39,8 @@ const authzCli = defineCliPlugin({
     'upgrade-r014-page': AuthzUpgradeR014Page,
     // R-019 页面片：给已有环境的销售/采购补物料页的页面授权（先补订单授权与 items.view）。可单独跑、可重跑。
     'upgrade-r019-page': AuthzUpgradeR019Page,
+    // R-019 加片：给已有环境的 purchase / sales 各补一个价格只读动作。可单独跑、可重跑。
+    'upgrade-r019-price': AuthzUpgradeR019Price,
     // R-026：给三个角色补反馈单页与两个新动作，给存量的人补 staff。可单独跑、可重跑。
     'upgrade-r026': AuthzUpgradeR026,
     // R-025：给已有环境的 staff 补班次只读授权。可单独跑、可重跑。

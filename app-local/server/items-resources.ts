@@ -47,6 +47,24 @@ const ITEM_READ_FIELDS = [
   'createdById',
   'createdAt',
   'updatedAt',
+  // 复刻波 0 加片：9 个不带价格的列进基础读；两个基准价各自单独成动作。
+  'englishName',
+  'stockMin',
+  'stockMax',
+  'barcode',
+  'brand',
+  'manufacturerModel',
+  'auxUnitCode',
+  'unitRatio',
+  'purchaseLeadDays',
+] as const;
+const ITEM_PURCHASE_PRICE_READ_FIELDS = [
+  ...ITEM_READ_FIELDS,
+  'basePurchasePrice',
+] as const;
+const ITEM_SALES_PRICE_READ_FIELDS = [
+  ...ITEM_READ_FIELDS,
+  'baseSalesPrice',
 ] as const;
 const ITEM_CREATE_FIELDS = [
   'name',
@@ -56,6 +74,17 @@ const ITEM_CREATE_FIELDS = [
   'unitCode',
   'legacyCode',
   'note',
+  'englishName',
+  'stockMin',
+  'stockMax',
+  'basePurchasePrice',
+  'baseSalesPrice',
+  'barcode',
+  'brand',
+  'manufacturerModel',
+  'auxUnitCode',
+  'unitRatio',
+  'purchaseLeadDays',
 ] as const;
 const ITEM_UPDATE_FIELDS = [
   'name',
@@ -66,6 +95,17 @@ const ITEM_UPDATE_FIELDS = [
   'status',
   'legacyCode',
   'note',
+  'englishName',
+  'stockMin',
+  'stockMax',
+  'basePurchasePrice',
+  'baseSalesPrice',
+  'barcode',
+  'brand',
+  'manufacturerModel',
+  'auxUnitCode',
+  'unitRatio',
+  'purchaseLeadDays',
 ] as const;
 
 const UNIT_READ_FIELDS = [
@@ -101,6 +141,18 @@ const manageItems = defineDatabasePermission((permission) =>
     .read(ITEM_READ_FIELDS)
     .create(ITEM_CREATE_FIELDS)
     .update(ITEM_UPDATE_FIELDS),
+);
+const readPurchasePrice = defineDatabasePermission((permission) =>
+  permission
+    .collection('items')
+    .title(itemsTitle)
+    .read(ITEM_PURCHASE_PRICE_READ_FIELDS),
+);
+const readSalesPrice = defineDatabasePermission((permission) =>
+  permission
+    .collection('items')
+    .title(itemsTitle)
+    .read(ITEM_SALES_PRICE_READ_FIELDS),
 );
 const readUnits = defineDatabasePermission((permission) =>
   permission.collection('units').title(unitsTitle).read(UNIT_READ_FIELDS),
@@ -163,5 +215,16 @@ export const items = defineCompositeResource('items', (resource) =>
         .grant('items', manageItems)
         .grant('units', manageUnits)
         .grant('itemCategories', manageCategories),
+    )
+    // 旧系统的「采购价 / 销售价」两个权限点：各比 view 多读一列，互不交叉。
+    .action('viewPurchasePrice', (action) =>
+      action
+        .title({ key: 'authorization.items.actions.viewPurchasePrice', ns: NAMESPACE })
+        .grant('items', readPurchasePrice),
+    )
+    .action('viewSalesPrice', (action) =>
+      action
+        .title({ key: 'authorization.items.actions.viewSalesPrice', ns: NAMESPACE })
+        .grant('items', readSalesPrice),
     ),
 );

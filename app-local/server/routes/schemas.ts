@@ -889,14 +889,26 @@ const listPaging = {
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 };
 
+/** `includeSubcategories=1` 让 categoryCode 连子孙类目一起筛；不传时仍是精确匹配。 */
+const includeSubcategories = z
+  .enum(['0', '1'])
+  .optional()
+  .transform((value) => value === '1');
+
 export const ItemListQuery = z.object({
   ...listPaging,
   itemType: itemTypeValue.optional(),
   categoryCode: z.string().min(1).max(32).optional(),
+  brand: z.string().min(1).max(64).optional(),
+  includeSubcategories,
 });
 export type ItemListQueryInput = z.infer<typeof ItemListQuery>;
 
-export const DictionaryListQuery = z.object(listPaging);
+/** parentId=root 取顶层类目；其它值精确匹配父 id。 */
+export const DictionaryListQuery = z.object({
+  ...listPaging,
+  parentId: z.string().min(1).max(64).optional(),
+});
 export type DictionaryListQueryInput = z.infer<typeof DictionaryListQuery>;
 
 export const ItemSchema = z.object({
@@ -913,6 +925,18 @@ export const ItemSchema = z.object({
   createdById: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  // 复刻波 0 加片：两个基准价只在持有对应价格动作时由端点放出，所以这里是可选的。
+  englishName: z.string().nullable(),
+  stockMin: z.number().nullable(),
+  stockMax: z.number().nullable(),
+  basePurchasePrice: z.number().nullable().optional(),
+  baseSalesPrice: z.number().nullable().optional(),
+  barcode: z.string().nullable(),
+  brand: z.string().nullable(),
+  manufacturerModel: z.string().nullable(),
+  auxUnitCode: z.string().nullable(),
+  unitRatio: z.number().nullable(),
+  purchaseLeadDays: z.number().int().nullable(),
 });
 
 export const UnitSchema = z.object({
@@ -932,6 +956,9 @@ export const CategorySchema = z.object({
   status: itemStatus,
   createdAt: z.string(),
   updatedAt: z.string(),
+  sort: z.number().int(),
+  /** 从根到它自己；页面拼一/二/三级目录用。 */
+  path: z.array(z.object({ code: z.string(), name: z.string() })),
 });
 
 export const ItemListSchema = z.object({
@@ -954,6 +981,37 @@ export const CategoryListSchema = z.object({
 });
 
 /**
+ * 复刻波 0 加片的 11 个可选键。越界值（负价、负提前期、上下限倒挂）留到服务层
+ * 映射成 422 规则码，不在 zod 里变成 400；PATCH 的 null 表示清空。
+ */
+const itemExtCreate = {
+  englishName: itemNullableText(128),
+  stockMin: z.number().optional(),
+  stockMax: z.number().optional(),
+  basePurchasePrice: z.number().optional(),
+  baseSalesPrice: z.number().optional(),
+  barcode: itemNullableText(64),
+  brand: itemNullableText(64),
+  manufacturerModel: itemNullableText(128),
+  auxUnitCode: itemNullableText(16),
+  unitRatio: z.number().optional(),
+  purchaseLeadDays: z.number().int().optional(),
+};
+const itemExtUpdate = {
+  englishName: itemNullableText(128),
+  stockMin: z.number().nullable().optional(),
+  stockMax: z.number().nullable().optional(),
+  basePurchasePrice: z.number().nullable().optional(),
+  baseSalesPrice: z.number().nullable().optional(),
+  barcode: itemNullableText(64),
+  brand: itemNullableText(64),
+  manufacturerModel: itemNullableText(128),
+  auxUnitCode: itemNullableText(16),
+  unitRatio: z.number().nullable().optional(),
+  purchaseLeadDays: z.number().int().nullable().optional(),
+};
+
+/**
  * 建物料不收 code：编码由 R-016 发号服务在服务端事务里发。
  * 请求体里带了 code 也被 z.object 剥掉，不在入库值里出现。
  */
@@ -965,6 +1023,7 @@ export const CreateItemBody = z.object({
   categoryCode: itemNullableText(32),
   legacyCode: itemNullableText(64),
   note: itemNullableText(2000),
+  ...itemExtCreate,
 });
 export type CreateItemInput = z.infer<typeof CreateItemBody>;
 
@@ -982,6 +1041,7 @@ export const UpdateItemBody = z
     status: itemStatus.optional(),
     legacyCode: itemNullableText(64),
     note: itemNullableText(2000),
+    ...itemExtUpdate,
   })
   .passthrough();
 export type UpdateItemInput = z.infer<typeof UpdateItemBody>;
@@ -1002,11 +1062,14 @@ export const UpdateUnitBody = z
   .passthrough();
 export type UpdateUnitInput = z.infer<typeof UpdateUnitBody>;
 
+const categorySort = z.number().int().min(0);
+
 export const CreateCategoryBody = z.object({
   id: idValue,
   code: categoryCodeValue,
   name: unitName,
   parentId: z.string().trim().min(1).max(64).nullable().optional(),
+  sort: categorySort.optional(),
 });
 export type CreateCategoryInput = z.infer<typeof CreateCategoryBody>;
 
@@ -1015,6 +1078,7 @@ export const UpdateCategoryBody = z
     name: unitName.optional(),
     parentId: z.string().trim().min(1).max(64).nullable().optional(),
     status: itemStatus.optional(),
+    sort: categorySort.optional(),
   })
   .passthrough();
 export type UpdateCategoryInput = z.infer<typeof UpdateCategoryBody>;

@@ -15,6 +15,14 @@ import AuthzUpgradeR019Page, {
   upgradeR019Page,
   type R019PageUpgradeServices,
 } from '../../cli/authz/upgrade-r019-page.js';
+import AuthzUpgradeR019Price, {
+  neededGrants,
+  PURCHASE_PRICE_ACTION,
+  SALES_PRICE_ACTION,
+  TARGETS as PRICE_TARGETS,
+  upgradeR019Price,
+  type R019PriceUpgradeServices,
+} from '../../cli/authz/upgrade-r019-price.js';
 import { createAppTest } from '../helpers/test-app.js';
 import { createStandaloneServer } from '../../server/standalone.js';
 
@@ -352,3 +360,172 @@ async function upgradeR021Only(authz: AppAuthorization): Promise<void> {
   const { upgradeR021 } = await import('../../cli/authz/upgrade-r021.js');
   await upgradeR021({ authorization: authz }, { info: () => undefined });
 }
+
+/* -------------------------------------------------------------------------- */
+/* R-019 加片：upgrade-r019-price 只给两个角色各补一个价格动作                  */
+/* -------------------------------------------------------------------------- */
+
+const priceServices = (app: Parameters<typeof services>[0]): R019PriceUpgradeServices => ({
+  authorization: app.container.resolve(authorizationToken),
+});
+
+/** 价格授权单独成一条 composite/items grant，删掉它才等于升级前的环境。 */
+const isPriceGrant = (grant: JsonGrant): boolean =>
+  grant.resource.type === 'composite' &&
+  grant.resource.id === 'items' &&
+  grant.actions.some(
+    (entry) =>
+      entry.action === PURCHASE_PRICE_ACTION || entry.action === SALES_PRICE_ACTION,
+  );
+
+async function makeOldPrice(
+  connection: DatabaseConnection,
+  authz: AppAuthorization,
+): Promise<void> {
+  for (const key of PRICE_TARGETS) {
+    const set = await authz.permissionSets.get(key);
+    if (!set) throw new Error(`permission set ${key} is missing`);
+    const next = grantsOf(set).filter((grant) => !isPriceGrant(grant));
+    await connection.query
+      .updateTable('authorizationPermissionSets')
+      .set({ grants: JSON.stringify(next) })
+      .where('key', '=', key)
+      .execute();
+  }
+}
+
+test('新环境 seed：采购拿采购价、销售拿销售价，不交叉、仓管两个都没有', async ({
+  app,
+}) => {
+  const authz = app.container.resolve(authorizationToken);
+  const users = app.container.resolve(userManagementServiceToken);
+  const buyer = await createPerson(users, 'r019pricebuyer', ['purchase']);
+  const seller = await createPerson(users, 'r019priceseller', ['sales']);
+  const keeper = await createPerson(users, 'r019pricekeeper', ['warehouse']);
+  expect(
+    await can(authz, buyer, itemsResource, PURCHASE_PRICE_ACTION),
+  ).toBe(true);
+  expect(await can(authz, buyer, itemsResource, SALES_PRICE_ACTION)).toBe(false);
+  expect(
+    await can(authz, seller, itemsResource, SALES_PRICE_ACTION),
+  ).toBe(true);
+  expect(await can(authz, seller, itemsResource, PURCHASE_PRICE_ACTION)).toBe(false);
+  expect(await can(authz, keeper, itemsResource, PURCHASE_PRICE_ACTION)).toBe(false);
+  expect(await can(authz, keeper, itemsResource, SALES_PRICE_ACTION)).toBe(false);
+});
+
+test('旧环境只补两个价格动作：原有授权不动、revision 更新，重跑不写', async ({
+  app,
+  connection,
+}) => {
+  const authz = app.container.resolve(authorizationToken);
+  const users = app.container.resolve(userManagementServiceToken);
+  await makeOldPrice(connection, authz);
+  const buyer = await createPerson(users, 'r019upgradepricebuyer', ['purchase']);
+  const seller = await createPerson(users, 'r019upgradepriceseller', ['sales']);
+  // 前置条件：升级前两个角色都没有价格动作。
+  expect(await can(authz, buyer, itemsResource, PURCHASE_PRICE_ACTION)).toBe(false);
+  expect(await can(authz, seller, itemsResource, SALES_PRICE_ACTION)).toBe(false);
+
+  const before = new Map<string, Snapshot>();
+  for (const key of [...PRICE_TARGETS, ...OTHERS])
+    before.set(key, await snapshot(authz, key));
+
+  const report = await upgradeR019Price(priceServices(app), {
+    info: () => undefined,
+  });
+  expect(report.changed).toEqual([...PRICE_TARGETS]);
+  expect(report.unchanged).toEqual([]);
+  expect(report.missing).toEqual([]);
+  expect(report.invalid).toEqual([]);
+
+  for (const key of PRICE_TARGETS) {
+    const old = before.get(key)!;
+    const now = await snapshot(authz, key);
+    // 原有授权一条不动、顺序不变，新补的价格动作接在后面。
+    expect(now.grants.slice(0, old.grants.length)).toEqual(old.grants);
+    expect(now.grants.slice(old.grants.length).filter(isPriceGrant)).toHaveLength(1);
+    expect(now.revision).not.toBe(old.revision);
+  }
+  for (const key of OTHERS)
+    expect(await snapshot(authz, key)).toEqual(before.get(key));
+  expect(await can(authz, buyer, itemsResource, PURCHASE_PRICE_ACTION)).toBe(true);
+  expect(await can(authz, buyer, itemsResource, SALES_PRICE_ACTION)).toBe(false);
+  expect(await can(authz, seller, itemsResource, SALES_PRICE_ACTION)).toBe(true);
+  expect(await can(authz, seller, itemsResource, PURCHASE_PRICE_ACTION)).toBe(false);
+
+  // 记下第一次升级之后的状态，重跑必须逐字节回到这里。
+  const afterFirst = new Map<string, Snapshot>();
+  for (const key of [...PRICE_TARGETS, ...OTHERS])
+    afterFirst.set(key, await snapshot(authz, key));
+  const second = await upgradeR019Price(priceServices(app), {
+    info: () => undefined,
+  });
+  expect(second.changed).toEqual([]);
+  expect(second.unchanged).toEqual([...PRICE_TARGETS]);
+  for (const key of [...PRICE_TARGETS, ...OTHERS])
+    expect(await snapshot(authz, key), `${key} 重跑不该变化`).toEqual(
+      afterFirst.get(key),
+    );
+});
+
+test('声明对不上时整条跳过；角色不存在记一行跳过，另一个照常补', async ({
+  app,
+  connection,
+}) => {
+  const authz = app.container.resolve(authorizationToken);
+  await makeOldPrice(connection, authz);
+  const before = new Map<string, Snapshot>();
+  for (const key of PRICE_TARGETS) before.set(key, await snapshot(authz, key));
+  const real = authz.compositeResources.getAction.bind(authz.compositeResources);
+  const spy = vi
+    .spyOn(authz.compositeResources, 'getAction')
+    .mockImplementation((id, action) =>
+      id === 'items' ? undefined : real(id, action),
+    );
+  try {
+    const report = await upgradeR019Price(priceServices(app), {
+      info: () => undefined,
+    });
+    expect(report.invalid).toEqual([...PRICE_TARGETS]);
+    expect(report.changed).toEqual([]);
+    for (const key of PRICE_TARGETS)
+      expect(await snapshot(authz, key)).toEqual(before.get(key));
+  } finally {
+    spy.mockRestore();
+  }
+
+  await connection.query
+    .deleteFrom('authorizationPermissionSets')
+    .where('key', '=', 'purchase')
+    .execute();
+  const lines: string[] = [];
+  const report = await upgradeR019Price(priceServices(app), {
+    info: (line) => lines.push(line),
+  });
+  expect(report.missing).toEqual(['purchase']);
+  expect(report.changed).toEqual(['sales']);
+  expect(
+    lines.some((line) => line.includes('purchase') && line.includes('not found')),
+  ).toBe(true);
+});
+
+test('升级命令挂在 authz 主题下，动作清单只含各自的价格动作', () => {
+  expect(AuthzUpgradeR019Price.summary).toContain('purchase');
+  expect(AuthzUpgradeR019Price.summary).toContain('sales');
+  expect(AuthzUpgradeR019Price.description).toContain(PURCHASE_PRICE_ACTION);
+  expect(AuthzUpgradeR019Price.description).toContain(SALES_PRICE_ACTION);
+  expect(AuthzUpgradeR019Price.description).toContain('no other role');
+  expect(neededGrants('purchase')).toEqual([
+    {
+      resource: { type: 'composite', id: 'items' },
+      actions: [{ action: PURCHASE_PRICE_ACTION }],
+    },
+  ]);
+  expect(neededGrants('sales')).toEqual([
+    {
+      resource: { type: 'composite', id: 'items' },
+      actions: [{ action: SALES_PRICE_ACTION }],
+    },
+  ]);
+});

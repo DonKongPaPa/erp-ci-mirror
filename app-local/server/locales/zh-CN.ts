@@ -28,6 +28,10 @@ const zhCN: AppServerResource = {
       'categoryInactive': '这个分类已经停用，请换一个。',
       'itemInactive': '这条物料已经停用，请先启用再改其它字段。',
       'invalidParent': '分类不能把自己的父分类设成自己。',
+      'limitInvalid': '库存上下限不能为负，下限不能大于上限。',
+      'auxUnitInvalid': '辅助单位与换算率要成对给；换算率必须为正，辅助单位必须在用且不同于基本单位。',
+      'numberInvalid': '价格不能为负，采购提前期要在 0 到 3650 天之间。',
+      'categoryTooDeep': '物料类目最多三级。',
     },
   },
   // R-021/R-022：订单规则码文案；端点在缺键时用 defaultValue 兜底。

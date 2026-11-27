@@ -40,6 +40,7 @@ import {
   itemsMutationsToken,
   itemsReaderToken,
   ItemRuleError,
+  type ItemRecord,
   type ItemRuleCode,
 } from '../providers/items.js';
 
@@ -65,6 +66,10 @@ const RULE_STATUS: Readonly<
   'category-inactive': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
   'item-inactive': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
   'invalid-parent': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
+  'limit-invalid': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
+  'aux-unit-invalid': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
+  'number-invalid': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
+  'category-too-deep': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
 };
 
 /** 稳定的规则码；前端按 reason 分支，文案在 server/locales。 */
@@ -83,6 +88,10 @@ const REASON: Readonly<Record<ItemRuleCode, string>> = {
   'category-inactive': 'CATEGORY_INACTIVE',
   'item-inactive': 'ITEM_INACTIVE',
   'invalid-parent': 'CATEGORY_INVALID_PARENT',
+  'limit-invalid': 'ITEM_LIMIT_INVALID',
+  'aux-unit-invalid': 'ITEM_AUX_UNIT_INVALID',
+  'number-invalid': 'ITEM_NUMBER_INVALID',
+  'category-too-deep': 'CATEGORY_TOO_DEEP',
 };
 
 const camelOf = (code: ItemRuleCode): string =>
@@ -139,6 +148,46 @@ export async function authorizeItems(
     throw new AuthorizationDeniedError(decision);
   }
   return decision;
+}
+
+export type PriceAction = 'viewPurchasePrice' | 'viewSalesPrice';
+
+/** 价格动作是独立的只读动作；没有就是 false，不抛、不影响 items.view。 */
+export async function hasItemsAction(
+  context: ItemsContext,
+  action: PriceAction,
+): Promise<boolean> {
+  const decision = await context.get('authz').authorize({
+    resource: { type: 'composite', id: 'items' },
+    action,
+  });
+  // root 走 unrestricted，判定是 conditional（带数据库字段条件）；与 authorizeItems
+  // 一致，只有 deny 才算没有授权，conditional 不能当成拒绝。
+  return decision.effect !== 'deny';
+}
+
+/** 响应裁列：键没有授权就不出现（不是 null）。授权没有字段这一层，只能靠动作。 */
+export function visibleItem(
+  row: ItemRecord,
+  canPurchase: boolean,
+  canSales: boolean,
+): Record<string, unknown> {
+  const { basePurchasePrice: _purchase, baseSalesPrice: _sales, ...rest } = row;
+  return {
+    ...rest,
+    ...(canPurchase ? { basePurchasePrice: row.basePurchasePrice } : {}),
+    ...(canSales ? { baseSalesPrice: row.baseSalesPrice } : {}),
+  };
+}
+
+/** 四个读写端点共用：先取两个价格动作的判定，再裁列。 */
+export async function priceVisibility(
+  context: ItemsContext,
+): Promise<{ readonly canPurchase: boolean; readonly canSales: boolean }> {
+  return {
+    canPurchase: await hasItemsAction(context, 'viewPurchasePrice'),
+    canSales: await hasItemsAction(context, 'viewSalesPrice'),
+  };
 }
 
 export const withItemErrors = async <T>(
@@ -216,8 +265,11 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         await authorizeItems(context, 'view');
         const query = context.req.valid('query');
         const result = await reader.list(query);
+        const visible = await priceVisibility(context);
         return context.json({
-          items: result.items,
+          items: result.items.map((row) =>
+            visibleItem(row, visible.canPurchase, visible.canSales),
+          ),
           total: result.total,
           page: query.page,
           pageSize: query.pageSize,
@@ -243,7 +295,8 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         await authorizeItems(context, 'view');
         const row = await reader.detail(context.req.param('id'));
         if (row === undefined) throw missingItem(context, 'item-not-found');
-        return context.json(row);
+        const visible = await priceVisibility(context);
+        return context.json(visibleItem(row, visible.canPurchase, visible.canSales));
       },
     );
 
@@ -275,7 +328,8 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         const row = await withItemErrors(context, async () =>
           mutations.create(context.req.valid('json'), String(session.user.id)),
         );
-        return context.json(row, 201);
+        const visible = await priceVisibility(context);
+        return context.json(visibleItem(row, visible.canPurchase, visible.canSales), 201);
       },
     );
 
@@ -313,7 +367,8 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
         const row = await withItemErrors(context, async () =>
           mutations.update(context.req.param('id'), body),
         );
-        return context.json(row);
+        const visible = await priceVisibility(context);
+        return context.json(visibleItem(row, visible.canPurchase, visible.canSales));
       },
     );
 

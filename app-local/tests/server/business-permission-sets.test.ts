@@ -224,6 +224,16 @@ const orderWarehouseRead = {
   actions: [{ action: 'warehouseView' }],
 };
 
+/** R-019 加片：采购拿采购价、销售拿销售价；两个动作互不交叉，仓管两个都不给。 */
+const purchasePriceGrant = {
+  resource: { type: 'composite', id: 'items' },
+  actions: [{ action: 'viewPurchasePrice' }],
+};
+const salesPriceGrant = {
+  resource: { type: 'composite', id: 'items' },
+  actions: [{ action: 'viewSalesPrice' }],
+};
+
 /** R-020：仓管五个库存动作，不含 warehouseManage。 */
 const inventoryGrant = {
   resource: { type: 'composite', id: 'inventory' },
@@ -295,6 +305,7 @@ const expectedRoles = {
       orderItemRead,
       orderWarehouseRead,
       itemsPageGrant,
+      salesPriceGrant,
     ],
   },
   purchase: {
@@ -308,6 +319,7 @@ const expectedRoles = {
       orderItemRead,
       orderWarehouseRead,
       itemsPageGrant,
+      purchasePriceGrant,
     ],
   },
 } as const;

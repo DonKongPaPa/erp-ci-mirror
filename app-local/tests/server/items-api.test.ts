@@ -365,3 +365,146 @@ test('R-019 接口契约: 物料列表按类型、分类、状态与 q 筛选并
   expect(paged).toMatchObject({ page: 1, pageSize: 1 });
   expect(paged.total).toBeGreaterThanOrEqual(2);
 });
+
+/** 加片验收 2：11 个新键写进去、读回来；辅助单位按「1 箱 = 24 件」成对给。 */
+test('R-019 加片验收2: 带 11 个新键建物料，详情与列表读回同样的值', async ({
+  testApp,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const basicUnit = unique('U');
+  const auxUnit = unique('U');
+  await createUnit(admin, basicUnit);
+  await createUnit(admin, auxUnit);
+
+  const extra: Row = {
+    englishName: 'Steel Plate',
+    stockMin: 1.5,
+    stockMax: 99.25,
+    basePurchasePrice: 12.3456,
+    baseSalesPrice: 18.5,
+    barcode: 'BC-12345',
+    brand: 'ACME',
+    manufacturerModel: 'M-42',
+    auxUnitCode: auxUnit,
+    unitRatio: 24,
+    purchaseLeadDays: 7,
+  };
+  const created = await createItem(admin, basicUnit, 'material', extra);
+  expect(created).toMatchObject(extra);
+
+  const detail = await jsonOf(await admin.fetch(`/items/${created.id}`, get()));
+  expect(detail).toMatchObject(extra);
+  const list = await jsonOf(await admin.fetch('/items?pageSize=100', get()));
+  const row = list.items?.find((entry) => entry.id === created.id);
+  expect(row).toMatchObject(extra);
+});
+
+/** 加片验收 3：上下限倒挂、辅助单位不成对、提前期为负都被 422 拒且库里没有这一行。 */
+test('R-019 加片验收3: 四个新规则码各拒一次，被拒的行不入库', async ({
+  testApp,
+  connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const unitCode = unique('U');
+  const auxUnit = unique('U');
+  await createUnit(admin, unitCode);
+  await createUnit(admin, auxUnit);
+
+  const cases = [
+    [
+      { stockMin: 10, stockMax: 1 },
+      'ITEM_LIMIT_INVALID',
+    ],
+    [{ auxUnitCode: auxUnit }, 'ITEM_AUX_UNIT_INVALID'],
+    [{ unitRatio: 24 }, 'ITEM_AUX_UNIT_INVALID'],
+    [{ purchaseLeadDays: -1 }, 'ITEM_NUMBER_INVALID'],
+    [{ basePurchasePrice: -1 }, 'ITEM_NUMBER_INVALID'],
+    [{ auxUnitCode: auxUnit, unitRatio: 0 }, 'ITEM_AUX_UNIT_INVALID'],
+  ] as const;
+  for (const [extra, reason] of cases) {
+    const name = unique('BAD');
+    const response = await admin.fetch('/items', write({
+      name,
+      itemType: 'material',
+      unitCode,
+      ...extra,
+    }));
+    await expectStatus(response, 422);
+    expect((await jsonOf(response)).error?.reason).toBe(reason);
+    expect(
+      await connection.repository<Row>('items').count({ filter: { name } }),
+    ).toBe(0);
+  }
+});
+
+/** 加片验收 4：三层类目、第四层拒绝、parentId=root、子孙筛选与 path。 */
+test('R-019 加片验收4: 类目三层与深度拒绝，根类目连子孙筛物料', async ({
+  testApp,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const unitCode = unique('U');
+  await createUnit(admin, unitCode);
+  const category = async (parentId: string | null, sort: number): Promise<Row> => {
+    const code = unique('C');
+    const response = await admin.fetch('/item-categories', write({
+      id: randomUUID(),
+      code,
+      name: `分类${code}`,
+      parentId,
+      sort,
+    }));
+    await expectStatus(response, 201);
+    return await jsonOf(response);
+  };
+
+  const root = await category(null, 1);
+  const middle = await category(String(root.id), 2);
+  const leaf = await category(String(middle.id), 3);
+  expect(root.path).toHaveLength(1);
+  expect(leaf.path).toEqual([
+    { code: root.code, name: root.name },
+    { code: middle.code, name: middle.name },
+    { code: leaf.code, name: leaf.name },
+  ]);
+  expect(leaf.sort).toBe(3);
+
+  const tooDeep = await admin.fetch('/item-categories', write({
+    id: randomUUID(),
+    code: unique('C'),
+    name: '第四层',
+    parentId: leaf.id,
+  }));
+  await expectStatus(tooDeep, 422);
+  expect((await jsonOf(tooDeep)).error?.reason).toBe('CATEGORY_TOO_DEEP');
+
+  const roots = await jsonOf(await admin.fetch('/item-categories?parentId=root', get()));
+  const codes = roots.items?.map((row) => String(row.code)) ?? [];
+  expect(codes).toContain(root.code);
+  expect(codes).not.toContain(middle.code);
+  expect(codes).not.toContain(leaf.code);
+
+  const onRoot = await createItem(admin, unitCode, 'material', {
+    categoryCode: root.code,
+    brand: 'BRAND-X',
+  });
+  const onLeaf = await createItem(admin, unitCode, 'material', {
+    categoryCode: leaf.code,
+  });
+
+  const withSub = await jsonOf(
+    await admin.fetch(`/items?categoryCode=${String(root.code)}&includeSubcategories=1`, get()),
+  );
+  const ids = withSub.items?.map((row) => String(row.id)) ?? [];
+  expect(ids).toContain(String(onRoot.id));
+  expect(ids).toContain(String(onLeaf.id));
+
+  const exact = await jsonOf(
+    await admin.fetch(`/items?categoryCode=${String(root.code)}`, get()),
+  );
+  const exactIds = exact.items?.map((row) => String(row.id)) ?? [];
+  expect(exactIds).toContain(String(onRoot.id));
+  expect(exactIds).not.toContain(String(onLeaf.id));
+
+  const byBrand = await jsonOf(await admin.fetch('/items?brand=BRAND-X', get()));
+  expect(byBrand.items?.map((row) => String(row.id))).toEqual([String(onRoot.id)]);
+});

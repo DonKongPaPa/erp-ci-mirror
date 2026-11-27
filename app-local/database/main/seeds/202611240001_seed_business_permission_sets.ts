@@ -226,6 +226,19 @@ const orderWarehouseRead = {
 };
 
 /**
+ * R-019 加片：旧系统两个在用的子账号都勾着价格管控可见，新系统照旧把动作给采购与销售。
+ * 价格没有字段级授权，只能用两个独立只读动作隔列：采购拿不到销售价、仓管两个都不给。
+ */
+const purchasePriceView = {
+  resource: { type: 'composite', id: 'items' },
+  actions: [{ action: 'viewPurchasePrice' }],
+};
+const salesPriceView = {
+  resource: { type: 'composite', id: 'items' },
+  actions: [{ action: 'viewSalesPrice' }],
+};
+
+/**
  * R-002：知识库的业务键是 `{ type: 'kb', id: 'kb.knowledge' }`，动作名带档位
  * （`manage.related` / `propose.related`）。`kb.knowledge/manage` 是业务键，不是授权
  * 动作名；知识库插件登记到授权插件的才是这些档位。
@@ -297,6 +310,7 @@ export const businessPermissionSets: readonly PermissionSet[] = [
     .grant(orderItemRead)
     .grant(orderWarehouseRead)
     .grant(itemsPage)
+    .grant(salesPriceView)
     .build(),
   definePermissionSet('purchase')
     .title({ key: 'permissionSets.business.purchase', ns: NAMESPACE })
@@ -308,6 +322,7 @@ export const businessPermissionSets: readonly PermissionSet[] = [
     .grant(orderItemRead)
     .grant(orderWarehouseRead)
     .grant(itemsPage)
+    .grant(purchasePriceView)
     .build(),
 ];
 

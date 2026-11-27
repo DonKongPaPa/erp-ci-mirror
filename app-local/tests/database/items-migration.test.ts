@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { describeMigration } from '@nocobase/app-testing/server';
 import { describe, expect } from 'vitest';
@@ -326,6 +327,147 @@ describe('R-019 MVP：物料主数据的迁移', () => {
       await expectCollection('items').not.toExist();
       await expectCollection('itemCategories').not.toExist();
       await expectCollection('units').not.toExist();
+    },
+  });
+});
+
+/** 复刻波 0 加片：11 列 + 类目 sort + 两个普通索引，逐项钉在物理结构上。 */
+const EXT_ITEM_FIELDS = [
+  ...ITEM_FIELDS,
+  'auxUnitCode',
+  'basePurchasePrice',
+  'baseSalesPrice',
+  'barcode',
+  'brand',
+  'englishName',
+  'manufacturerModel',
+  'purchaseLeadDays',
+  'stockMax',
+  'stockMin',
+  'unitRatio',
+].sort();
+const EXT_CATEGORY_FIELDS = [...CATEGORY_FIELDS, 'sort'].sort();
+
+describe('R-019 加片：物料档案补字段的迁移', () => {
+  describeMigration('202611260016_items_ext', {
+    sources,
+    up: async ({ connection, expectCollection }) => {
+      const items = await expectCollection('items').toExist();
+      expect(Object.keys(items.fields).sort()).toEqual(EXT_ITEM_FIELDS);
+      for (const field of ['englishName', 'barcode', 'brand']) {
+        await expectCollection('items').toHaveField(field, {
+          type: 'string',
+          nullable: true,
+        });
+      }
+      await expectCollection('items').toHaveField('manufacturerModel', {
+        type: 'string',
+        nullable: true,
+      });
+      await expectCollection('items').toHaveField('auxUnitCode', {
+        type: 'string',
+        length: 16,
+        nullable: true,
+      });
+      for (const field of ['stockMin', 'stockMax', 'basePurchasePrice', 'baseSalesPrice']) {
+        await expectCollection('items').toHaveField(field, {
+          type: 'decimal',
+          nullable: true,
+        });
+      }
+      await expectCollection('items').toHaveField('unitRatio', {
+        type: 'decimal',
+        nullable: true,
+      });
+      await expectCollection('items').toHaveField('purchaseLeadDays', {
+        type: 'integer',
+        nullable: true,
+      });
+
+      const categories = await expectCollection('itemCategories').toExist();
+      expect(Object.keys(categories.fields).sort()).toEqual(EXT_CATEGORY_FIELDS);
+      await expectCollection('itemCategories').toHaveField('sort', {
+        type: 'integer',
+        nullable: false,
+      });
+
+      await expectCollection('items').toHaveIndex(['barcode']);
+      await expectCollection('items').toHaveIndex(['legacyCode']);
+      expect(items.indexes).toHaveLength(5);
+
+      const physical = await connection.schemaInspector.getPhysicalCollection({
+        tableName: 'items',
+      });
+      expect([...(physical?.indexes.map((index) => index.name) ?? [])].sort()).toEqual([
+        'ix_items_barcode',
+        'ix_items_category',
+        'ix_items_legacy_code',
+        'ix_items_type_status_code',
+        'pk_items',
+        'uq_items_code',
+      ]);
+
+      // 默认值从真库读：存量行的 11 列全空，类目 sort 默认 0。
+      // up 会被跑两遍（回滚前后各一次），标识全部现取，不能写死。
+      const now = '2026-11-27T02:00:00.000Z';
+      const unitCode = `U${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+      const categoryId = randomUUID();
+      const itemId = randomUUID();
+      await connection.query
+        .insertInto('units')
+        .values({ code: unitCode, name: 'Piece', createdAt: now, updatedAt: now })
+        .execute();
+      await connection.query
+        .insertInto('item_categories')
+        .values({ id: categoryId, code: `C${randomUUID().slice(0, 8)}`, name: 'Raw', createdAt: now, updatedAt: now })
+        .execute();
+      const category = await connection.query
+        .selectFrom('item_categories')
+        .selectAll()
+        .where('id', '=', categoryId)
+        .executeTakeFirstOrThrow();
+      expect(Number(category.sort)).toBe(0);
+      await connection.query
+        .insertInto('items')
+        .values({
+          id: itemId,
+          code: `M${randomUUID().replaceAll('-', '').slice(0, 12)}`,
+          name: 'Steel',
+          itemType: 'material',
+          unitCode,
+          createdById: 'root',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .execute();
+      const item = await connection.query
+        .selectFrom('items')
+        .selectAll()
+        .where('id', '=', itemId)
+        .executeTakeFirstOrThrow();
+      for (const field of [
+        'englishName', 'stockMin', 'stockMax', 'basePurchasePrice',
+        'baseSalesPrice', 'barcode', 'brand', 'manufacturerModel',
+        'auxUnitCode', 'unitRatio', 'purchaseLeadDays',
+      ]) {
+        expect(item[field]).toBeNull();
+      }
+    },
+    down: async ({ expectCollection }) => {
+      const items = await expectCollection('items').toExist();
+      expect(Object.keys(items.fields).sort()).toEqual(ITEM_FIELDS);
+      for (const field of [
+        'englishName', 'stockMin', 'stockMax', 'basePurchasePrice',
+        'baseSalesPrice', 'barcode', 'brand', 'manufacturerModel',
+        'auxUnitCode', 'unitRatio', 'purchaseLeadDays',
+      ]) {
+        await expectCollection('items').not.toHaveField(field);
+      }
+      await expectCollection('items').not.toHaveIndex(['barcode']);
+      await expectCollection('items').not.toHaveIndex(['legacyCode']);
+      const categories = await expectCollection('itemCategories').toExist();
+      expect(Object.keys(categories.fields).sort()).toEqual(CATEGORY_FIELDS);
+      await expectCollection('itemCategories').not.toHaveField('sort');
     },
   });
 });

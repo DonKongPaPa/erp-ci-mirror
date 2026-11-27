@@ -41,7 +41,8 @@ import { departmentServiceToken } from './departments.js';
  * server/approvals-resources.ts 与 server/department-record-access.ts，这里只做注册：
  * FQC、部门、员工、班次、物料、往来单位、审批、库存的表，以及 `fqc`、`departments`、`employees`、
  * `shifts`、`items`、`customers`、`suppliers` 与 `inventory` 业务资源、两把部门范围键、工作区分节。
- * R-019 的物料三张表与 `items` 资源在这里登记，默认不给任何业务角色授权（只有 root）。
+ * R-019 的物料三张表与 `items` 资源在这里登记；读、建、改默认只给 root，
+ * 加片拆出的 `viewPurchasePrice` / `viewSalesPrice` 由 seed 各给一个业务角色。
  * 注册只描述能做什么，不给任何人授权；初始角色由 seed 建。
  */
 export default class AuthorizationResourcesProvider extends ServiceProvider<AppPluginApplication> {

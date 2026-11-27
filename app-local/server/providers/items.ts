@@ -42,7 +42,11 @@ export type ItemRuleCode =
   | 'unit-inactive'
   | 'category-inactive'
   | 'item-inactive'
-  | 'invalid-parent';
+  | 'invalid-parent'
+  | 'limit-invalid'
+  | 'aux-unit-invalid'
+  | 'number-invalid'
+  | 'category-too-deep';
 
 export class ItemRuleError extends Error {
   public constructor(
@@ -72,6 +76,18 @@ export interface ItemRecord {
   readonly createdById: string;
   readonly createdAt: string | Date;
   readonly updatedAt: string | Date;
+  // 复刻波 0 加片。decimal 在 Postgres 里读回来可能是字符串，viewItem 统一转成 number。
+  readonly englishName: string | null;
+  readonly stockMin: number | null;
+  readonly stockMax: number | null;
+  readonly basePurchasePrice: number | null;
+  readonly baseSalesPrice: number | null;
+  readonly barcode: string | null;
+  readonly brand: string | null;
+  readonly manufacturerModel: string | null;
+  readonly auxUnitCode: string | null;
+  readonly unitRatio: number | null;
+  readonly purchaseLeadDays: number | null;
 }
 
 export interface UnitRecord {
@@ -91,6 +107,9 @@ export interface CategoryRecord {
   readonly status: string;
   readonly createdAt: string | Date;
   readonly updatedAt: string | Date;
+  readonly sort: number;
+  /** 从根到它自己；读的时候沿 parentId 算，不落库。 */
+  readonly path?: readonly { readonly code: string; readonly name: string }[];
 }
 
 export interface DictionaryQuery {
@@ -98,11 +117,15 @@ export interface DictionaryQuery {
   readonly pageSize: number;
   readonly q?: string;
   readonly status?: string;
+  /** `root` 取顶层；其它值精确匹配父 id。 */
+  readonly parentId?: string;
 }
 
 export interface ItemQuery extends DictionaryQuery {
   readonly itemType?: string;
   readonly categoryCode?: string;
+  readonly brand?: string;
+  readonly includeSubcategories?: boolean;
 }
 
 interface Page<T> {
@@ -118,6 +141,17 @@ export interface CreateItemInput {
   readonly unitCode: string;
   readonly legacyCode?: string | null;
   readonly note?: string | null;
+  readonly englishName?: string | null;
+  readonly stockMin?: number | null;
+  readonly stockMax?: number | null;
+  readonly basePurchasePrice?: number | null;
+  readonly baseSalesPrice?: number | null;
+  readonly barcode?: string | null;
+  readonly brand?: string | null;
+  readonly manufacturerModel?: string | null;
+  readonly auxUnitCode?: string | null;
+  readonly unitRatio?: number | null;
+  readonly purchaseLeadDays?: number | null;
 }
 
 export interface UpdateItemInput {
@@ -129,6 +163,17 @@ export interface UpdateItemInput {
   readonly status?: string;
   readonly legacyCode?: string | null;
   readonly note?: string | null;
+  readonly englishName?: string | null;
+  readonly stockMin?: number | null;
+  readonly stockMax?: number | null;
+  readonly basePurchasePrice?: number | null;
+  readonly baseSalesPrice?: number | null;
+  readonly barcode?: string | null;
+  readonly brand?: string | null;
+  readonly manufacturerModel?: string | null;
+  readonly auxUnitCode?: string | null;
+  readonly unitRatio?: number | null;
+  readonly purchaseLeadDays?: number | null;
 }
 
 export interface CreateUnitInput {
@@ -148,12 +193,14 @@ export interface CreateCategoryInput {
   readonly code: string;
   readonly name: string;
   readonly parentId?: string | null;
+  readonly sort?: number;
 }
 
 export interface UpdateCategoryInput {
   readonly name?: string;
   readonly parentId?: string | null;
   readonly status?: string;
+  readonly sort?: number;
 }
 
 export interface ItemsReader {
@@ -182,6 +229,9 @@ const nullableText = (value: string | null | undefined): string | null => {
   return trimmed === undefined || trimmed.length === 0 ? null : trimmed;
 };
 
+const numberOrNull = (value: number | string | null | undefined): number | null =>
+  value === undefined || value === null ? null : Number(value);
+
 function viewItem(row: ItemRecord): ItemRecord {
   return {
     id: row.id,
@@ -197,6 +247,17 @@ function viewItem(row: ItemRecord): ItemRecord {
     createdById: row.createdById,
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
+    englishName: row.englishName ?? null,
+    stockMin: numberOrNull(row.stockMin),
+    stockMax: numberOrNull(row.stockMax),
+    basePurchasePrice: numberOrNull(row.basePurchasePrice),
+    baseSalesPrice: numberOrNull(row.baseSalesPrice),
+    barcode: row.barcode ?? null,
+    brand: row.brand ?? null,
+    manufacturerModel: row.manufacturerModel ?? null,
+    auxUnitCode: row.auxUnitCode ?? null,
+    unitRatio: numberOrNull(row.unitRatio),
+    purchaseLeadDays: numberOrNull(row.purchaseLeadDays),
   };
 }
 
@@ -211,7 +272,27 @@ function viewUnit(row: UnitRecord): UnitRecord {
   };
 }
 
-function viewCategory(row: CategoryRecord): CategoryRecord {
+/** 从根到它自己；沿 parentId 往上取，缺父或成环就停，不让坏数据卡住读端点。 */
+function categoryPath(
+  row: CategoryRecord,
+  byId: ReadonlyMap<string, CategoryRecord>,
+): readonly { readonly code: string; readonly name: string }[] {
+  const path: { code: string; name: string }[] = [];
+  const seen = new Set<string>();
+  let cursor: CategoryRecord | undefined = row;
+  while (cursor !== undefined && !seen.has(cursor.id)) {
+    seen.add(cursor.id);
+    path.unshift({ code: cursor.code, name: cursor.name });
+    if (cursor.parentId === null || cursor.parentId === '') break;
+    cursor = byId.get(cursor.parentId);
+  }
+  return path;
+}
+
+function viewCategory(
+  row: CategoryRecord,
+  all: readonly CategoryRecord[],
+): CategoryRecord {
   return {
     id: row.id,
     code: row.code,
@@ -220,6 +301,8 @@ function viewCategory(row: CategoryRecord): CategoryRecord {
     status: row.status,
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
+    sort: Number(row.sort ?? 0),
+    path: categoryPath(row, new Map(all.map((entry) => [entry.id, entry]))),
   };
 }
 
@@ -271,6 +354,75 @@ function categoryCode(value: string | null | undefined): string | null | undefin
   return text(value, 'categoryCode', 32, true) ?? null;
 }
 
+/* 复刻波 0 加片的服务层校验。越界一律抛规则码，由端点映射成 422。 */
+type NumberInput = number | string | null | undefined;
+
+const numeric = (value: NumberInput): number | null =>
+  value === undefined || value === null ? null : Number(value);
+
+function nonNegative(
+  value: NumberInput,
+  code: ItemRuleCode,
+  field: string,
+): number | null {
+  const parsed = numeric(value);
+  if (parsed !== null && (!Number.isFinite(parsed) || parsed < 0)) {
+    return fail(code, field);
+  }
+  return parsed;
+}
+
+/** 上下限都为负或下限大于上限：ITEM_LIMIT_INVALID。 */
+function stockLimits(
+  min: NumberInput,
+  max: NumberInput,
+): { readonly stockMin: number | null; readonly stockMax: number | null } {
+  const stockMin = nonNegative(min, 'limit-invalid', 'stockMin');
+  const stockMax = nonNegative(max, 'limit-invalid', 'stockMax');
+  if (stockMin !== null && stockMax !== null && stockMin > stockMax) {
+    return fail('limit-invalid', 'stockMin>stockMax');
+  }
+  return { stockMin, stockMax };
+}
+
+function leadDays(value: NumberInput): number | null {
+  const parsed = numeric(value);
+  if (
+    parsed !== null &&
+    (!Number.isInteger(parsed) || parsed < 0 || parsed > 3650)
+  ) {
+    return fail('number-invalid', 'purchaseLeadDays');
+  }
+  return parsed;
+}
+
+function unitRatioValue(value: NumberInput): number | null {
+  const parsed = numeric(value);
+  if (parsed !== null && (!Number.isFinite(parsed) || parsed <= 0)) {
+    return fail('aux-unit-invalid', 'unitRatio');
+  }
+  return parsed;
+}
+
+/** 辅助单位与换算率要么都给、要么都不给（null 表示清空）。 */
+function assertAuxPair(
+  auxUnitCode: string | null,
+  unitRatio: number | null,
+): void {
+  if ((auxUnitCode !== null) !== (unitRatio !== null)) {
+    fail('aux-unit-invalid', 'auxUnitCode/unitRatio');
+  }
+}
+
+function extText(
+  value: string | null | undefined,
+  field: string,
+  max: number,
+): string | null {
+  if (value === undefined || value === null) return null;
+  return text(value, field, max) ?? null;
+}
+
 function pageOf<T>(
   rows: readonly T[],
   query: DictionaryQuery,
@@ -292,12 +444,20 @@ export class DatabaseItemsReader implements ItemsReader {
 
   public async list(query: ItemQuery): Promise<Page<ItemRecord>> {
     const rows = await this.database.repository<ItemRecord>('items').findMany();
+    // includeSubcategories=1 时先把根类目的子孙码展开；不传时仍精确匹配。
+    let categoryCodes: readonly string[] | undefined;
+    if (query.categoryCode !== undefined && query.includeSubcategories === true) {
+      categoryCodes = await this.subtreeCodes(query.categoryCode);
+    }
     const selected = rows.filter(
       (row) =>
         (query.status === undefined || row.status === query.status) &&
         (query.itemType === undefined || row.itemType === query.itemType) &&
         (query.categoryCode === undefined ||
-          row.categoryCode === query.categoryCode) &&
+          (categoryCodes === undefined
+            ? row.categoryCode === query.categoryCode
+            : categoryCodes.includes(row.categoryCode ?? ''))) &&
+        (query.brand === undefined || row.brand === query.brand) &&
         matches(row as unknown as Record<string, unknown>, query.q),
     );
     selected.sort((left, right) =>
@@ -344,20 +504,53 @@ export class DatabaseItemsReader implements ItemsReader {
     const selected = rows.filter(
       (row) =>
         (query.status === undefined || row.status === query.status) &&
+        (query.parentId === undefined ||
+          (query.parentId === 'root'
+            ? row.parentId === null || row.parentId === ''
+            : row.parentId === query.parentId)) &&
         matches(row as unknown as Record<string, unknown>, query.q),
     );
     selected.sort((left, right) =>
       left.code < right.code ? -1 : left.code > right.code ? 1 : 0,
     );
     const result = pageOf(selected, query);
-    return { ...result, items: result.items.map(viewCategory) };
+    return {
+      ...result,
+      items: result.items.map((row) => viewCategory(row, rows)),
+    };
   }
 
   public async categoryDetail(id: string): Promise<CategoryRecord | undefined> {
-    const row = await this.database
+    const rows = await this.database
       .repository<CategoryRecord>('itemCategories')
-      .findOne({ filter: { id } });
-    return row === undefined ? undefined : viewCategory(row);
+      .findMany();
+    const row = rows.find((entry) => entry.id === id);
+    return row === undefined ? undefined : viewCategory(row, rows);
+  }
+
+  /** 根类目加全部子孙的 code；母子关系沿 parentId 读，坏链与环都不无限跑。 */
+  private async subtreeCodes(code: string): Promise<readonly string[]> {
+    const rows = await this.database
+      .repository<CategoryRecord>('itemCategories')
+      .findMany();
+    const root = rows.find((entry) => entry.code === code);
+    if (root === undefined) return [code];
+    const byParent = new Map<string, CategoryRecord[]>();
+    for (const row of rows) {
+      const parent = row.parentId ?? '';
+      byParent.set(parent, [...(byParent.get(parent) ?? []), row]);
+    }
+    const codes: string[] = [];
+    const queue = [root];
+    const seen = new Set<string>();
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (seen.has(current.id)) continue;
+      seen.add(current.id);
+      codes.push(current.code);
+      for (const child of byParent.get(current.id) ?? []) queue.push(child);
+    }
+    return codes;
   }
 }
 
@@ -377,6 +570,24 @@ export class DatabaseItemsMutations implements ItemsMutations {
       const type = itemType(input.itemType)!;
       const basicUnit = unitCode(input.unitCode)!;
       await this.requireUnit(tx, basicUnit);
+      const { stockMin, stockMax } = stockLimits(input.stockMin, input.stockMax);
+      const basePurchasePrice = nonNegative(
+        input.basePurchasePrice,
+        'number-invalid',
+        'basePurchasePrice',
+      );
+      const baseSalesPrice = nonNegative(
+        input.baseSalesPrice,
+        'number-invalid',
+        'baseSalesPrice',
+      );
+      const purchaseLeadDays = leadDays(input.purchaseLeadDays);
+      const ratio = unitRatioValue(input.unitRatio);
+      const auxUnitCode = input.auxUnitCode ?? null;
+      assertAuxPair(auxUnitCode, ratio);
+      if (auxUnitCode !== null) {
+        await this.requireAuxUnit(tx, auxUnitCode, basicUnit);
+      }
       const category = categoryCode(input.categoryCode);
       if (category !== null && category !== undefined) {
         await this.requireCategory(tx, category);
@@ -400,6 +611,17 @@ export class DatabaseItemsMutations implements ItemsMutations {
             status: 'active',
             legacyCode: nullableText(input.legacyCode),
             note: nullableText(input.note),
+            englishName: extText(input.englishName, 'englishName', 128),
+            stockMin,
+            stockMax,
+            basePurchasePrice,
+            baseSalesPrice,
+            barcode: extText(input.barcode, 'barcode', 64),
+            brand: extText(input.brand, 'brand', 64),
+            manufacturerModel: extText(input.manufacturerModel, 'manufacturerModel', 128),
+            auxUnitCode,
+            unitRatio: ratio,
+            purchaseLeadDays,
             createdById: actorId,
             createdAt: now,
             updatedAt: now,
@@ -423,12 +645,37 @@ export class DatabaseItemsMutations implements ItemsMutations {
       if (current.status === 'inactive' && input.status !== 'active') {
         return fail('item-inactive');
       }
-      if (input.unitCode !== undefined) {
-        const basicUnit = unitCode(input.unitCode)!;
-        await this.requireUnit(tx, basicUnit);
-      }
+      const basicUnit = input.unitCode === undefined
+        ? current.unitCode
+        : unitCode(input.unitCode)!;
+      if (input.unitCode !== undefined) await this.requireUnit(tx, basicUnit);
       if (input.categoryCode !== undefined && input.categoryCode !== null) {
         await this.requireCategory(tx, input.categoryCode);
+      }
+      const merged = (patch: NumberInput, value: number | null): number | null =>
+        patch === undefined ? value : patch === null ? null : Number(patch);
+      const limits = stockLimits(
+        merged(input.stockMin, current.stockMin),
+        merged(input.stockMax, current.stockMax),
+      );
+      const purchasePrice = nonNegative(
+        merged(input.basePurchasePrice, current.basePurchasePrice),
+        'number-invalid',
+        'basePurchasePrice',
+      );
+      const salesPrice = nonNegative(
+        merged(input.baseSalesPrice, current.baseSalesPrice),
+        'number-invalid',
+        'baseSalesPrice',
+      );
+      const lead = leadDays(merged(input.purchaseLeadDays, current.purchaseLeadDays));
+      const ratio = unitRatioValue(merged(input.unitRatio, current.unitRatio));
+      const auxUnitCode = input.auxUnitCode === undefined
+        ? current.auxUnitCode ?? null
+        : input.auxUnitCode;
+      assertAuxPair(auxUnitCode, ratio);
+      if (auxUnitCode !== null) {
+        await this.requireAuxUnit(tx, auxUnitCode, basicUnit);
       }
       const nextStatus = status(input.status, 'status');
       const { record } = await tx
@@ -444,12 +691,37 @@ export class DatabaseItemsMutations implements ItemsMutations {
             ...(input.categoryCode === undefined
               ? {}
               : { categoryCode: categoryCode(input.categoryCode) ?? null }),
-            ...(input.unitCode === undefined ? {} : { unitCode: unitCode(input.unitCode)! }),
+            ...(input.unitCode === undefined ? {} : { unitCode: basicUnit }),
             ...(nextStatus === undefined ? {} : { status: nextStatus }),
             ...(input.legacyCode === undefined
               ? {}
               : { legacyCode: nullableText(input.legacyCode) }),
             ...(input.note === undefined ? {} : { note: nullableText(input.note) }),
+            ...(input.englishName === undefined
+              ? {}
+              : { englishName: extText(input.englishName, 'englishName', 128) }),
+            ...(input.stockMin === undefined ? {} : { stockMin: limits.stockMin }),
+            ...(input.stockMax === undefined ? {} : { stockMax: limits.stockMax }),
+            ...(input.basePurchasePrice === undefined
+              ? {}
+              : { basePurchasePrice: purchasePrice }),
+            ...(input.baseSalesPrice === undefined
+              ? {}
+              : { baseSalesPrice: salesPrice }),
+            ...(input.barcode === undefined
+              ? {}
+              : { barcode: extText(input.barcode, 'barcode', 64) }),
+            ...(input.brand === undefined
+              ? {}
+              : { brand: extText(input.brand, 'brand', 64) }),
+            ...(input.manufacturerModel === undefined
+              ? {}
+              : { manufacturerModel: extText(input.manufacturerModel, 'manufacturerModel', 128) }),
+            ...(input.auxUnitCode === undefined ? {} : { auxUnitCode }),
+            ...(input.unitRatio === undefined ? {} : { unitRatio: ratio }),
+            ...(input.purchaseLeadDays === undefined
+              ? {}
+              : { purchaseLeadDays: lead }),
             updatedAt: new Date(),
           },
         });
@@ -539,17 +811,22 @@ export class DatabaseItemsMutations implements ItemsMutations {
       if (parentId !== null && parentId === id) {
         return fail('invalid-parent');
       }
+      if (parentId !== null) await this.checkCategoryDepth(tx, parentId, id);
+      const sort = input.sort ?? 0;
       const now = new Date();
       const row = await tx
         .repository<CategoryRecord>('itemCategories')
         .createOne({
-          values: { id, code, name, parentId, status: 'active', createdAt: now, updatedAt: now },
+          values: { id, code, name, parentId, sort, status: 'active', createdAt: now, updatedAt: now },
         })
         .catch((error: unknown) => {
           if (isUniqueConstraintViolation(error)) return fail('category-code-taken');
           throw error;
         });
-      return viewCategory(row.record);
+      const all = await tx
+        .repository<CategoryRecord>('itemCategories')
+        .findMany();
+      return viewCategory(row.record, all);
     });
   }
 
@@ -565,11 +842,16 @@ export class DatabaseItemsMutations implements ItemsMutations {
       if (parentId === id) {
         return fail('invalid-parent');
       }
+      if (parentId !== undefined && parentId !== null) {
+        await this.checkCategoryDepth(tx, parentId, id);
+      }
       const nextStatus = status(input.status, 'status');
+      const sort = input.sort ?? 0;
       if (
         input.name === undefined &&
         parentId === undefined &&
-        nextStatus === undefined
+        nextStatus === undefined &&
+        input.sort === undefined
       ) {
         return fail('empty-patch');
       }
@@ -581,10 +863,14 @@ export class DatabaseItemsMutations implements ItemsMutations {
             ...(input.name === undefined ? {} : { name: text(input.name, 'name', 64, true)! }),
             ...(parentId === undefined ? {} : { parentId }),
             ...(nextStatus === undefined ? {} : { status: nextStatus }),
+            ...(input.sort === undefined ? {} : { sort }),
             updatedAt: new Date(),
           },
         });
-      return viewCategory(record);
+      const all = await tx
+        .repository<CategoryRecord>('itemCategories')
+        .findMany();
+      return viewCategory(record, all);
     });
   }
 
@@ -641,6 +927,41 @@ export class DatabaseItemsMutations implements ItemsMutations {
     if (row === undefined) return fail('category-not-found');
     if (row.status !== 'active') return fail('category-inactive');
     return row;
+  }
+
+  /** 辅助单位必须在用、不等于基本单位；失败都归 ITEM_AUX_UNIT_INVALID。 */
+  private async requireAuxUnit(
+    tx: DatabaseConnection,
+    code: string,
+    basicUnit: string,
+  ): Promise<void> {
+    if (code === basicUnit) return fail('aux-unit-invalid', 'auxUnitCode=basicUnit');
+    const row = await tx.repository<UnitRecord>('units').findOne({ filter: { code } });
+    if (row === undefined || row.status !== 'active') {
+      return fail('aux-unit-invalid', 'auxUnitCode');
+    }
+  }
+
+  /**
+   * 沿父链查而不是只看直接父：碰到自己或已有环交 CATEGORY_INVALID_PARENT，
+   * 父链已经到第三级再往下挂就是第四层，交 CATEGORY_TOO_DEEP。
+   */
+  private async checkCategoryDepth(
+    tx: DatabaseConnection,
+    parentId: string,
+    selfId: string,
+  ): Promise<void> {
+    let cursor: string | null = parentId;
+    const seen = new Set<string>();
+    let depth = 1;
+    while (cursor !== null && cursor !== '') {
+      if (cursor === selfId || seen.has(cursor)) return fail('invalid-parent');
+      seen.add(cursor);
+      const parent = await this.requireCategoryById(tx, cursor);
+      if (depth >= 3) return fail('category-too-deep');
+      cursor = parent.parentId ?? null;
+      depth += 1;
+    }
   }
 
   private async itemCountByUnit(

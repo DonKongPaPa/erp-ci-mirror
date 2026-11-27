@@ -32,6 +32,10 @@ const enUS = {
       'categoryInactive': 'That category is inactive. Choose another one.',
       'itemInactive': 'That item is inactive. Reactivate it before changing other fields.',
       'invalidParent': 'A category cannot be its own parent.',
+      'limitInvalid': 'Stock limits must not be negative and the lower limit must not exceed the upper limit.',
+      'auxUnitInvalid': 'The auxiliary unit and its ratio must be given together; the ratio must be positive and the auxiliary unit active and different from the base unit.',
+      'numberInvalid': 'Prices must not be negative and the purchase lead days must be between 0 and 3650.',
+      'categoryTooDeep': 'An item category can have at most three levels.',
     },
   },
   // R-021/R-022: order rule messages; the route supplies defaultValue for missing keys.

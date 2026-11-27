@@ -11,6 +11,7 @@ import AuthzUpgradeR002 from '../../cli/authz/upgrade-r002.js';
 import AuthzUpgradeR014 from '../../cli/authz/upgrade-r014.js';
 import AuthzUpgradeR014Page from '../../cli/authz/upgrade-r014-page.js';
 import AuthzUpgradeR019Page from '../../cli/authz/upgrade-r019-page.js';
+import AuthzUpgradeR019Price from '../../cli/authz/upgrade-r019-price.js';
 import AuthzUpgradeR020 from '../../cli/authz/upgrade-r020.js';
 import AuthzUpgradeR020Page from '../../cli/authz/upgrade-r020-page.js';
 import AuthzUpgradeR021 from '../../cli/authz/upgrade-r021.js';
@@ -43,6 +44,7 @@ test('R-013: the authz commands are registered under their own topic', () => {
     'upgrade-r014',
     'upgrade-r014-page',
     'upgrade-r019-page',
+    'upgrade-r019-price',
     'upgrade-r020',
     'upgrade-r020-page',
     'upgrade-r021',
@@ -66,6 +68,10 @@ test('R-013: the authz commands are registered under their own topic', () => {
   expect(plugin!.commands['upgrade-r014-page']).toBe(AuthzUpgradeR014Page);
   // R-019 页面片：给销售/采购补物料页的页面授权（先补订单授权与 items.view）。
   expect(plugin!.commands['upgrade-r019-page']).toBe(AuthzUpgradeR019Page);
+  // R-019 加片：给采购/销售各补一个价格只读动作，可单独跑、可重跑。
+  expect(plugin!.commands['upgrade-r019-price']).toBe(AuthzUpgradeR019Price);
+  expect(AuthzUpgradeR019Price.description).toContain('viewPurchasePrice');
+  expect(AuthzUpgradeR019Price.description).toContain('viewSalesPrice');
   expect(plugin!.commands['upgrade-r020']).toBe(AuthzUpgradeR020);
   expect(plugin!.commands['upgrade-r020-page']).toBe(AuthzUpgradeR020Page);
   expect(AuthzUpgradeR020.description).toContain('inventory');

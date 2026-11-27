@@ -41,6 +41,18 @@ const write = (body: unknown, method = 'POST'): RequestInit => ({
 });
 const get = (): RequestInit => ({ method: 'GET' });
 
+interface Row {
+  [key: string]: unknown;
+}
+type JsonBody = Row & { items?: Row[]; error?: { reason?: string } };
+const jsonOf = async (response: Response): Promise<JsonBody> =>
+  (await response.json()) as JsonBody;
+const expectStatus = async (response: Response, status: number): Promise<void> => {
+  if (response.status !== status) {
+    throw new Error(`期望 ${status}，实际 ${response.status}：${await response.text()}`);
+  }
+};
+
 const makeUser = async (
   admin: TestSession,
   testApp: Parameters<typeof signIn>[0],
@@ -168,7 +180,12 @@ test('R-019 验收6: 资源声明只登记读/建/改，不登记删除；业务
       authz.compositeResources.getAction('items', 'delete'),
     ).toBeUndefined();
   }
-  for (const action of ['view', 'manage'] as const) {
+  for (const action of [
+    'view',
+    'manage',
+    'viewPurchasePrice',
+    'viewSalesPrice',
+  ] as const) {
     expect(authz.compositeResources.getAction('items', action)).toBeDefined();
   }
   expect(authz.ui.placementOf({ type: 'composite', id: 'items' })).toEqual({
@@ -199,4 +216,94 @@ test('R-019 验收6: 资源声明只登记读/建/改，不登记删除；业务
       `${key} 不该持有 items 的任何动作`,
     ).toEqual([]);
   }
+});
+
+/**
+ * 加片验收 5 的价格反向断言：授权没有字段这一层，价格靠动作隔出来。
+ * 没有动作时是「键不出现」而不是 null；先授权后读内容，没 items.view 的带价建单先 403。
+ */
+test('R-019 加片验收5: 价格键按动作隔离，无 items.view 的带价请求先得 403', async ({
+  app,
+  testApp,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const authz = app.container.resolve(authorizationToken);
+  const viewOnly = await makeUser(admin, testApp, [], true);
+  const withPurchase = await makeUser(admin, testApp, [], true);
+  const noView = await makeUser(admin, testApp, [], true);
+
+  // 自定义权限集，避免借用 purchase/sales 自带的价格动作。
+  const viewKey = unique('r019view');
+  const priceKey = unique('r019price');
+  const itemResource = { type: 'composite', id: 'items' };
+  await authz.permissionSets.create({
+    key: viewKey,
+    grants: [{ resource: itemResource, actions: [{ action: 'view' }] }],
+  });
+  await authz.permissionSets.create({
+    key: priceKey,
+    grants: [{
+      resource: itemResource,
+      actions: [{ action: 'view' }, { action: 'viewPurchasePrice' }],
+    }],
+  });
+  await authz.permissionSets.assign({
+    subject: { type: 'user', id: String(viewOnly.user.id) },
+    permissionSet: viewKey,
+  });
+  await authz.permissionSets.assign({
+    subject: { type: 'user', id: String(withPurchase.user.id) },
+    permissionSet: priceKey,
+  });
+
+  // 前置：root 建一条带两个价格真值的物料，才谈得上「泄露」。
+  const unitCode = unique('U');
+  expect((await admin.fetch('/units', write({ code: unitCode, name: '单位' }))).status).toBe(201);
+  const created = await admin.fetch('/items', write({
+    name: '带价物料',
+    itemType: 'material',
+    unitCode,
+    basePurchasePrice: 11.5,
+    baseSalesPrice: 22.75,
+  }));
+  await expectStatus(created, 201);
+  const item = await jsonOf(created);
+  const itemId = String(item.id);
+  expect(item.basePurchasePrice).toBe(11.5);
+  expect(item.baseSalesPrice).toBe(22.75);
+
+  const rowOf = (body: JsonBody) =>
+    body.items?.find((row) => String(row.id) === itemId);
+  const has = (row: Row | undefined, key: string) =>
+    row !== undefined && Object.prototype.hasOwnProperty.call(row, key);
+  const listOf = async (session: TestSession) =>
+    rowOf(await jsonOf(await session.fetch('/items', get())));
+  const detailOf = async (session: TestSession) =>
+    jsonOf(await session.fetch(`/items/${itemId}`, get()));
+
+  for (const [label, read] of [
+    ['列表', listOf],
+    ['详情', detailOf],
+  ] as const) {
+    const onlyView = await read(viewOnly);
+    expect(has(onlyView, 'basePurchasePrice'), `${label}：只持 view 不该有采购价键`).toBe(false);
+    expect(has(onlyView, 'baseSalesPrice'), `${label}：只持 view 不该有销售价键`).toBe(false);
+
+    const purchase = await read(withPurchase);
+    expect(purchase?.basePurchasePrice, `${label}：持采购价动作能读到采购价`).toBe(11.5);
+    expect(has(purchase, 'baseSalesPrice'), `${label}：持采购价动作仍不该有销售价键`).toBe(false);
+
+    const root = await read(admin);
+    expect(root?.basePurchasePrice, `${label}：root 有采购价`).toBe(11.5);
+    expect(root?.baseSalesPrice, `${label}：root 有销售价`).toBe(22.75);
+  }
+
+  // 没 items.view 的会话发带价建单，先被授权拦下，不是 422/409。
+  const denied = await noView.fetch('/items', write({
+    name: '冒名',
+    itemType: 'material',
+    unitCode,
+    basePurchasePrice: 99,
+  }));
+  expect(denied.status).toBe(403);
 });
