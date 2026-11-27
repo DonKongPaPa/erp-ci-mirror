@@ -158,6 +158,16 @@ const partnersPage = {
 };
 
 /**
+ * R-019 页面片（《基座ERP前端设计》1.3）：物料页（物料清单、计量单位、物料分类三个标签）。
+ * 读：销售、采购（它们为订单已经拿了下面的 items.view）、root；写只给 root（items.manage），
+ * 不给任何业务角色，仓管也一份不给。页面 id 与路由的 `authz.resource.id` 由守门测试钉在一起。
+ */
+const itemsPage = {
+  resource: { type: 'page', id: 'items' },
+  actions: [{ action: 'access' }],
+};
+
+/**
  * R-021/R-022：订单六个动作各成一条授权；没有删除。采购另拿物料与仓库只读，
  * 销售拿同一份只读（items.view 同时展开物料分类），都不拿库存单据的读写与过账。
  */
@@ -244,6 +254,7 @@ export const businessPermissionSets: readonly PermissionSet[] = [
     .grant(salesOrderGrant)
     .grant(orderItemRead)
     .grant(orderWarehouseRead)
+    .grant(itemsPage)
     .build(),
   definePermissionSet('purchase')
     .title({ key: 'permissionSets.business.purchase', ns: NAMESPACE })
@@ -252,6 +263,7 @@ export const businessPermissionSets: readonly PermissionSet[] = [
     .grant(purchaseOrderGrant)
     .grant(orderItemRead)
     .grant(orderWarehouseRead)
+    .grant(itemsPage)
     .build(),
 ];
 

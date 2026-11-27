@@ -7,6 +7,7 @@ import {
 import { bearer, deviceAuthorization, username } from 'better-auth/plugins';
 
 import { ownKeyEndpointGuard } from '../own-key-endpoint-guard.js';
+import { parseTrustedOrigins } from './trusted-origins.js';
 
 /**
  * The command-line clients that may sign in through the browser (`deviceAuthorization()`): `nocobase-cli`, the id
@@ -39,6 +40,18 @@ const auth: AppConfigFactory<AuthConfig> = defineAuthConfig({
     session: { storeSessionInDatabase: true },
     account: { encryptOAuthTokens: true },
   }),
+  // Cookie-authenticated write requests may arrive from a forwarded domain; the framework compares
+  // the request's Origin against publicOrigin plus this list. The parser keeps the list exact and
+  // refuses to start on an invalid entry rather than silently trusting nothing.
+  env: {
+    APP_TRUSTED_ORIGINS: {
+      path: 'trustedOrigins',
+      description:
+        'Comma-separated complete origins of cookie-authenticated write requests to trust when the application is reached through a forwarded domain, such as https://apps.example.com:13000.',
+      required: false,
+      parse: parseTrustedOrigins,
+    },
+  },
   // R-032: `hooks.before` cannot be expressed by a configuration file — a user-written `auth.hooks`
   // (even `null` or an empty map) replaces it and silently leaves `/api-key/create` unguarded, and the plugin's
   // own policy hook cannot take over (see `server/own-key-endpoint-guard.ts`). Refuse to start instead.

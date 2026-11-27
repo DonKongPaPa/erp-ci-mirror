@@ -7,11 +7,13 @@ import { describe, expect, it } from 'vitest';
 import { FEEDBACK_PAGE_ID } from '../../client/pages/feedbacks/page-id.js';
 import { businessPermissionSets } from '../../database/main/seeds/202611240001_seed_business_permission_sets.js';
 
+import { ITEMS_PAGE_ID } from '../../client/pages/items/page-id.js';
 import { PARTNERS_PAGE_ID } from '../../client/pages/partners/page-id.js';
 import { SHIFTS_PAGE_ID } from '../../client/pages/shifts/page-id.js';
 
 import { EMPLOYEES_PAGE_ID } from '../../client/pages/settings/employees/page-id.js';
 import { PARTNERS_PAGE_ID as COMMAND_PARTNERS_PAGE_ID } from '../../cli/authz/upgrade-r014-page.js';
+import { ITEMS_PAGE_ID as COMMAND_ITEMS_PAGE_ID } from '../../cli/authz/upgrade-r019-page.js';
 
 const appRoot = path.resolve(
   fileURLToPath(new URL('.', import.meta.url)),
@@ -55,12 +57,12 @@ describe('R-013 质量页的授权 id', () => {
         '202611240001_seed_business_permission_sets.ts',
       ),
     );
-    // 质量页一条（R-013），知识库页一条（R-002），反馈单页一条（R-026），客户与供应商页一条字面量（R-014；
-    // 销售与采购各引用它一次，下面按解析后的结构数人头）。
+    // 质量页一条（R-013），知识库页一条（R-002），反馈单页一条（R-026），客户与供应商页一条字面量（R-014），
+    // 物料页一条（R-019）；销售与采购各引用一次，下面按解析后的结构数人头。
     expect(
       seedPageIds.sort(),
-      'seed 里的页面授权应当有质量页、知识库页、反馈单页与客户与供应商页',
-    ).toEqual(['feedback', 'knowledge', 'partners', 'quality']);
+      'seed 里的页面授权应当有质量页、知识库页、反馈单页、客户与供应商页与物料页',
+    ).toEqual(['feedback', 'items', 'knowledge', 'partners', 'quality']);
 
     const routePageIds = pageGrantIds(read('client', 'routes.ts'));
     expect(
@@ -99,9 +101,9 @@ describe('R-011 员工页的授权 id', () => {
         .filter((grant) => grant.resource.type === 'page')
         .map((grant) => ({ role: set.key, id: grant.resource.id })),
     );
-    // 先钉住解析本身：其它三个页面授权必须被解析出来，否则下面的反向断言是空的。
+    // 先钉住解析本身：其它四个页面授权必须被解析出来，否则下面的反向断言是空的。
     expect(new Set(pageGrants.map(({ id }) => id))).toEqual(
-      new Set(['quality', 'feedback', 'knowledge', 'partners']),
+      new Set(['quality', 'feedback', 'knowledge', 'partners', 'items']),
     );
     expect(
       pageGrants.map(({ id }) => id),
@@ -142,5 +144,39 @@ describe('R-014 / R-025 页面片的授权 id', () => {
       pageGrants.map(({ id }) => id),
       '班次页默认只有 root 能进：业务角色的 seed 不能给它授权',
     ).not.toContain(SHIFTS_PAGE_ID);
+  });
+});
+
+describe('R-019 页面片的授权 id', () => {
+  it('物料页：路由、seed、升级命令三处是同一个 id，只给销售与采购', () => {
+    expect(ITEMS_PAGE_ID).toBe('items');
+    expect(COMMAND_ITEMS_PAGE_ID, '升级命令里的页面 id 与页面不是同一个').toBe(
+      ITEMS_PAGE_ID,
+    );
+    const routes = read('client', 'routes.ts');
+    expect(routes, '路由没有用共享的页面 id 常量').toContain(
+      'id: ITEMS_PAGE_ID',
+    );
+    const holders = businessPermissionSets.flatMap((set) =>
+      set.grants
+        .filter((grant) => grant.resource.type === 'page')
+        .filter((grant) => grant.resource.id === ITEMS_PAGE_ID)
+        .map(() => set.key),
+    );
+    expect(holders.sort()).toEqual(['purchase', 'sales']);
+    // 写只给 root：没有任何业务角色拿 items.manage（仓管连 items.view 都没有）。
+    const writers = businessPermissionSets.flatMap((set) =>
+      set.grants
+        .filter(
+          (grant) =>
+            grant.resource.type === 'composite' &&
+            grant.resource.id === 'items',
+        )
+        .filter((grant) =>
+          grant.actions.some((entry) => entry.action === 'manage'),
+        )
+        .map(() => set.key),
+    );
+    expect(writers).toEqual([]);
   });
 });

@@ -78,6 +78,8 @@ const noPageGrant: AuthorizationSnapshot = {
       resource: { type: 'composite', id: 'shifts' },
       actions: ['view', 'manage'],
     },
+    // R-019：采购、销售持有的只读物料授权。
+    { resource: { type: 'composite', id: 'items' }, actions: ['view'] },
   ],
 };
 const withPageGrant: AuthorizationSnapshot = {
@@ -86,6 +88,7 @@ const withPageGrant: AuthorizationSnapshot = {
     ...noPageGrant.permissions,
     { resource: { type: 'page', id: 'partners' }, actions: ['access'] },
     { resource: { type: 'page', id: 'shifts' }, actions: ['access'] },
+    { resource: { type: 'page', id: 'items' }, actions: ['access'] },
   ],
 };
 
@@ -124,7 +127,7 @@ function flatten<R extends { children?: readonly R[] }>(
 const sidebar = (): HTMLElement =>
   document.querySelector<HTMLElement>('[data-slot=sidebar]') ?? document.body;
 
-it('hides the shifts and partners entries from someone with no page grant, and shows them with one', async () => {
+it('hides the shifts, partners and items entries from someone with no page grant, and shows them with one', async () => {
   permissions = noPageGrant;
   await renderMenu();
   await screen.findByRole(
@@ -148,6 +151,13 @@ it('hides the shifts and partners entries from someone with no page grant, and s
   expect(
     within(sidebar()).queryByText('Human resources'),
   ).not.toBeInTheDocument();
+  // 物料页同理：有 items.view、没有页面授权的人看不到入口，连「物料与库存」这个分组都不出现。
+  expect(
+    within(sidebar()).queryByRole('link', { name: 'Items' }),
+  ).not.toBeInTheDocument();
+  expect(
+    within(sidebar()).queryByText('Items & inventory'),
+  ).not.toBeInTheDocument();
 });
 
 it('shows the entries once the page grants are given', async () => {
@@ -167,6 +177,13 @@ it('shows the entries once the page grants are given', async () => {
       { timeout: 15_000 },
     ),
   ).toHaveAttribute('href', '/partners');
+  expect(
+    await within(sidebar()).findByRole(
+      'link',
+      { name: 'Items' },
+      { timeout: 15_000 },
+    ),
+  ).toHaveAttribute('href', '/items');
 });
 
 /**
@@ -177,6 +194,7 @@ it('shows the entries once the page grants are given', async () => {
 it.each([
   ['/partners', 'partners'],
   ['/shifts', 'shifts'],
+  ['/items', 'items'],
 ])('%s asks for its page grant before anything loads', async (path, id) => {
   permissions = noPageGrant;
   api.mockClear();
@@ -202,4 +220,7 @@ it.each([
   ).toBeVisible();
   expect(api.mock.calls.map(([call]) => call.path)).not.toContain('partners');
   expect(api.mock.calls.map(([call]) => call.path)).not.toContain('shifts');
+  // 物料页的三个标签、两本字典都不该发出去。
+  for (const path of ['items', 'units', 'item-categories'])
+    expect(api.mock.calls.map(([call]) => call.path)).not.toContain(path);
 });

@@ -28,6 +28,8 @@ const enUS = {
     hr: 'Human resources',
     shifts: 'Shifts',
     partners: 'Customers & suppliers',
+    inventory: 'Items & inventory',
+    items: 'Items',
   },
   settings: {
     ...systemEnUS.settings,
@@ -758,6 +760,88 @@ const enUS = {
       kindRequired: 'Choose customer, supplier, or both.',
     },
   },
+  // R-019: the items page. Items, units of measure and item categories are three tabs of one page.
+  items: {
+    title: 'Items',
+    description:
+      'Materials and products share one list; units of measure and item categories are its two dictionaries.',
+    detailTitle: 'Item details',
+    codeLabel: 'Code {{code}}',
+    view: {
+      list: 'Item list',
+      units: 'Units of measure',
+      categories: 'Item categories',
+    },
+    // How a sentence names one record.
+    noun: { item: 'item', material: 'material', product: 'product' },
+    itemType: { material: 'Material', product: 'Product' },
+    searchLabel: 'Search by code, name, specification or legacy code',
+    empty: 'No items yet',
+    columns: {
+      spec: 'Specification',
+      category: 'Category',
+      unit: 'Base unit',
+      legacyCode: 'Legacy code',
+      decimals: 'Decimals',
+      parent: 'Parent category',
+    },
+    filters: { itemType: 'Type', category: 'Category' },
+    withCode: '{{name}} ({{code}})',
+    form: {
+      newTitle: 'New item',
+      editTitle: 'Edit item',
+      editDescription: 'The code {{code}} cannot be changed.',
+      inactive: 'This item is deactivated. Activate it before changing it.',
+      noCategory: 'No category',
+      inactiveOption: '{{label}} (deactivated)',
+    },
+    createdToast: 'Created {{noun}} "{{name}}"',
+    savedToast: 'Saved {{noun}} "{{name}}"',
+    activatedToast: 'Activated {{noun}} "{{name}}"',
+    deactivatedToast: 'Deactivated {{noun}} "{{name}}"',
+    deactivateTitle: 'Deactivate {{noun}} "{{name}}"?',
+    deactivateDescription:
+      'It can no longer be chosen on new documents. Existing documents and stock are not affected.',
+    errors: {
+      invalidName: 'The name must be 1–{{max}} characters once trimmed.',
+      tooLong: 'Use at most {{max}} characters.',
+    },
+    units: {
+      newTitle: 'New unit of measure',
+      editTitle: 'Edit unit of measure',
+      editDescription: 'The code {{code}} cannot be changed.',
+      searchLabel: 'Search by code or name',
+      empty: 'No units of measure yet',
+      noun: 'unit of measure',
+      codeHint:
+        '1–16 characters, upper case as you type; it cannot be changed later',
+      decimalsHint: '0–10: how many decimal places quantities keep',
+      deactivateDescription:
+        'A unit that items still use cannot be deactivated; the application then asks you to change those items first.',
+      errors: {
+        invalidCode: 'The code must be 1–{{max}} characters once trimmed.',
+        invalidName: 'The name must be 1–{{max}} characters once trimmed.',
+        invalidDecimals: 'Decimals must be a whole number from 0 to 10.',
+      },
+    },
+    categories: {
+      newTitle: 'New item category',
+      editTitle: 'Edit item category',
+      editDescription: 'The code {{code}} cannot be changed.',
+      searchLabel: 'Search by code or name',
+      empty: 'No item categories yet',
+      noun: 'item category',
+      codeHint:
+        '1–32 characters, upper case as you type; it cannot be changed later',
+      parentHint: 'Leave it empty for a root category',
+      noParent: 'None (root category)',
+      deactivateDescription: 'It can no longer be chosen for new items.',
+      errors: {
+        invalidCode: 'The code must be 1–{{max}} characters once trimmed.',
+        invalidName: 'The name must be 1–{{max}} characters once trimmed.',
+      },
+    },
+  },
   // R-012: the department maintenance page. Rejections say what to do next, not just what failed.
   departments: {
     tree: 'Department tree',
@@ -1036,6 +1120,19 @@ const enUS = {
     },
     partners: {
       tables: { partners: 'Business partners', contacts: 'Contacts' },
+    },
+    // R-019: items, units of measure and item categories are one business resource; view reads, manage writes.
+    items: {
+      title: 'Item master data',
+      tables: {
+        items: 'Items',
+        units: 'Units of measure',
+        categories: 'Item categories',
+      },
+      actions: {
+        view: 'View item master data',
+        manage: 'Manage item master data',
+      },
     },
     recordAccess: {
       myDepartments: 'My departments',

@@ -255,11 +255,12 @@ describe('System settings navigation', () => {
     ]);
     expect(
       buildRouteNavigation(routes, new Set()).map(({ route }) => route.name),
-      // 人事与客户与供应商排在质量工单前面（《基座ERP前端设计》1.1）。
+      // 人事、客户与供应商、物料与库存排在质量工单前面（《基座ERP前端设计》1.1）。
     ).toEqual([
       'home',
       'hr',
       'partners',
+      'inventory',
       'quality',
       'feedbacks',
       'ai',

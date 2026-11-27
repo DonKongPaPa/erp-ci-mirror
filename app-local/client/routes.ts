@@ -3,10 +3,12 @@ import { createAppClientConfig } from '@nocobase/app-client';
 import { readAppClientRuntimeConfig } from '@nocobase/app-client/runtime';
 import { includeNotificationTemplateRoutes } from './pages/settings/notification-routes.js';
 import notificationLogRoutes from './pages/settings/notification-log-routes.js';
+import { ITEMS_PAGE_ID } from './pages/items/page-id.js';
 import { PARTNERS_PAGE_ID } from './pages/partners/page-id.js';
 import { SHIFTS_PAGE_ID } from './pages/shifts/page-id.js';
 import {
   Bot,
+  Boxes,
   ChartColumn,
   Clock,
   Cpu,
@@ -15,6 +17,7 @@ import {
   IdCard,
   MessageSquareWarning,
   MonitorSmartphone,
+  Package,
   ShieldAlert,
   Users,
   Wrench,
@@ -151,6 +154,86 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
             presentation: {
               kind: 'dialog',
               title: 'partners.contact.editTitle',
+            },
+          },
+        ],
+      },
+    ],
+  },
+  {
+    // 物料与库存（《基座ERP前端设计》第一节）：可折叠的分组。现在只有物料一页；库存查询、入库单、
+    // 出库单、仓库是另外的片，到时直接加进这个分组。
+    auth: 'required',
+    name: 'inventory',
+    navigation: { title: 'navigation.inventory', icon: Boxes },
+    children: [
+      {
+        // R-019 物料：物料清单、计量单位、物料分类三个标签共用这一条路由（标签记在地址栏的 view 上）。
+        // 页面授权 `items` 给销售、采购与 root；打开之后读、写再分 items 的 view / manage。
+        auth: 'required',
+        authz: {
+          resource: { type: 'page', id: ITEMS_PAGE_ID },
+          action: 'access',
+        },
+        breadcrumb: { title: 'navigation.items' },
+        componentLoader: () => import('./pages/items/index.js'),
+        name: 'items',
+        navigation: { title: 'navigation.items', icon: Package },
+        path: '/items',
+        // 新建、编辑的路由对话框与详情抽屉都从这一页继承授权。
+        children: [
+          {
+            componentLoader: () => import('./pages/items/new.js'),
+            name: 'itemNew',
+            path: 'new',
+            presentation: { kind: 'dialog', title: 'items.form.newTitle' },
+          },
+          {
+            // 详情是抽屉；编辑的对话框叠在抽屉上。
+            componentLoader: () => import('./pages/items/detail.js'),
+            name: 'itemDetail',
+            path: ':itemId',
+            presentation: { kind: 'drawer', title: 'items.detailTitle' },
+            children: [
+              {
+                componentLoader: () => import('./pages/items/edit.js'),
+                name: 'itemEdit',
+                path: 'edit',
+                presentation: {
+                  kind: 'dialog',
+                  title: 'items.form.editTitle',
+                },
+              },
+            ],
+          },
+          {
+            componentLoader: () => import('./pages/items/unit-new.js'),
+            name: 'unitNew',
+            path: 'units/new',
+            presentation: { kind: 'dialog', title: 'items.units.newTitle' },
+          },
+          {
+            componentLoader: () => import('./pages/items/unit-edit.js'),
+            name: 'unitEdit',
+            path: 'units/:unitCode/edit',
+            presentation: { kind: 'dialog', title: 'items.units.editTitle' },
+          },
+          {
+            componentLoader: () => import('./pages/items/category-new.js'),
+            name: 'categoryNew',
+            path: 'categories/new',
+            presentation: {
+              kind: 'dialog',
+              title: 'items.categories.newTitle',
+            },
+          },
+          {
+            componentLoader: () => import('./pages/items/category-edit.js'),
+            name: 'categoryEdit',
+            path: 'categories/:categoryId/edit',
+            presentation: {
+              kind: 'dialog',
+              title: 'items.categories.editTitle',
             },
           },
         ],

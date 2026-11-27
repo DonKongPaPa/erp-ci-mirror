@@ -22,6 +22,8 @@ const zhCN: AppResource = {
     hr: '人事',
     shifts: '班次定义',
     partners: '客户与供应商',
+    inventory: '物料与库存',
+    items: '物料',
   },
   settings: {
     ...systemZhCN.settings,
@@ -706,6 +708,81 @@ const zhCN: AppResource = {
       kindRequired: '客户与供应商至少勾一项。',
     },
   },
+  // R-019 物料页（《基座ERP前端设计》3.3）：物料清单、计量单位、物料分类三个标签，整页一组。
+  items: {
+    title: '物料',
+    description: '物料与产品同在一张清单里，计量单位和物料分类是它的两本字典。',
+    detailTitle: '物料详情',
+    codeLabel: '编码 {{code}}',
+    view: { list: '物料清单', units: '计量单位', categories: '物料分类' },
+    // 提示与确认框里怎么叫这一条。
+    noun: { item: '物料', material: '物料', product: '产品' },
+    itemType: { material: '物料', product: '产品' },
+    searchLabel: '按编码、名称、规格型号或旧系统编码搜索',
+    empty: '还没有物料',
+    columns: {
+      spec: '规格型号',
+      category: '分类',
+      unit: '基本单位',
+      legacyCode: '旧系统编码',
+      decimals: '小数位',
+      parent: '上级分类',
+    },
+    filters: { itemType: '类型', category: '分类' },
+    withCode: '{{name}}（{{code}}）',
+    form: {
+      newTitle: '新建物料',
+      editTitle: '编辑物料',
+      editDescription: '编码 {{code}} 不能修改。',
+      inactive: '这条物料已停用，请先启用再修改。',
+      noCategory: '无分类',
+      inactiveOption: '{{label}}（已停用）',
+    },
+    createdToast: '已创建{{noun}}“{{name}}”',
+    savedToast: '已保存{{noun}}“{{name}}”',
+    activatedToast: '已启用{{noun}}“{{name}}”',
+    deactivatedToast: '已停用{{noun}}“{{name}}”',
+    deactivateTitle: '停用{{noun}}“{{name}}”？',
+    deactivateDescription:
+      '停用后新单据里不能再选它，已有的单据和库存不受影响。',
+    errors: {
+      invalidName: '名称要去掉首尾空白后 1–{{max}} 个字符。',
+      tooLong: '这一项最多 {{max}} 个字符。',
+    },
+    units: {
+      newTitle: '新建计量单位',
+      editTitle: '编辑计量单位',
+      editDescription: '编码 {{code}} 不能修改。',
+      searchLabel: '按编码或名称搜索',
+      empty: '还没有计量单位',
+      noun: '计量单位',
+      codeHint: '1–16 个字符，输入时自动转成大写；建好后不能改',
+      decimalsHint: '0–10，决定数量能写到小数点后几位',
+      deactivateDescription:
+        '还有物料在用这个单位时不能停用，系统会提示先改那些物料。',
+      errors: {
+        invalidCode: '编码要去掉首尾空白后 1–{{max}} 个字符。',
+        invalidName: '名称要去掉首尾空白后 1–{{max}} 个字符。',
+        invalidDecimals: '小数位要填 0–10 的整数。',
+      },
+    },
+    categories: {
+      newTitle: '新建物料分类',
+      editTitle: '编辑物料分类',
+      editDescription: '编码 {{code}} 不能修改。',
+      searchLabel: '按编码或名称搜索',
+      empty: '还没有物料分类',
+      noun: '物料分类',
+      codeHint: '1–32 个字符，输入时自动转成大写；建好后不能改',
+      parentHint: '不选就是根分类',
+      noParent: '无（根分类）',
+      deactivateDescription: '停用后新建物料时不能再选它。',
+      errors: {
+        invalidCode: '编码要去掉首尾空白后 1–{{max}} 个字符。',
+        invalidName: '名称要去掉首尾空白后 1–{{max}} 个字符。',
+      },
+    },
+  },
   departments: {
     tree: '部门树',
     details: '部门详情',
@@ -957,6 +1034,12 @@ const zhCN: AppResource = {
       },
     },
     partners: { tables: { partners: '往来单位', contacts: '联系人' } },
+    // R-019：物料、计量单位、物料分类合成一个业务资源；读要 view，建改要 manage。
+    items: {
+      title: '物料主数据',
+      tables: { items: '物料', units: '计量单位', categories: '物料分类' },
+      actions: { view: '查看物料主数据', manage: '管理物料主数据' },
+    },
     recordAccess: {
       myDepartments: '本部门',
       myDepartmentsAndBelow: '本部门及下级',

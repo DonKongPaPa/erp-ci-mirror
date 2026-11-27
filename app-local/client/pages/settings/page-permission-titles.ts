@@ -23,4 +23,12 @@ export const pagePermissionTitles: PagePermissionTitles = {
   partnerEdit: 'partners.form.editTitle',
   partnerContactNew: 'partners.contact.addTitle',
   partnerContactEdit: 'partners.contact.editTitle',
+  // R-019：物料页的路由对话框与抽屉继承列表页的页面授权，权限清单里要有可读的名字。
+  itemNew: 'items.form.newTitle',
+  itemDetail: 'items.detailTitle',
+  itemEdit: 'items.form.editTitle',
+  unitNew: 'items.units.newTitle',
+  unitEdit: 'items.units.editTitle',
+  categoryNew: 'items.categories.newTitle',
+  categoryEdit: 'items.categories.editTitle',
 };

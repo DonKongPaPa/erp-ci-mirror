@@ -68,6 +68,12 @@ const partnersPageGrant = {
   actions: [{ action: 'access' }],
 };
 
+/** R-019 页面片：物料页的页面授权，销售与采购各一条；写（items.manage）不给任何业务角色。 */
+const itemsPageGrant = {
+  resource: { type: 'page', id: 'items' },
+  actions: [{ action: 'access' }],
+};
+
 /** R-002：知识库的业务键是 `{ type: 'kb', id: 'kb.knowledge' }`，动作名带档位。 */
 const knowledgeGrant = (action: 'manage.related' | 'propose.related') => ({
   resource: { type: 'kb', id: 'kb.knowledge' },
@@ -105,7 +111,10 @@ const fqcConfigure = {
 const fqcView = {
   resource: { type: 'composite', id: 'fqc' },
   actions: [
-    { action: 'view', policy: { type: 'composite', scopes: qualityViewScopes } },
+    {
+      action: 'view',
+      policy: { type: 'composite', scopes: qualityViewScopes },
+    },
   ],
 };
 
@@ -137,7 +146,10 @@ const fqcViewOnly = {
 const fqcSubmit = {
   resource: { type: 'composite', id: 'fqc' },
   actions: [
-    { action: 'submit', policy: { type: 'composite', scopes: submitFqcScopes } },
+    {
+      action: 'submit',
+      policy: { type: 'composite', scopes: submitFqcScopes },
+    },
   ],
 };
 
@@ -160,29 +172,30 @@ const shiftsViewGrant = {
 /** R-014：销售只拿 customers，采购只拿 suppliers，各三个动作。 */
 const customerGrant = {
   resource: { type: 'composite', id: 'customers' },
-  actions: [
-    { action: 'view' },
-    { action: 'create' },
-    { action: 'update' },
-  ],
+  actions: [{ action: 'view' }, { action: 'create' }, { action: 'update' }],
 };
 const supplierGrant = {
   resource: { type: 'composite', id: 'suppliers' },
-  actions: [
-    { action: 'view' },
-    { action: 'create' },
-    { action: 'update' },
-  ],
+  actions: [{ action: 'view' }, { action: 'create' }, { action: 'update' }],
 };
 
 /** R-021/R-022：订单六动作各一条，另给物料与仓库只读；动作清单无删除。 */
 const purchaseOrderGrant = {
   resource: { type: 'composite', id: 'purchaseOrders' },
-  actions: ['view', 'create', 'update', 'submit', 'cancel', 'createReceipt'].map((action) => ({ action })),
+  actions: [
+    'view',
+    'create',
+    'update',
+    'submit',
+    'cancel',
+    'createReceipt',
+  ].map((action) => ({ action })),
 };
 const salesOrderGrant = {
   resource: { type: 'composite', id: 'salesOrders' },
-  actions: ['view', 'create', 'update', 'submit', 'cancel', 'createIssue'].map((action) => ({ action })),
+  actions: ['view', 'create', 'update', 'submit', 'cancel', 'createIssue'].map(
+    (action) => ({ action }),
+  ),
 };
 const orderItemRead = {
   resource: { type: 'composite', id: 'items' },
@@ -249,11 +262,25 @@ const expectedRoles = {
   },
   sales: {
     title: { key: 'permissionSets.business.sales', ns: 'app-local' },
-    grants: [partnersPageGrant, customerGrant, salesOrderGrant, orderItemRead, orderWarehouseRead],
+    grants: [
+      partnersPageGrant,
+      customerGrant,
+      salesOrderGrant,
+      orderItemRead,
+      orderWarehouseRead,
+      itemsPageGrant,
+    ],
   },
   purchase: {
     title: { key: 'permissionSets.business.purchase', ns: 'app-local' },
-    grants: [partnersPageGrant, supplierGrant, purchaseOrderGrant, orderItemRead, orderWarehouseRead],
+    grants: [
+      partnersPageGrant,
+      supplierGrant,
+      purchaseOrderGrant,
+      orderItemRead,
+      orderWarehouseRead,
+      itemsPageGrant,
+    ],
   },
 } as const;
 
@@ -276,9 +303,7 @@ test('R-013: declares the keys, titles and grants of the designed roles', () => 
   }
 });
 
-test('R-013: the seed creates the designed roles', async ({
-  app,
-}) => {
+test('R-013: the seed creates the designed roles', async ({ app }) => {
   const sets = app.container.resolve(authorizationToken).permissionSets;
   const stored = await sets.list();
   for (const [key, expected] of Object.entries(expectedRoles)) {
@@ -339,7 +364,10 @@ test('R-017 S1: with the seed applied, staff and a roleless user are denied on a
   const decision = (userId: string, table: string, action: string) =>
     authz
       .for({ principal: { type: 'user', id: userId } })
-      .authorize({ resource: { type: 'database.collection', id: table }, action });
+      .authorize({
+        resource: { type: 'database.collection', id: table },
+        action,
+      });
   const codes = (d: { reasons: readonly { code: string }[] }) =>
     d.reasons.map((reason) => reason.code);
 
@@ -350,10 +378,13 @@ test('R-017 S1: with the seed applied, staff and a roleless user are denied on a
         ['零角色用户', nobody],
       ] as const) {
         const denied = await decision(id, table, action);
-        expect(denied.effect, `${label} 不该能 ${action} ${table}`).toBe('deny');
-        expect(codes(denied), `${label} ${action} ${table} 的拒绝原因`).toContain(
-          'NO_OBJECT_PERMISSION',
+        expect(denied.effect, `${label} 不该能 ${action} ${table}`).toBe(
+          'deny',
         );
+        expect(
+          codes(denied),
+          `${label} ${action} ${table} 的拒绝原因`,
+        ).toContain('NO_OBJECT_PERMISSION');
       }
       const rootDecision = await decision(String(admin.user.id), table, action);
       expect(rootDecision.effect, `root 不能 ${action} ${table}`).not.toBe(
@@ -424,11 +455,14 @@ test('R-026 25: seed 的五个动作逐条展开，该放行的没有 NO_MATCHIN
           'deny',
         );
         // 质量主管的「查看」「处理」没有因为加了新动作而丢。
-        expect(reasons, `${entry.role} ${action} 返回 NO_MATCHING_GRANT`).not.toContain(
-          'NO_MATCHING_GRANT',
-        );
+        expect(
+          reasons,
+          `${entry.role} ${action} 返回 NO_MATCHING_GRANT`,
+        ).not.toContain('NO_MATCHING_GRANT');
       } else {
-        expect(decision.effect, `${entry.role} 不应当能 ${action}`).toBe('deny');
+        expect(decision.effect, `${entry.role} 不应当能 ${action}`).toBe(
+          'deny',
+        );
         expect(reasons, `${entry.role} ${action} 不是没有授权`).toContain(
           'NO_MATCHING_GRANT',
         );
