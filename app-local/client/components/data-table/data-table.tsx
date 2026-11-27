@@ -38,6 +38,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
@@ -160,6 +161,16 @@ export interface DataTableProps<TData, TValue = unknown> {
    * list would ignore. Omit it to keep each column's own `enableSorting`.
    */
   readonly sortableColumns?: readonly string[];
+  /**
+   * A second row under the toolbar, such as the filter panel a toolbar control expands. It sits below the toolbar row
+   * and above the table, in the same column, so expanding filters moves nothing above them.
+   */
+  readonly filterPanel?: ReactNode;
+  /**
+   * A summary row under the table body, in the table's footer, such as a document's line totals: one row of cells
+   * matching the columns. It shows only with rows.
+   */
+  readonly summaryRow?: ReactNode;
 }
 
 export interface DataTableCardParts {
@@ -269,6 +280,8 @@ export function DataTable<TData, TValue = unknown>({
   actionsColumnId = 'actions',
   selectionColumnId = 'select',
   sortableColumns,
+  filterPanel,
+  summaryRow,
 }: DataTableProps<TData, TValue>): ReactElement {
   const { t } = useTranslation();
   const phone = useIsPhone(renderCard !== undefined || filters !== undefined);
@@ -462,6 +475,9 @@ export function DataTable<TData, TValue = unknown>({
           />
         </div>
       ) : null}
+      {filterPanel != null ? (
+        <div data-slot='data-table-filter-panel'>{filterPanel}</div>
+      ) : null}
       {cards ? (
         <div className='relative'>
           <RefreshIndicator
@@ -521,6 +537,14 @@ export function DataTable<TData, TValue = unknown>({
                 />
               ))}
             </ul>
+          ) : null}
+          {/* On a phone the summary keeps its cells, in a one-row table under the cards. */}
+          {summaryRow != null && showRows ? (
+            <Table className='rounded-lg border bg-muted/50'>
+              <TableBody>
+                <TableRow>{summaryRow}</TableRow>
+              </TableBody>
+            </Table>
           ) : null}
         </div>
       ) : (
@@ -604,6 +628,11 @@ export function DataTable<TData, TValue = unknown>({
                   ))
                 : null}
             </TableBody>
+            {summaryRow != null && showRows ? (
+              <TableFooter>
+                <TableRow>{summaryRow}</TableRow>
+              </TableFooter>
+            ) : null}
           </Table>
         </div>
       )}

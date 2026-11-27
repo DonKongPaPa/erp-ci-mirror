@@ -188,6 +188,18 @@ describe('app client routes', () => {
     expect(pageAuthorizations(resolved.routes)).toEqual([
       { name: 'home', authorizedAs: null },
       { name: 'inbox', authorizedAs: null },
+      // 人事的班次定义（R-025）与客户与供应商（R-014）：页面授权 id 见《基座ERP前端设计》1.3，
+      // 各自的路由对话框与抽屉继承列表页的授权。
+      { name: 'shifts', authorizedAs: 'shifts' },
+      { name: 'shiftNew', authorizedAs: 'shifts' },
+      { name: 'shiftEdit', authorizedAs: 'shifts' },
+      { name: 'shiftCopy', authorizedAs: 'shifts' },
+      { name: 'partners', authorizedAs: 'partners' },
+      { name: 'partnerNew', authorizedAs: 'partners' },
+      { name: 'partnerDetail', authorizedAs: 'partners' },
+      { name: 'partnerEdit', authorizedAs: 'partners' },
+      { name: 'partnerContactNew', authorizedAs: 'partners' },
+      { name: 'partnerContactEdit', authorizedAs: 'partners' },
       { name: 'quality', authorizedAs: 'quality' },
       { name: 'feedbacks', authorizedAs: 'feedback' },
       { name: 'feedbackNew', authorizedAs: 'feedback' },
@@ -278,6 +290,18 @@ describe('app client routes', () => {
     expect(pageAuthorizations(built.routes)).toEqual([
       { name: 'home', authorizedAs: null },
       { name: 'inbox', authorizedAs: null },
+      // 人事的班次定义（R-025）与客户与供应商（R-014）：页面授权 id 见《基座ERP前端设计》1.3，
+      // 各自的路由对话框与抽屉继承列表页的授权。
+      { name: 'shifts', authorizedAs: 'shifts' },
+      { name: 'shiftNew', authorizedAs: 'shifts' },
+      { name: 'shiftEdit', authorizedAs: 'shifts' },
+      { name: 'shiftCopy', authorizedAs: 'shifts' },
+      { name: 'partners', authorizedAs: 'partners' },
+      { name: 'partnerNew', authorizedAs: 'partners' },
+      { name: 'partnerDetail', authorizedAs: 'partners' },
+      { name: 'partnerEdit', authorizedAs: 'partners' },
+      { name: 'partnerContactNew', authorizedAs: 'partners' },
+      { name: 'partnerContactEdit', authorizedAs: 'partners' },
       { name: 'quality', authorizedAs: 'quality' },
       { name: 'feedbacks', authorizedAs: 'feedback' },
       { name: 'feedbackNew', authorizedAs: 'feedback' },

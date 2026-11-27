@@ -62,6 +62,12 @@ const knowledgePageGrant = {
   actions: [{ action: 'access' }],
 };
 
+/** R-014 页面片：客户与供应商页的页面授权，销售与采购各一条。 */
+const partnersPageGrant = {
+  resource: { type: 'page', id: 'partners' },
+  actions: [{ action: 'access' }],
+};
+
 /** R-002：知识库的业务键是 `{ type: 'kb', id: 'kb.knowledge' }`，动作名带档位。 */
 const knowledgeGrant = (action: 'manage.related' | 'propose.related') => ({
   resource: { type: 'kb', id: 'kb.knowledge' },
@@ -243,11 +249,11 @@ const expectedRoles = {
   },
   sales: {
     title: { key: 'permissionSets.business.sales', ns: 'app-local' },
-    grants: [customerGrant, salesOrderGrant, orderItemRead, orderWarehouseRead],
+    grants: [partnersPageGrant, customerGrant, salesOrderGrant, orderItemRead, orderWarehouseRead],
   },
   purchase: {
     title: { key: 'permissionSets.business.purchase', ns: 'app-local' },
-    grants: [supplierGrant, purchaseOrderGrant, orderItemRead, orderWarehouseRead],
+    grants: [partnersPageGrant, supplierGrant, purchaseOrderGrant, orderItemRead, orderWarehouseRead],
   },
 } as const;
 

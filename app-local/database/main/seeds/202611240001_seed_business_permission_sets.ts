@@ -138,7 +138,7 @@ const inventoryGrant = {
 /**
  * R-014：客户与供应商各一份业务资源，动作都是 view / create / update（没有删除）。
  * 销售只持 customers，采购只持 suppliers；数据范围初期用全部，授权不带 policy。
- * 页面授权不在这条 seed 里：页面与路由由前端片登记，届时再由前端片补页面授权。
+ * 页面授权 `partnersPage` 是前端片补的；存量环境跑 `pnpm nocobase authz upgrade-r014-page`。
  */
 const PARTNER_ACTIONS = ['view', 'create', 'update'] as const;
 
@@ -146,6 +146,16 @@ const partnerGrant = (id: 'customers' | 'suppliers') => ({
   resource: { type: 'composite', id },
   actions: PARTNER_ACTIONS.map((action) => ({ action })),
 });
+
+/**
+ * R-014 页面片（《基座ERP前端设计》1.3）：客户与供应商页，一条路由、一个页面授权 id，
+ * 两个标签靠 customers.view、suppliers.view 各自显隐。销售、采购都拿页面授权；
+ * 页面 id 与路由的 `authz.resource.id` 由守门测试钉在一起。
+ */
+const partnersPage = {
+  resource: { type: 'page', id: 'partners' },
+  actions: [{ action: 'access' }],
+};
 
 /**
  * R-021/R-022：订单六个动作各成一条授权；没有删除。采购另拿物料与仓库只读，
@@ -229,6 +239,7 @@ export const businessPermissionSets: readonly PermissionSet[] = [
     .build(),
   definePermissionSet('sales')
     .title({ key: 'permissionSets.business.sales', ns: NAMESPACE })
+    .grant(partnersPage)
     .grant(partnerGrant('customers'))
     .grant(salesOrderGrant)
     .grant(orderItemRead)
@@ -236,6 +247,7 @@ export const businessPermissionSets: readonly PermissionSet[] = [
     .build(),
   definePermissionSet('purchase')
     .title({ key: 'permissionSets.business.purchase', ns: NAMESPACE })
+    .grant(partnersPage)
     .grant(partnerGrant('suppliers'))
     .grant(purchaseOrderGrant)
     .grant(orderItemRead)

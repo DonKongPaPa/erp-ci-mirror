@@ -19,6 +19,9 @@ const zhCN: AppResource = {
     aiRuntimes: '机器连接',
     aiSkills: '技能',
     aiUsage: '用量',
+    hr: '人事',
+    shifts: '班次定义',
+    partners: '客户与供应商',
   },
   settings: {
     ...systemZhCN.settings,
@@ -104,7 +107,8 @@ const zhCN: AppResource = {
       },
       reviews: '确认记录',
       reviewsEmpty: '暂无确认记录。',
-      reviewLine: '{{kind}} · {{actor}} · {{time}} · {{category}} / {{severity}}',
+      reviewLine:
+        '{{kind}} · {{actor}} · {{time}} · {{category}} / {{severity}}',
       reviewKind: {
         confirm: '确认',
         dispatch: '派单',
@@ -250,7 +254,8 @@ const zhCN: AppResource = {
       similarCases: '参考了 {{count}} 条相似案例',
     },
     review: {
-      record: '确认人 {{actor}} · {{time}} · 确认成 {{category}} / {{severity}}',
+      record:
+        '确认人 {{actor}} · {{time}} · 确认成 {{category}} / {{severity}}',
     },
     // R-002：「代填效果」卡片，数据来自 GET /quality/drafting/stats。
     drafting: {
@@ -537,11 +542,51 @@ const zhCN: AppResource = {
       offboardRejected: '离职前检查拦住了这次办理，请处理下面各项后重试。',
       noConflict: '工号分配出现冲突，请重试。',
       noExhausted: '工号已用到 E999999，无法继续发号。',
-      syntheticEmailReserved: '这个邮箱是留给没有邮箱的员工自动生成的地址，请换一个。',
+      syntheticEmailReserved:
+        '这个邮箱是留给没有邮箱的员工自动生成的地址，请换一个。',
     },
   },
   // R-025：班次定义的服务端错误文案（页面文案在 S3 补）。
   shifts: {
+    // R-025：`errors` 是服务端规则码的文案，其余是页面的。
+    title: '班次定义',
+    description:
+      '班次给报工与排班用。起止时间建好后不能改：要改就新建一条，再停用旧的。',
+    new: '新建班次',
+    empty: '还没有班次',
+    crossMidnight: '跨天',
+    copyAction: '复制新建并停用旧的',
+    columns: { range: '时间段', crossMidnight: '跨天', break: '休息段' },
+    form: {
+      newTitle: '新建班次',
+      newDescription: '时间按几点几分填，系统换算成从零点起的分钟数。',
+      editTitle: '编辑班次',
+      editDescription:
+        '起止时间与休息段不能改。要改时间，用「复制新建并停用旧的」。',
+      copyTitle: '复制新建并停用旧的',
+      copyDescription:
+        '按「{{title}}」（{{code}}）的新时间建一条新班次，建好后再停用这一条。',
+      copySubmit: '新建并停用旧的',
+      source: '旧班次 {{code}} {{title}}：',
+      start: '上班时间',
+      end: '下班时间',
+      break: '休息段',
+      breakStart: '休息开始',
+      breakEnd: '休息结束',
+      newCode: '新编码',
+      codeHint: '大写字母、数字、连字符或下划线；建好后不能改，停用后不复用',
+      crossHint: '下班早于上班表示跨天',
+      sortHint: '数字小的排前面',
+    },
+    createdToast: '已创建班次“{{name}}”',
+    savedToast: '已保存班次“{{name}}”',
+    copiedToast: '已新建班次，旧的“{{name}}”已停用',
+    copyPartialToast: '新班次已建好，旧班次没能停用，请手动停用。',
+    activatedToast: '已启用班次“{{name}}”',
+    deactivatedToast: '已停用班次“{{name}}”',
+    deactivateTitle: '停用班次“{{name}}”？',
+    deactivateDescription:
+      '停用后报工与排班时不能再选它，已经记在它名下的记录不受影响。',
     errors: {
       denied: '你没有这项操作的权限。请管理员在角色里授予所需权限。',
       session: '会话已过期，请重新登录。',
@@ -551,7 +596,8 @@ const zhCN: AppResource = {
       breakOutOfRange: '休息段要落在班次之内，且开始早于结束。',
       fieldImmutable: '编码、起止时间与休息段不能改。请新建一条并停用这一条。',
       invalidRequest: '有内容不合规，请检查编码、名称与时间。',
-      invalidCode: '编码要用 1–32 位大写字母、数字、连字符或下划线，且以字母或数字开头。',
+      invalidCode:
+        '编码要用 1–32 位大写字母、数字、连字符或下划线，且以字母或数字开头。',
       invalidTitle: '名称要去掉首尾空白后 1–64 个字符。',
       invalidMinute: '时间要写成 0–1439 的分钟数。',
       invalidBreak: '休息段要开始与结束一起给。',
@@ -560,6 +606,104 @@ const zhCN: AppResource = {
       conflict: '另一位操作员先改了这条班次，请刷新后重试。',
       failed: '请求失败，请重试。',
       generic: '操作失败（{{reason}}），请重试。',
+      invalidTime: '时间要写成「时:分」，如 08:30。',
+      invalidBreakOrder: '休息段的开始要早于结束。',
+      invalidInteger: '排序要填整数。',
+    },
+  },
+  // 基座 ERP 各模块页面共用的话（《基座ERP前端设计》第二节）。
+  erp: {
+    actions: {
+      create: '创建',
+      save: '保存',
+      edit: '编辑',
+      deactivate: '停用',
+      activate: '启用',
+      view: '查看',
+      add: '添加',
+    },
+    fields: {
+      code: '编码',
+      name: '名称',
+      status: '状态',
+      type: '类型',
+      contact: '联系人',
+      phone: '电话',
+      email: '邮箱',
+      address: '地址',
+      taxId: '税号',
+      note: '备注',
+      sortOrder: '排序',
+      actions: '操作',
+      actionsFor: '{{name}} 的操作',
+    },
+    list: {
+      filters: '筛选',
+      includeInactive: '含已停用',
+      resultCount: '共 {{count}} 条',
+      loadingRow: '加载中，第 {{row}} 行',
+      all: '全部',
+    },
+    status: { active: '在用', inactive: '已停用' },
+    form: {
+      required: '必填。',
+      codeIssued: '编码由系统发放，创建后不能修改。',
+      noWrite: '你没有修改这条记录的权限。',
+    },
+    detail: { basic: '基本信息' },
+    errors: {
+      invalid: '有内容不合规，请检查后重试。',
+      session: '会话已过期，请重新登录。',
+      denied: '你没有这项操作的权限。',
+      notFound: '这条记录不存在，请刷新后重试。',
+      conflict: '另一位操作员先改了这条记录，请刷新后重试。',
+      generic: '操作失败（{{reason}}），请重试。',
+      network: '网络连接不上，请重试。',
+    },
+  },
+  // R-014 客户与供应商的页面（《基座ERP前端设计》3.2）。
+  partners: {
+    title: '客户与供应商',
+    description:
+      '客户与供应商各有一个标签；同一家单位既买又卖时，两个标签里都有它。',
+    newTitle: '新建客户或供应商',
+    detailTitle: '客户与供应商详情',
+    searchLabel: '按名称或编码搜索',
+    empty: '还没有客户或供应商',
+    kind: { customer: '客户', supplier: '供应商' },
+    noun: { customer: '客户', supplier: '供应商', both: '往来单位' },
+    newKind: '新建{{kind}}',
+    editKind: '编辑{{kind}}',
+    codeLabel: '编码 {{code}}',
+    form: {
+      editTitle: '编辑客户或供应商',
+      editDescription: '编码 {{code}} 和类型不能修改。',
+      kindsHint: '至少勾一项；两项都勾表示这家单位既是客户也是供应商。',
+    },
+    createdToast: '已创建{{kind}}“{{name}}”',
+    savedToast: '已保存“{{name}}”',
+    activatedToast: '已启用“{{name}}”',
+    deactivatedToast: '已停用“{{name}}”',
+    deactivateTitle: '停用“{{name}}”？',
+    deactivateDescription: '停用后新单据里不能再选它，已有的单据不受影响。',
+    contacts: '联系人',
+    contact: {
+      title: '职务',
+      isPrimary: '首要',
+      primary: '首要',
+      setPrimary: '设为首要联系人',
+      add: '添加联系人',
+      addTitle: '添加联系人',
+      addDescription: '加到“{{name}}”名下。',
+      editTitle: '编辑联系人',
+      editDescription: '{{partner}}的联系人 {{name}}。',
+      empty: '还没有联系人',
+      addedToast: '已添加联系人',
+      savedToast: '已保存联系人“{{name}}”',
+    },
+    errors: {
+      inactive: '这条记录已停用，请先启用。',
+      kindRequired: '客户与供应商至少勾一项。',
     },
   },
   departments: {
@@ -797,6 +941,22 @@ const zhCN: AppResource = {
         createIssue: '生成出库单',
       },
     },
+    // R-014：客户与供应商两个业务资源，动作都是 view / create / update，没有删除。
+    customers: {
+      title: '客户',
+      tables: { partners: '往来单位', contacts: '联系人' },
+      actions: { view: '查看客户', create: '新建客户', update: '修改客户' },
+    },
+    suppliers: {
+      title: '供应商',
+      tables: { partners: '往来单位', contacts: '联系人' },
+      actions: {
+        view: '查看供应商',
+        create: '新建供应商',
+        update: '修改供应商',
+      },
+    },
+    partners: { tables: { partners: '往来单位', contacts: '联系人' } },
     recordAccess: {
       myDepartments: '本部门',
       myDepartmentsAndBelow: '本部门及下级',

@@ -25,6 +25,9 @@ const enUS = {
     aiRuntimes: 'Runtimes',
     aiSkills: 'Skills',
     aiUsage: 'Usage',
+    hr: 'Human resources',
+    shifts: 'Shifts',
+    partners: 'Customers & suppliers',
   },
   settings: {
     ...systemEnUS.settings,
@@ -122,8 +125,7 @@ const enUS = {
       },
       transitions: 'History',
       transitionsEmpty: 'No transitions yet.',
-      transitionLine:
-        '{{name}}: {{from}} → {{to}} · {{actor}} · {{time}}',
+      transitionLine: '{{name}}: {{from}} → {{to}} · {{actor}} · {{time}}',
       actions: {
         accept: 'Accept',
         resolve: 'Resolve',
@@ -270,8 +272,7 @@ const enUS = {
       similarCases: 'Similar cases referenced: {{count}}',
     },
     review: {
-      record:
-        'Confirmed by {{actor}} · {{time}} · {{category}} / {{severity}}',
+      record: 'Confirmed by {{actor}} · {{time}} · {{category}} / {{severity}}',
     },
     // R-002: the drafting outcomes card, fed by GET /quality/drafting/stats.
     drafting: {
@@ -286,7 +287,8 @@ const enUS = {
       severityMatched: 'Severity agreed',
       severityMismatched: 'Severity differed',
       redacted: 'Redacted before model',
-      stale: 'Refresh failed — showing the numbers from the last successful read.',
+      stale:
+        'Refresh failed — showing the numbers from the last successful read.',
       retry: 'Retry',
     },
     empty: 'No data',
@@ -331,8 +333,7 @@ const enUS = {
       'Submit a feedback sheet, follow your own sheets, or maintain all of them.',
     new: 'New feedback',
     refresh: 'Refresh',
-    noAccess:
-      'You do not have access to feedback sheets in this role.',
+    noAccess: 'You do not have access to feedback sheets in this role.',
     detailNoAccess:
       'You cannot open this feedback sheet with your current permissions.',
     newNoAccess: 'You cannot submit feedback with your current permissions.',
@@ -422,8 +423,7 @@ const enUS = {
       generic: 'The request could not be completed ({{reason}}).',
       customerRequired: 'Enter the customer before submitting.',
       tooManyAttachments: 'Too many attachments; at most 10 are allowed.',
-      operationKey:
-        'The submission could not be started. Please try again.',
+      operationKey: 'The submission could not be started. Please try again.',
       emptyUpdate: 'Change at least one field before saving.',
       attachmentUnavailable:
         'An attachment is not available for this feedback sheet.',
@@ -440,12 +440,16 @@ const enUS = {
       session: 'Your session has expired. Sign in again.',
       invalidInput: 'Check what you entered.',
       invalidInputWith: 'Check what you entered ({{detail}}).',
-      network: 'The network is unreachable. Check your connection and try again.',
+      network:
+        'The network is unreachable. Check your connection and try again.',
       forbidden: 'You do not have permission for this action.',
       attachmentNotFound: 'That attachment is not on this feedback sheet.',
-      operationConflict: 'This action conflicts with a change already made. Refresh and try again.',
-      feedbackConflict: 'This sheet was changed by someone else. Refresh and try again.',
-      conflict: 'This action conflicts with another change. Refresh and try again.',
+      operationConflict:
+        'This action conflicts with a change already made. Refresh and try again.',
+      feedbackConflict:
+        'This sheet was changed by someone else. Refresh and try again.',
+      conflict:
+        'This action conflicts with another change. Refresh and try again.',
       invalidMultipart: 'The upload is not a valid multipart request.',
       unsupportedMediaType: 'This upload format is not supported.',
     },
@@ -476,7 +480,8 @@ const enUS = {
     deactivated: 'Entry deactivated',
     activated: 'Entry activated',
     saving: 'Saving…',
-    noView: 'You do not have permission to view employees. Ask an administrator to grant the "View employees" permission.',
+    noView:
+      'You do not have permission to view employees. Ask an administrator to grant the "View employees" permission.',
     loadingRow: 'Loading employee row',
     secondaryDepartments: 'Secondary departments',
     reportsTo: 'Reports to',
@@ -486,13 +491,15 @@ const enUS = {
     left: 'Former',
     none: 'None',
     hireTitle: 'Hire an employee',
-    hireDescription: 'Creates the account and the profile together. Email and password are optional.',
+    hireDescription:
+      'Creates the account and the profile together. Email and password are optional.',
     linkTitle: 'Create a profile for an existing account',
     linkDescription: 'The account is reused; no new account is created.',
     transferTitle: 'Change position',
     transferDescription: 'Change the position of {{name}}.',
     leaveTitle: 'Process a departure',
-    leaveDescription: 'This signs {{name}} out of the application and removes them from every department.',
+    leaveDescription:
+      'This signs {{name}} out of the application and removes them from every department.',
     rehireTitle: 'Rehire an employee',
     rehireDescription: 'Rehire {{name}}; the employee number is kept.',
     detailTitle: 'Employee details',
@@ -535,7 +542,8 @@ const enUS = {
       reportsTo: 'Supervisor',
     },
     errors: {
-      denied: 'You do not have permission for this action. Ask an administrator to grant your role the required permission.',
+      denied:
+        'You do not have permission for this action. Ask an administrator to grant your role the required permission.',
       accountProtected: 'Only a root administrator can process this account.',
       alreadyLeft: 'This person has already left.',
       notLeft: 'Only a former employee can be rehired.',
@@ -554,34 +562,91 @@ const enUS = {
       profileNotFound: 'That account has no employee profile.',
       reportsToSelf: 'A person cannot report to themselves.',
       reportsToCycle: 'That reporting line would make a cycle.',
-      reportsToNotActive: 'The supervisor must be an active employee with a profile.',
-      positionInactive: 'That position is inactive; choose another one or clear it.',
+      reportsToNotActive:
+        'The supervisor must be an active employee with a profile.',
+      positionInactive:
+        'That position is inactive; choose another one or clear it.',
       gradeInactive: 'That grade is inactive; choose another one or clear it.',
-      positionInUse: 'An active employee still uses that position. Reassign them first.',
-      gradeInUse: 'An active employee still uses that grade. Reassign them first.',
+      positionInUse:
+        'An active employee still uses that position. Reassign them first.',
+      gradeInUse:
+        'An active employee still uses that grade. Reassign them first.',
       dictionaryExists: 'That code is already in use.',
       dictionaryNotFound: 'That dictionary entry does not exist.',
       selfLeave: 'You cannot process your own departure.',
-      isDepartmentManager: 'Change the department manager before processing this departure.',
-      hasDirectReports: 'Reassign the direct reports before processing this departure.',
-      offboardRejected: 'A pre-departure check stopped this departure. Resolve the items below and try again.',
+      isDepartmentManager:
+        'Change the department manager before processing this departure.',
+      hasDirectReports:
+        'Reassign the direct reports before processing this departure.',
+      offboardRejected:
+        'A pre-departure check stopped this departure. Resolve the items below and try again.',
       noConflict: 'Employee numbers were contested; retry the request.',
-      noExhausted: 'All employee numbers up to E999999 are used; no more can be issued.',
-      syntheticEmailReserved: 'That address is reserved for employees without an email; choose another one.',
+      noExhausted:
+        'All employee numbers up to E999999 are used; no more can be issued.',
+      syntheticEmailReserved:
+        'That address is reserved for employees without an email; choose another one.',
     },
   },
-  // R-025: server-side shift errors (page copy arrives in S3).
+  // R-025: shift definitions. `errors` is the copy of the server's rule codes; the rest is the page's.
   shifts: {
+    title: 'Shifts',
+    description:
+      'Shift definitions are used for work reporting and scheduling. Start and end times cannot be changed once saved: create a new shift and deactivate the old one.',
+    new: 'New shift',
+    empty: 'No shifts yet',
+    crossMidnight: 'Overnight',
+    copyAction: 'Copy as new and deactivate this one',
+    columns: { range: 'Time', crossMidnight: 'Overnight', break: 'Break' },
+    form: {
+      newTitle: 'New shift',
+      newDescription:
+        'Enter times as hours and minutes; they are stored as minutes from midnight.',
+      editTitle: 'Edit shift',
+      editDescription:
+        'Start, end and break cannot be changed. To change the times, use "Copy as new and deactivate this one".',
+      copyTitle: 'Copy as new and deactivate this one',
+      copyDescription:
+        'Create a new shift with new times based on "{{title}}" ({{code}}), then deactivate it.',
+      copySubmit: 'Create and deactivate the old one',
+      source: 'Original shift {{code}} {{title}}: ',
+      start: 'Start',
+      end: 'End',
+      break: 'Break',
+      breakStart: 'Break start',
+      breakEnd: 'Break end',
+      newCode: 'New code',
+      codeHint:
+        'Uppercase letters, digits, hyphens or underscores. It cannot be changed later and is not reused after deactivation.',
+      crossHint:
+        'An end earlier than the start means the shift crosses midnight.',
+      sortHint: 'Lower numbers come first.',
+    },
+    createdToast: 'Created shift "{{name}}"',
+    savedToast: 'Saved shift "{{name}}"',
+    copiedToast: 'Created the new shift; "{{name}}" was deactivated',
+    copyPartialToast:
+      'The new shift was created, but the old one could not be deactivated. Deactivate it yourself.',
+    activatedToast: 'Activated shift "{{name}}"',
+    deactivatedToast: 'Deactivated shift "{{name}}"',
+    deactivateTitle: 'Deactivate shift "{{name}}"?',
+    deactivateDescription:
+      'Work reporting and scheduling can no longer choose it. Records already made under it are not affected.',
     errors: {
-      denied: 'You do not have permission for this action. Ask an administrator to grant your role the required permission.',
+      denied:
+        'You do not have permission for this action. Ask an administrator to grant your role the required permission.',
       session: 'Your session has expired. Sign in again.',
       notFound: 'That shift does not exist. Reload and try again.',
-      codeExists: 'That shift code is already in use, including by a deactivated shift. Choose another.',
+      codeExists:
+        'That shift code is already in use, including by a deactivated shift. Choose another.',
       emptyRange: 'A shift cannot start and end at the same minute.',
-      breakOutOfRange: 'The break must lie inside the shift and start before it ends.',
-      fieldImmutable: 'The code, start, end and break cannot be changed. Create a new shift and deactivate this one.',
-      invalidRequest: 'Some values are not valid. Check the code, title and times.',
-      invalidCode: 'Use 1–32 uppercase letters, digits, hyphens or underscores, starting with a letter or digit.',
+      breakOutOfRange:
+        'The break must lie inside the shift and start before it ends.',
+      fieldImmutable:
+        'The code, start, end and break cannot be changed. Create a new shift and deactivate this one.',
+      invalidRequest:
+        'Some values are not valid. Check the code, title and times.',
+      invalidCode:
+        'Use 1–32 uppercase letters, digits, hyphens or underscores, starting with a letter or digit.',
       invalidTitle: 'The title must be 1–64 characters after trimming.',
       invalidMinute: 'Times must be minutes from 0 to 1439.',
       invalidBreak: 'Give both the break start and end, or neither.',
@@ -590,6 +655,107 @@ const enUS = {
       conflict: 'Another change won; reload and try again.',
       failed: 'The request failed. Please try again.',
       generic: 'Something went wrong ({{reason}}). Please try again.',
+      invalidTime: 'Enter the time as hours:minutes, for example 08:30.',
+      invalidBreakOrder: 'The break must start before it ends.',
+      invalidInteger: 'Sort order must be a whole number.',
+    },
+  },
+  // 基座 ERP 各模块页面共用的话（《基座ERP前端设计》第二节）。
+  erp: {
+    actions: {
+      create: 'Create',
+      save: 'Save',
+      edit: 'Edit',
+      deactivate: 'Deactivate',
+      activate: 'Activate',
+      view: 'View',
+      add: 'Add',
+    },
+    fields: {
+      code: 'Code',
+      name: 'Name',
+      status: 'Status',
+      type: 'Type',
+      contact: 'Contact',
+      phone: 'Phone',
+      email: 'Email',
+      address: 'Address',
+      taxId: 'Tax ID',
+      note: 'Note',
+      sortOrder: 'Sort order',
+      actions: 'Actions',
+      actionsFor: 'Actions for {{name}}',
+    },
+    list: {
+      filters: 'Filters',
+      includeInactive: 'Include deactivated',
+      resultCount: '{{count}} found',
+      loadingRow: 'Loading, row {{row}}',
+      all: 'All',
+    },
+    status: { active: 'Active', inactive: 'Deactivated' },
+    form: {
+      required: 'Required.',
+      codeIssued:
+        'The code is assigned by the system and cannot be changed after it is created.',
+      noWrite: 'You do not have permission to change this record.',
+    },
+    detail: { basic: 'Basic information' },
+    errors: {
+      invalid: 'Some values are not valid. Check them and try again.',
+      session: 'Your session has expired. Sign in again.',
+      denied: 'You do not have permission for this action.',
+      notFound: 'This record does not exist. Reload and try again.',
+      conflict: 'Another change won. Reload and try again.',
+      generic: 'Something went wrong ({{reason}}). Please try again.',
+      network: 'The network is unreachable. Please try again.',
+    },
+  },
+  // R-014 客户与供应商的页面（《基座ERP前端设计》3.2）。
+  partners: {
+    title: 'Customers & suppliers',
+    description:
+      'Customers and suppliers each have a tab. A company that both buys and sells appears in both.',
+    newTitle: 'New customer or supplier',
+    detailTitle: 'Customer or supplier details',
+    searchLabel: 'Search by name or code',
+    empty: 'No customers or suppliers yet',
+    kind: { customer: 'Customer', supplier: 'Supplier' },
+    noun: { customer: 'customer', supplier: 'supplier', both: 'company' },
+    newKind: 'New {{kind}}',
+    editKind: 'Edit {{kind}}',
+    codeLabel: 'Code {{code}}',
+    form: {
+      editTitle: 'Edit customer or supplier',
+      editDescription: 'The code {{code}} and the type cannot be changed.',
+      kindsHint:
+        'Choose at least one; both means this company is both a customer and a supplier.',
+    },
+    createdToast: 'Created {{kind}} "{{name}}"',
+    savedToast: 'Saved "{{name}}"',
+    activatedToast: 'Activated "{{name}}"',
+    deactivatedToast: 'Deactivated "{{name}}"',
+    deactivateTitle: 'Deactivate "{{name}}"?',
+    deactivateDescription:
+      'It can no longer be chosen on new documents. Existing documents are not affected.',
+    contacts: 'Contacts',
+    contact: {
+      title: 'Title',
+      isPrimary: 'Primary',
+      primary: 'Primary',
+      setPrimary: 'Set as primary contact',
+      add: 'Add contact',
+      addTitle: 'Add contact',
+      addDescription: 'Add to "{{name}}".',
+      editTitle: 'Edit contact',
+      editDescription: '{{name}}, contact of {{partner}}.',
+      empty: 'No contacts yet',
+      addedToast: 'Contact added',
+      savedToast: 'Saved contact "{{name}}"',
+    },
+    errors: {
+      inactive: 'This record is deactivated. Activate it first.',
+      kindRequired: 'Choose customer, supplier, or both.',
     },
   },
   // R-012: the department maintenance page. Rejections say what to do next, not just what failed.
@@ -849,6 +1015,28 @@ const enUS = {
         createIssue: 'Create outbound documents',
       },
     },
+    // R-014: customers and suppliers are two business resources with three actions each and no delete.
+    customers: {
+      title: 'Customers',
+      tables: { partners: 'Business partners', contacts: 'Contacts' },
+      actions: {
+        view: 'View customers',
+        create: 'Create customers',
+        update: 'Update customers',
+      },
+    },
+    suppliers: {
+      title: 'Suppliers',
+      tables: { partners: 'Business partners', contacts: 'Contacts' },
+      actions: {
+        view: 'View suppliers',
+        create: 'Create suppliers',
+        update: 'Update suppliers',
+      },
+    },
+    partners: {
+      tables: { partners: 'Business partners', contacts: 'Contacts' },
+    },
     recordAccess: {
       myDepartments: 'My departments',
       myDepartmentsAndBelow: 'My departments and below',
@@ -890,8 +1078,10 @@ const enUS = {
     errors: {
       orderNotFound: 'That order does not exist.',
       notDraft: 'Only a draft order can be changed or submitted.',
-      notCancellable: 'That order cannot be cancelled (it may already have a linked stock document).',
-      notIssuable: 'Only a submitted or partially completed order can issue a stock document.',
+      notCancellable:
+        'That order cannot be cancelled (it may already have a linked stock document).',
+      notIssuable:
+        'Only a submitted or partially completed order can issue a stock document.',
       lineInvalid: 'An order line is invalid.',
       lineDuplicated: 'The same item cannot appear twice in one order.',
       linesIssued: 'That line has already been fully issued.',
@@ -1068,7 +1258,8 @@ const enUS = {
   ticketNotifications: {
     contributor: 'Quality tickets',
     category: 'Quality tickets',
-    businessRule: 'Sent once after the transition commits; replaying the same idempotency key does not resend.',
+    businessRule:
+      'Sent once after the transition commits; replaying the same idempotency key does not resend.',
     languagePolicy: 'One message in the application default language.',
     channel: 'Inbox',
     variables: {
@@ -1083,7 +1274,8 @@ const enUS = {
     reassign: {
       name: 'Ticket reassigned',
       trigger: 'After a ticket is reassigned.',
-      recipients: 'The responsible department manager, the assignee and the previous assignee.',
+      recipients:
+        'The responsible department manager, the assignee and the previous assignee.',
     },
     resolve: {
       name: 'Ticket resolved',

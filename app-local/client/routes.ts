@@ -3,11 +3,16 @@ import { createAppClientConfig } from '@nocobase/app-client';
 import { readAppClientRuntimeConfig } from '@nocobase/app-client/runtime';
 import { includeNotificationTemplateRoutes } from './pages/settings/notification-routes.js';
 import notificationLogRoutes from './pages/settings/notification-log-routes.js';
+import { PARTNERS_PAGE_ID } from './pages/partners/page-id.js';
+import { SHIFTS_PAGE_ID } from './pages/shifts/page-id.js';
 import {
   Bot,
   ChartColumn,
+  Clock,
   Cpu,
+  Handshake,
   Home,
+  IdCard,
   MessageSquareWarning,
   MonitorSmartphone,
   ShieldAlert,
@@ -53,6 +58,104 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
     componentLoader: () => import('./pages/inbox.js'),
     name: 'inbox',
     path: '/inbox',
+  },
+  {
+    // 人事（《基座ERP前端设计》第一节）：可折叠的分组。现在只有班次定义一页；员工、部门从系统设置
+    // 挪进来是另一片（设计 1.4），到时直接加进这个分组，路径与页面授权 id 都不变。
+    auth: 'required',
+    name: 'hr',
+    navigation: { title: 'navigation.hr', icon: IdCard },
+    children: [
+      {
+        // R-025 班次定义：页面授权 `shifts` 默认只给 root；打开之后读、写再分 shifts 的 view / manage。
+        auth: 'required',
+        authz: {
+          resource: { type: 'page', id: SHIFTS_PAGE_ID },
+          action: 'access',
+        },
+        breadcrumb: { title: 'navigation.shifts' },
+        componentLoader: () => import('./pages/shifts/index.js'),
+        name: 'shifts',
+        navigation: { title: 'navigation.shifts', icon: Clock },
+        path: '/shifts',
+        // 新建、编辑、复制新建都是路由上的对话框，从这一页继承授权。
+        children: [
+          {
+            componentLoader: () => import('./pages/shifts/new.js'),
+            name: 'shiftNew',
+            path: 'new',
+            presentation: { kind: 'dialog', title: 'shifts.form.newTitle' },
+          },
+          {
+            componentLoader: () => import('./pages/shifts/edit.js'),
+            name: 'shiftEdit',
+            path: ':shiftId/edit',
+            presentation: { kind: 'dialog', title: 'shifts.form.editTitle' },
+          },
+          {
+            componentLoader: () => import('./pages/shifts/copy.js'),
+            name: 'shiftCopy',
+            path: ':shiftId/copy',
+            presentation: { kind: 'dialog', title: 'shifts.form.copyTitle' },
+          },
+        ],
+      },
+    ],
+  },
+  {
+    // R-014 客户与供应商：一条路由、一个页面授权 id，「客户」「供应商」两个标签靠
+    // customers.view、suppliers.view 各自显隐（销售只看得到客户，采购只看得到供应商）。
+    auth: 'required',
+    authz: {
+      resource: { type: 'page', id: PARTNERS_PAGE_ID },
+      action: 'access',
+    },
+    breadcrumb: { title: 'navigation.partners' },
+    componentLoader: () => import('./pages/partners/index.js'),
+    name: 'partners',
+    navigation: { title: 'navigation.partners', icon: Handshake },
+    path: '/partners',
+    children: [
+      {
+        componentLoader: () => import('./pages/partners/new.js'),
+        name: 'partnerNew',
+        path: 'new',
+        presentation: { kind: 'dialog', title: 'partners.newTitle' },
+      },
+      {
+        // 详情是抽屉；编辑与联系人的对话框叠在抽屉上，都从它继承授权。
+        componentLoader: () => import('./pages/partners/detail.js'),
+        name: 'partnerDetail',
+        path: ':partnerId',
+        presentation: { kind: 'drawer', title: 'partners.title' },
+        children: [
+          {
+            componentLoader: () => import('./pages/partners/edit.js'),
+            name: 'partnerEdit',
+            path: 'edit',
+            presentation: { kind: 'dialog', title: 'partners.form.editTitle' },
+          },
+          {
+            componentLoader: () => import('./pages/partners/contact-new.js'),
+            name: 'partnerContactNew',
+            path: 'contacts/new',
+            presentation: {
+              kind: 'dialog',
+              title: 'partners.contact.addTitle',
+            },
+          },
+          {
+            componentLoader: () => import('./pages/partners/contact-edit.js'),
+            name: 'partnerContactEdit',
+            path: 'contacts/:contactId/edit',
+            presentation: {
+              kind: 'dialog',
+              title: 'partners.contact.editTitle',
+            },
+          },
+        ],
+      },
+    ],
   },
   {
     // 质量工单看板：客户反馈初筛与分流。
