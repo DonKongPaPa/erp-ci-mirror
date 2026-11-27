@@ -40,7 +40,8 @@ export interface DictTypeItem {
 
 export interface EntryListQuery {
   readonly dictType: string;
-  readonly status?: EntryStatus;
+  /** `all` 只是列表筛选用，不是一条取值的状态。 */
+  readonly status?: EntryStatus | 'all';
   readonly q?: string;
   readonly page?: number;
   readonly pageSize?: number;

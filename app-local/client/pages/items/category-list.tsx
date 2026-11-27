@@ -2,7 +2,7 @@ import { useApiClient } from '@nocobase/app-client';
 import { useTranslation } from '@nocobase/i18n/client';
 import type { CellContext, ColumnDef } from '@tanstack/react-table';
 import { useMemo, type ReactElement } from 'react';
-import { Link } from 'react-router';
+import { Link, useLocation } from 'react-router';
 
 import { ActiveBadge } from '#components/erp/detail';
 import { IncludeInactiveFilter, ListSearch } from '#components/erp/list-page';
@@ -16,8 +16,8 @@ import type { ListAccess } from './page-id.js';
 import { useStatusChange } from './status-change.js';
 
 const DASH = <span className='text-muted-foreground'>—</span>;
-const editLink = (category: Category) =>
-  `/items/categories/${encodeURIComponent(category.id)}/edit`;
+const editLink = (category: Category, search = '') =>
+  `/items/categories/${encodeURIComponent(category.id)}/edit${search}`;
 
 /**
  * 物料分类这一张表（`/items?view=categories`）：第一版只有一层，上级分类一列对不出上级时留空。
@@ -29,6 +29,7 @@ export function CategoryList({
   pending,
 }: ListAccess): ReactElement {
   const { t } = useTranslation();
+  const location = useLocation();
   const api = useApiClient();
   const client = useMemo(() => new ItemsClient(api), [api]);
   // 上级分类一列只有 id，名字要从字典里对出来。
@@ -63,7 +64,7 @@ export function CategoryList({
                     {
                       key: 'edit',
                       label: t('erp.actions.edit'),
-                      render: <Link to={editLink(category)} />,
+                      render: <Link to={editLink(category, location.search)} />,
                     },
                     {
                       key: 'deactivate',
@@ -81,7 +82,7 @@ export function CategoryList({
                     {
                       key: 'edit',
                       label: t('erp.actions.edit'),
-                      render: <Link to={editLink(category)} />,
+                      render: <Link to={editLink(category, location.search)} />,
                     },
                   ]
             }
@@ -122,7 +123,7 @@ export function CategoryList({
       },
       ...(canManage ? [actions] : []),
     ];
-  }, [t, canManage, dictionaries.data, ask, activate]);
+  }, [t, canManage, dictionaries.data, ask, activate, location.search]);
 
   return (
     <>

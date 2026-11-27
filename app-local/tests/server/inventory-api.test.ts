@@ -466,6 +466,45 @@ test('加片拒绝路径：来源、领用、对方、日期六类规则码', as
   await reject({}, 'STOCK_TAKER_REQUIRED', true, internal.id);
 }, 30_000);
 
+test('无来源草稿打补丁不被误判成带来源：内部领用草稿改备注照旧 200，来源两列仍空', async ({
+  testApp, connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const warehouse = await createWarehouse(admin);
+  const itemId = await createItem(connection);
+  const created = await jsonOf(await admin.fetch('/stock-docs', write({
+    docType: 'out', reason: 'internal_use',
+    lines: [{ itemId, warehouseId: String(warehouse.id), qty: 1 }],
+  })));
+  expect(created.sourceType).toBeNull();
+  expect(created.sourceId).toBeNull();
+  const docId = String(created.id);
+
+  const patched = await admin.fetch(`/stock-docs/${docId}`, write({
+    remark: '补领用说明', docDate: '2026-11-28',
+    lines: [{ itemId, warehouseId: String(warehouse.id), qty: 1 }],
+  }, 'PATCH'));
+  expect(patched.status, `无来源内部领用草稿补丁失败：${await patched.clone().text()}`).toBe(200);
+  expect(await jsonOf(patched)).toMatchObject({ remark: '补领用说明', docDate: '2026-11-28' });
+  const stored = await connection.repository<Row>('stockDocs').findOne({ filter: { id: docId } });
+  expect(stored?.remark).toBe('补领用说明');
+  expect(stored?.sourceType).toBeNull();
+  expect(stored?.sourceId).toBeNull();
+
+  // 反向：真带来源的补丁仍要按理由拒绝，不能把修复放宽成「任何来源都放行」。
+  const customer = await createPartner(admin, { isCustomer: true });
+  const order = await createOrder(admin, 'sales', {
+    customerId: customer.id, lines: [{ itemId, qty: 10 }],
+  });
+  await admin.fetch(`/sales-orders/${String(order.id)}/submit`, write());
+  const withSource = await admin.fetch(`/stock-docs/${docId}`, write({
+    sourceType: 'sales_order', sourceId: String(order.id),
+    lines: [{ itemId, warehouseId: String(warehouse.id), qty: 1 }],
+  }, 'PATCH'));
+  expect(withSource.status, `带来源的内部领用补丁应当被拒：${await withSource.clone().text()}`).toBe(422);
+  expect((await jsonOf(withSource)).error?.reason).toBe('STOCK_SOURCE_NOT_ALLOWED');
+}, 30_000);
+
 test('加片金额与价格反向：没给税率的旧行照旧没有金额键，只持 stockView 看不到价格', async ({
   testApp, connection,
 }) => {

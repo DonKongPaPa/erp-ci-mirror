@@ -26,6 +26,7 @@ import InboundOrdersPage from '../../client/pages/inbound-orders/index.js';
 import InboundOrderNewPage from '../../client/pages/inbound-orders/new.js';
 import OutboundOrdersPage from '../../client/pages/outbound-orders/index.js';
 import OutboundOrderDetailPage from '../../client/pages/outbound-orders/detail.js';
+import OutboundOrderEditPage from '../../client/pages/outbound-orders/edit.js';
 
 import packageMetadata from '../../package.json' with { type: 'json' };
 
@@ -169,7 +170,9 @@ async function renderAt(route: string, grants: AuthorizationSnapshot) {
           </Route>
         </Route>
         <Route path='/outbound-orders' element={<OutboundOrdersPage />}>
-          <Route path=':docId' element={<OutboundOrderDetailPage />} />
+          <Route path=':docId' element={<OutboundOrderDetailPage />}>
+            <Route path='edit' element={<OutboundOrderEditPage />} />
+          </Route>
         </Route>
       </Routes>
     </AuthenticationProvider>,
@@ -671,5 +674,36 @@ describe('R-020 出库单', () => {
       WAIT,
     );
     expect(calls('GET', 'stock-docs/d1')).toHaveLength(2);
+  });
+
+  it('returns straight to the document after saving, without a discard prompt', async () => {
+    answer = (call) => {
+      if (call.method === 'GET' && call.path === 'stock-docs/d1') return outDoc();
+      if (call.method === 'PATCH' && call.path === 'stock-docs/d1')
+        return outDoc({ lines: [line({ qty: 130 })] });
+      return lookups(call);
+    };
+    await renderAt('/outbound-orders/d1/edit', keeper);
+    const qty = await screen.findByRole(
+      'textbox',
+      { name: 'Quantity, line 1' },
+      WAIT,
+    );
+    await userEvent.clear(qty);
+    await userEvent.type(qty, '130');
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Save draft' }, WAIT),
+    );
+
+    // 保存成功必须真的离开表单回到详情；若还问「放弃修改」，导航会被挡住，这里会超时。
+    await waitFor(
+      () =>
+        expect(screen.getByTestId('location')).toHaveTextContent(
+          /^\/outbound-orders\/d1$/,
+        ),
+      WAIT,
+    );
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(calls('PATCH', 'stock-docs/d1')).toHaveLength(1);
   });
 });

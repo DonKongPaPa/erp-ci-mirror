@@ -174,10 +174,12 @@ const optionPageSize = z.coerce.number().int().min(1).max(20).default(20);
 const dictDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u);
 const dictCode = z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/u);
 const dictStatus = z.enum(['active', 'inactive']);
+/** 列表独有的取值：`all` 只表示在用加已停用，不是一行的状态（PATCH 与响应仍只认 dictStatus）。 */
+const listStatus = z.enum(['active', 'inactive', 'all']);
 
 export const EntryListQuery = z.object({
   dictType: z.string().min(1).max(32),
-  status: dictStatus.optional(),
+  status: listStatus.optional(),
   q: z.string().min(1).max(128).optional(),
   page,
   pageSize,

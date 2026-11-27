@@ -54,6 +54,7 @@ import {
 import { Textarea } from '#components/ui/textarea';
 import { cn } from 'cn';
 
+import { usePageLeave } from '../../routing/route-leave-boundary.js';
 import { formatQty } from '../stock/format.js';
 import {
   ITEMS_RESOURCE,
@@ -204,10 +205,15 @@ function StockDocForm({
   const [errors, setErrors] = useState<FieldErrors>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [touched, setTouched] = useState(false);
+  const [saved, setSaved] = useState(false);
+  // 和订单编辑同一套离开守卫：保存成功后先把这一份标成已保存，再去详情，不再问「放弃修改」。
+  const leave = usePageLeave(touched && !saved, busy);
   // 出库单的每一行旁边带现存量：填的数量超过它就标红（过账时以服务端的判断为准）。
   const hand = useLineStock(values.lines, def.kind === 'out' && canPick);
 
   const setLine = (index: number, key: keyof LineFormValues, value: string) => {
+    setTouched(true);
     setValues((old) => ({
       ...old,
       lines: old.lines.map((line, at) =>
@@ -221,10 +227,13 @@ function StockDocForm({
         : { ...old, [`line.${index}.${key}`]: undefined },
     );
   };
-  const addLine = () =>
+  const addLine = () => {
+    setTouched(true);
     setValues((old) => ({ ...old, lines: [...old.lines, emptyLine()] }));
+  };
   /** 删的是没保存的这一行，不是删记录：保存时整单替换明细。 */
   const removeLine = (index: number) => {
+    setTouched(true);
     setValues((old) => ({
       ...old,
       lines: old.lines.filter((_, at) => at !== index),
@@ -255,6 +264,9 @@ function StockDocForm({
           ? await client.create({ docType: def.kind, ...body })
           : await client.update(doc.id, body);
       toaster.show({ type: 'success', title: t('stockDocs.savedToast') });
+      setSaved(true);
+      // 先放行这一次的离开，再导航；否则表单还认为有未保存的更改。
+      leave.allow();
       // 保存成功：到这张单的页面，地址栏里列表的搜索与筛选带过去。
       await navigate(
         {
@@ -356,9 +368,10 @@ function StockDocForm({
               <Select
                 items={reasonOptions}
                 value={values.reason}
-                onValueChange={(next) =>
-                  setValues((old) => ({ ...old, reason: String(next) as DocFormValues['reason'] }))
-                }
+                onValueChange={(next) => {
+                  setTouched(true);
+                  setValues((old) => ({ ...old, reason: String(next) as DocFormValues['reason'] }));
+                }}
               >
                 <SelectTrigger id={idOf('reason')} className='w-full' aria-invalid={Boolean(errors.reason)}>
                   <SelectValue />
@@ -392,9 +405,10 @@ function StockDocForm({
                 maxLength={1000}
                 aria-invalid={Boolean(errors.remark)}
                 value={values.remark}
-                onChange={(event) =>
-                  setValues((old) => ({ ...old, remark: event.target.value }))
-                }
+                onChange={(event) => {
+                  setTouched(true);
+                  setValues((old) => ({ ...old, remark: event.target.value }));
+                }}
               />
             </DocField>
           </div>
@@ -564,6 +578,7 @@ function StockDocForm({
             </span>
           </div>
         </DocumentSection>
+        {leave.dialog}
       </FeedbackForm>
     </DocumentPage>
   );

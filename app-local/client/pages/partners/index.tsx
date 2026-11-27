@@ -3,7 +3,7 @@ import { useCan } from '@nocobase/app-plugin-authorization/client';
 import { useTranslation } from '@nocobase/i18n/client';
 import type { CellContext, ColumnDef } from '@tanstack/react-table';
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
-import { Link, Outlet, useSearchParams } from 'react-router';
+import { Link, Outlet, useLocation, useSearchParams } from 'react-router';
 
 import { DataTable } from '#components/data-table';
 import { ConfirmDialog } from '#components/erp/confirm';
@@ -33,8 +33,9 @@ import { CUSTOMERS_RESOURCE, SUPPLIERS_RESOURCE } from './page-id.js';
 
 /** 换标签就是换一组数据：搜索、页码、「含已停用」都清掉，只留标签。 */
 const TAB_RESET_KEYS = ['q', 'page', 'pageSize', 'includeInactive'] as const;
-const detailLink = (partner: Partner) =>
-  `/partners/${encodeURIComponent(partner.id)}`;
+/** 详情、编辑、抽屉里的子页都带着列表的查询串，关掉后回到原来的标签与筛选。 */
+const detailLink = (partner: Partner, search = '') =>
+  `/partners/${encodeURIComponent(partner.id)}${search}`;
 
 /**
  * 客户与供应商（`/partners`，R-014）：一页两个标签。销售只看得到「客户」，采购只看得到「供应商」，
@@ -42,6 +43,7 @@ const detailLink = (partner: Partner) =>
  */
 export default function PartnersPage(): ReactElement {
   const { t } = useTranslation();
+  const location = useLocation();
   const api = useApiClient();
   const toaster = useToaster();
   const client = useMemo(() => new PartnersClient(api), [api]);
@@ -87,6 +89,11 @@ export default function PartnersPage(): ReactElement {
   const canUpdate =
     kind === 'supplier' ? supplierUpdate.can : customerUpdate.can;
 
+  const newLink = (() => {
+    const next = new URLSearchParams(location.search);
+    if (kind) next.set('kind', kind);
+    return `/partners/new?${next.toString()}`;
+  })();
   const list = useEntityList<Partner>({
     path: 'partners',
     fixed: kind ? { kind } : {},
@@ -152,7 +159,11 @@ export default function PartnersPage(): ReactElement {
                     {
                       key: 'edit',
                       label: t('erp.actions.edit'),
-                      render: <Link to={`${detailLink(partner)}/edit`} />,
+                      render: (
+                        <Link
+                          to={`${detailLink(partner, location.search)}/edit`}
+                        />
+                      ),
                     },
                     {
                       key: 'deactivate',
@@ -170,7 +181,11 @@ export default function PartnersPage(): ReactElement {
                     {
                       key: 'edit',
                       label: t('erp.actions.edit'),
-                      render: <Link to={`${detailLink(partner)}/edit`} />,
+                      render: (
+                        <Link
+                          to={`${detailLink(partner, location.search)}/edit`}
+                        />
+                      ),
                     },
                   ]
             }
@@ -184,7 +199,7 @@ export default function PartnersPage(): ReactElement {
         header: t('erp.fields.code'),
         // 首列点开详情抽屉，列表还在后面。
         cell: ({ row }) => (
-          <RecordLink to={detailLink(row.original)}>
+          <RecordLink to={detailLink(row.original, location.search)}>
             {row.original.code}
           </RecordLink>
         ),
@@ -226,7 +241,14 @@ export default function PartnersPage(): ReactElement {
       // 没有任何一行的写权限时整列操作都不画。
       ...(canUpdate ? [actions] : []),
     ];
-  }, [t, canUpdate, customerUpdate.can, supplierUpdate.can, setStopping]);
+  }, [
+    t,
+    canUpdate,
+    customerUpdate.can,
+    supplierUpdate.can,
+    setStopping,
+    location.search,
+  ]);
 
   const skeleton = list.skeleton;
   return (
@@ -236,7 +258,7 @@ export default function PartnersPage(): ReactElement {
       actions={
         canCreate && kind ? (
           <NewButton
-            to={`/partners/new?kind=${kind}`}
+            to={newLink}
             label={t('partners.newKind', { kind: kindNoun(kind, t) })}
           />
         ) : undefined

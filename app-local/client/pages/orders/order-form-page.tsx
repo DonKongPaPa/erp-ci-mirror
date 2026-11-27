@@ -55,6 +55,7 @@ import {
 } from './model.js';
 import {
   useReferencePage,
+  type Choice,
   type Item,
   type PartnerOption,
 } from './reference.js';
@@ -353,10 +354,26 @@ function OrderForm({
       { replace: true },
     );
   };
-  const partnerChoices = (partners ?? []).map((partner) => ({
+  // 往来单位下拉只查在用的；编辑一张引用了已停用单位的草稿时，详情摘要里还有编码与名称，
+  // 把它补成不可选的一项，免得下拉只显示裸 UUID，同时保留「请先启用」的提示。
+  const inactivePartner =
+    order?.partner?.status === 'inactive' ? order.partner : undefined;
+  const partnerChoices: Choice[] = (partners ?? []).map((partner) => ({
     value: partner.id,
     label: `${partner.code} ${partner.name}`,
   }));
+  if (inactivePartner) {
+    // 同一个 id 在「只查在用」的列表里不会出现；万一两侧都带回来，以停用的这一份为准。
+    const active = partnerChoices.findIndex(
+      (choice) => choice.value === inactivePartner.id,
+    );
+    if (active >= 0) partnerChoices.splice(active, 1);
+    partnerChoices.unshift({
+      value: inactivePartner.id,
+      label: `${inactivePartner.code} ${inactivePartner.name}（${t('orderDocs.form.inactiveItem')}）`,
+      disabled: true,
+    });
+  }
   const dateError = errors.orderDate;
   const remarkError = errors.remark;
 
@@ -403,6 +420,11 @@ function OrderForm({
                 onChange={(partnerId) => set('partnerId', partnerId)}
                 options={partnerChoices}
                 placeholder={t('orderDocs.form.choose')}
+                hint={
+                  inactivePartner
+                    ? t('orders.errors.partnerInactive')
+                    : undefined
+                }
                 disabled={busy}
               />
               <PageField

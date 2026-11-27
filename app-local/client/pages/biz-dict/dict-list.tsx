@@ -52,7 +52,8 @@ export function DictList({
     path: 'biz-dict/entries',
     fixed: { dictType },
     searchable: true,
-    inactiveParam: 'status',
+    // 字典端点不传 status 时只回在用；勾上「含已停用」要显式要全部。
+    inactiveParam: 'status-all',
     pending,
   });
   const [stopping, setStopping] = useState<Entry>();
@@ -121,7 +122,9 @@ export function DictList({
               {
                 key: 'edit',
                 label: t('erp.actions.edit'),
-                render: <Link to={detailLink(entry, dictType)} />,
+                render: (
+                  <Link to={detailLink(entry, dictType)} state={{ entry }} />
+                ),
               },
               {
                 key: 'moveUp',

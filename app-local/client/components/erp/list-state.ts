@@ -27,8 +27,9 @@ export interface EntityListOptions {
   readonly searchable?: boolean;
   /**
    * 「含已停用」怎么传：班次是 `includeInactive=true`；往来单位反过来，不勾时传 `status=active`。
+   * `status-all` 给端点认识 `all`（在用加已停用）的列表用：勾了传 `status=all`，不勾仍是 `status=active`。
    */
-  readonly inactiveParam?: 'includeInactive' | 'status';
+  readonly inactiveParam?: 'includeInactive' | 'status' | 'status-all';
   /** 没有读的权限时传 `false`：不发请求，列表显示「无权访问」。 */
   readonly enabled?: boolean;
   /** 权限还没落定：先不发请求，列表照常画骨架，不显示「无权访问」。 */
@@ -46,6 +47,20 @@ function compact(
   return Object.fromEntries(
     Object.entries(query).filter(([, value]) => value !== ''),
   );
+}
+
+/** 不勾「含已停用」时端点缺省只回在用；勾上时按端点能接受的写法要求在用加已停用。 */
+function inactiveQuery(
+  inactiveParam: 'includeInactive' | 'status' | 'status-all',
+  includeInactive: boolean,
+): Record<string, string> {
+  if (inactiveParam === 'includeInactive') {
+    return includeInactive ? { includeInactive: 'true' } : {};
+  }
+  if (inactiveParam === 'status-all') {
+    return { status: includeInactive ? 'all' : 'active' };
+  }
+  return includeInactive ? {} : { status: 'active' };
 }
 
 /**
@@ -93,13 +108,7 @@ export function useEntityList<T>({
       compact({
         ...(JSON.parse(fixedKey) as Record<string, string>),
         ...(q ? { q } : {}),
-        ...(inactiveParam === 'includeInactive'
-          ? includeInactive
-            ? { includeInactive: 'true' }
-            : {}
-          : includeInactive
-            ? {}
-            : { status: 'active' }),
+        ...inactiveQuery(inactiveParam, includeInactive),
         ...filters,
       }),
     );

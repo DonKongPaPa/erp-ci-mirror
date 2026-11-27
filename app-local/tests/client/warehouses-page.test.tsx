@@ -288,16 +288,25 @@ describe('R-020 仓库页', () => {
     ]);
   });
 
-  it('edits without sending the code', async () => {
+  it('edits from the list row without reading a warehouse detail or sending the code', async () => {
     answer = (call) => {
-      if (call.method === 'GET' && call.path === 'warehouses/w1')
-        return warehouse();
+      if (call.method === 'GET' && call.path === 'warehouses')
+        return page(warehouse());
       if (call.method === 'PATCH' && call.path === 'warehouses/w1')
         return warehouse({ name: 'Sample Renamed' });
       return notFound();
     };
-    const view = await renderAt('/warehouses/w1/edit', manager);
+    const view = await renderAt('/warehouses', manager);
+    await screen.findByText('Sample Warehouse', {}, WAIT);
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Actions for Sample Warehouse' }),
+    );
+    await userEvent.click(
+      await screen.findByRole('menuitem', { name: 'Edit' }, WAIT),
+    );
     const dialog = await liveDialog('Name');
+    // R-020 没有详情端点：编辑表单用的是列表那一行，一次详情请求都不发。
+    expect(gets('warehouses/w1')).toHaveLength(0);
 
     // 编码不可改：先等到表单稳定，再断言对话框里没有编码输入框。
     const name = await within(dialog).findByRole(

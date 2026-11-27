@@ -1087,6 +1087,7 @@ const enUS = {
       newDescription: 'The code cannot be changed later.',
       editTitle: 'Edit warehouse',
       editDescription: 'The code {{code}} cannot be changed.',
+      editFromList: 'Open this page from the Edit action on the warehouse list.',
       codeHint:
         'Uppercase letters, digits, hyphens or underscores. It cannot be changed later.',
     },

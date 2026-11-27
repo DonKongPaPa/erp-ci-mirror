@@ -441,6 +441,35 @@ test('R-014 加片: 两条交货地址、默认切换、停用仍回、没有删
   expect([404, 405]).toContain(removed.status);
 });
 
+test('R-014 加片: 没有地址的客户详情回空 addresses，采购侧仍没有这个键', async ({
+  testApp,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const sales = await makeRoleUser(admin, testApp, 'r014emptyaddr', 'sales');
+  const purchase = await makeRoleUser(admin, testApp, 'r014noaddr', 'purchase');
+  const customer = await create(admin, unique('无地址客户'), { isCustomer: true });
+  const both = await create(admin, unique('无地址双向'), {
+    isCustomer: true,
+    isSupplier: true,
+  });
+
+  // 客户侧：无论是不是双向单位，没有地址也必须给出空数组而不是省略键。
+  const customerDetail = await jsonOf(
+    await sales.fetch(`/partners/${String(customer.id)}`, get()),
+  );
+  expect(customerDetail).toHaveProperty('addresses', []);
+  const bothSales = await jsonOf(
+    await sales.fetch(`/partners/${String(both.id)}`, get()),
+  );
+  expect(bothSales).toHaveProperty('addresses', []);
+
+  // 采购侧读同一家双向单位：反向断言不许放宽，依然没有 addresses 键。
+  const bothPurchase = await jsonOf(
+    await purchase.fetch(`/partners/${String(both.id)}`, get()),
+  );
+  expect(bothPurchase).not.toHaveProperty('addresses');
+});
+
 test('R-014 加片: 停用分组、离职员工、停用单位都被拒', async ({
   testApp,
   connection,

@@ -10,8 +10,10 @@ import { expect } from 'vitest';
 
 import businessPermissionSetsSeed, {
   businessPermissionSets,
+  ensureBusinessPermissionSets,
   persistBusinessPermissionSets,
 } from '../../database/main/seeds/202611240001_seed_business_permission_sets.js';
+import catchupSeed from '../../database/main/seeds/202611280001_seed_business_permission_sets_catchup.js';
 import { createStandaloneServer } from '../../server/standalone.js';
 
 /**
@@ -755,4 +757,68 @@ test('R-013: names the seed after its file so the loader can find it', () => {
     '202611240001_seed_business_permission_sets',
   );
   expect(typeof businessPermissionSetsSeed.run).toBe('function');
+});
+
+test('R-075: the catchup seed is named after its file', () => {
+  expect(catchupSeed.name).toBe(
+    '202611280001_seed_business_permission_sets_catchup',
+  );
+  expect(typeof catchupSeed.run).toBe('function');
+});
+
+/**
+ * R-075：老环境里先跑过原种子、后来它又被追加了角色，所以缺 warehouse 与 finance。
+ * 新种子只补这两个；sales 被管理员改过的授权保持原样；重跑一次什么也不写。
+ */
+test('R-075: catchup rebuilds missing sets and keeps administrator changes', async ({
+  app,
+  connection,
+}) => {
+  const sets = app.container.resolve(authorizationToken).permissionSets;
+  const rowsFor = () =>
+    connection.query
+      .selectFrom('authorizationPermissionSets')
+      .select('key')
+      .where('key', 'in', roleKeys)
+      .execute();
+
+  // 模拟存量环境：两个后来加的角色不在，管理员改过另一个角色的授权。
+  await sets.delete('warehouse');
+  await sets.delete('finance');
+  const changedGrants = [
+    {
+      resource: { type: 'page', id: 'quality' },
+      actions: [{ action: 'access' }],
+    },
+  ];
+  await sets.update('sales', { key: 'sales', grants: changedGrants });
+
+  expect((await rowsFor()).map((row) => String(row.key)).sort()).toEqual(
+    roleKeys.filter((key) => key !== 'warehouse' && key !== 'finance').sort(),
+  );
+
+  // 种子 run 拿到的就是这个 query；只建缺的，不碰已经存在的。
+  expect((await ensureBusinessPermissionSets(connection.query)).sort()).toEqual(
+    ['finance', 'warehouse'],
+  );
+
+  const stored = new Map((await sets.list()).map((set) => [set.key, set]));
+  for (const key of ['warehouse', 'finance'] as const) {
+    expect(stored.get(key)?.title, `${key} 的名称`).toEqual(
+      expectedRoles[key].title,
+    );
+    expect(stored.get(key)?.grants, `${key} 的授权`).toEqual(
+      expectedRoles[key].grants,
+    );
+  }
+  expect(stored.get('sales')?.grants, '管理员改过的 sales 不被覆盖').toEqual(
+    changedGrants,
+  );
+
+  // 第二次执行全部跳过：管理员改过的 sales 与刚补出的两个都不动。
+  expect(await ensureBusinessPermissionSets(connection.query)).toEqual([]);
+  const after = new Map((await sets.list()).map((set) => [set.key, set]));
+  expect(after.get('sales')?.grants).toEqual(changedGrants);
+  expect(after.get('warehouse')?.grants).toEqual(expectedRoles.warehouse.grants);
+  expect(after.get('finance')?.grants).toEqual(expectedRoles.finance.grants);
 });

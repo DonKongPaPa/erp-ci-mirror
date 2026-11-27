@@ -43,3 +43,18 @@ export interface PartnerDictionaries {
   readonly customerGroups: readonly Entry[];
   readonly supplierGroups: readonly Entry[];
 }
+
+/**
+ * 详情里把客户分组的码显示成名称：读的是表单用的同一本字典，拿不到名称时回落到码。
+ * 只在客户侧真有分组码时才发请求；采购侧读双向单位时没有这个键，也就不发。
+ */
+export function useCustomerGroupName(
+  code: string | null | undefined,
+  enabled: boolean,
+): string | null {
+  const groups = useListData<EntityPage<Entry>>(groupPath('customer_group'), {
+    active: enabled && code !== null && code !== undefined,
+  });
+  const name = groups.data?.items.find((item) => item.code === code)?.name;
+  return name ?? code ?? null;
+}

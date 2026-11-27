@@ -480,8 +480,9 @@ export class DatabasePartnerReader implements PartnerReader {
       ...project(view(row), sides, names),
       contacts: contacts.map(viewContact),
     };
-    // 交货地址是客户侧数据；采购读不到，老客户端读没有地址的单位形状不变。
-    if (row.isCustomer && sides.includes('customers') && rawAddresses.length > 0) {
+    // 交货地址是客户侧数据：是客户且持客户侧就一直给这个键，没有地址时是空数组，
+    // 页面才有「新增交货地址」的入口；采购侧照旧没有这个键（反向断言不变）。
+    if (row.isCustomer && sides.includes('customers')) {
       return { ...result, addresses: rawAddresses.map(viewAddress) };
     }
     return result;

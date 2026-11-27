@@ -2,7 +2,7 @@ import { useApiClient } from '@nocobase/app-client';
 import { useTranslation } from '@nocobase/i18n/client';
 import type { CellContext, ColumnDef } from '@tanstack/react-table';
 import { useMemo, type ReactElement } from 'react';
-import { Link } from 'react-router';
+import { Link, useLocation } from 'react-router';
 
 import { ActiveBadge } from '#components/erp/detail';
 import { IncludeInactiveFilter, ListSearch } from '#components/erp/list-page';
@@ -14,8 +14,8 @@ import { EntityTable } from './entity-table.js';
 import type { ListAccess } from './page-id.js';
 import { useStatusChange } from './status-change.js';
 
-const editLink = (unit: Unit) =>
-  `/items/units/${encodeURIComponent(unit.code)}/edit`;
+const editLink = (unit: Unit, search = '') =>
+  `/items/units/${encodeURIComponent(unit.code)}/edit${search}`;
 
 /**
  * 计量单位这一张表（`/items?view=units`）：编码、名称、小数位、状态。字段太少，不设详情，
@@ -27,6 +27,7 @@ export function UnitList({
   pending,
 }: ListAccess): ReactElement {
   const { t } = useTranslation();
+  const location = useLocation();
   const api = useApiClient();
   const client = useMemo(() => new ItemsClient(api), [api]);
   const list = useEntityList<Unit>({
@@ -58,7 +59,7 @@ export function UnitList({
                     {
                       key: 'edit',
                       label: t('erp.actions.edit'),
-                      render: <Link to={editLink(unit)} />,
+                      render: <Link to={editLink(unit, location.search)} />,
                     },
                     {
                       key: 'deactivate',
@@ -76,7 +77,7 @@ export function UnitList({
                     {
                       key: 'edit',
                       label: t('erp.actions.edit'),
-                      render: <Link to={editLink(unit)} />,
+                      render: <Link to={editLink(unit, location.search)} />,
                     },
                   ]
             }
@@ -116,7 +117,7 @@ export function UnitList({
       },
       ...(canManage ? [actions] : []),
     ];
-  }, [t, canManage, ask, activate]);
+  }, [t, canManage, ask, activate, location.search]);
 
   return (
     <>

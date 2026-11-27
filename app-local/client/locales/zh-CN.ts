@@ -758,6 +758,7 @@ const zhCN: AppResource = {
       newDescription: '编码建好后不能改。',
       editTitle: '编辑仓库',
       editDescription: '编码 {{code}} 不能改。',
+      editFromList: '请从仓库列表的「编辑」打开这一页。',
       codeHint:
         '1–32 位大写字母、数字、连字符或下划线，以字母或数字开头。建好后不能改。',
     },

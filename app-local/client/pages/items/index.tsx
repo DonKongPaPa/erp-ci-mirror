@@ -1,7 +1,7 @@
 import { useTranslation } from '@nocobase/i18n/client';
 import { useCan } from '@nocobase/app-plugin-authorization/client';
 import type { ReactElement } from 'react';
-import { Outlet, useSearchParams } from 'react-router';
+import { Outlet, useLocation, useSearchParams } from 'react-router';
 
 import {
   ListPage,
@@ -34,6 +34,7 @@ const TAB_RESET_KEYS = [
  */
 export default function ItemsPage(): ReactElement {
   const { t } = useTranslation();
+  const location = useLocation();
   const [params, setParams] = useSearchParams();
   const view = useCan({ resource: ITEMS_RESOURCE, action: 'view' });
   const manage = useCan({ resource: ITEMS_RESOURCE, action: 'manage' });
@@ -65,7 +66,9 @@ export default function ItemsPage(): ReactElement {
       title={t('items.title')}
       description={t('items.description')}
       actions={
-        manage.can ? <NewButton to={newLink} label={newLabel} /> : undefined
+        manage.can ? (
+            <NewButton to={`${newLink}${location.search}`} label={newLabel} />
+          ) : undefined
       }
       tabs={
         <ListTabs

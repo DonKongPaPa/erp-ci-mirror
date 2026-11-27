@@ -1,6 +1,10 @@
 import { authenticationToken } from '@nocobase/app-plugin-authentication/server';
-import { userManagementServiceToken } from '@nocobase/app-plugin-users/server';
+import {
+  UserManagementError,
+  userManagementServiceToken,
+} from '@nocobase/app-plugin-users/server';
 import type { Application } from '@nocobase/app-server/application';
+import { loggingToken } from '@nocobase/app-server/logging';
 import { databaseManagerToken } from '@nocobase/db';
 import { ServiceProvider } from '@nocobase/service-provider';
 import { randomBytes } from 'node:crypto';
@@ -8,6 +12,10 @@ import { randomBytes } from 'node:crypto';
 import { DEMO_ACCOUNTS, demoAccountEmail } from '../dev-tools/demo-accounts.js';
 import { isDevAccountSwitcherEnabled } from '../dev-tools/settings.js';
 import { STAFF_PERMISSION_SET } from './staff-baseline.js';
+
+interface StartupLogger {
+  warn(bindings: Record<string, unknown>, message: string): void;
+}
 
 /**
  * R-037 开发工具的启动逻辑：建出演示账户。
@@ -43,6 +51,9 @@ export default class DevAccountSwitcherProvider extends ServiceProvider<Applicat
     const database = this.app.container.resolve(databaseManagerToken);
     const users = this.app.container.resolve(userManagementServiceToken);
     const connection = database.connection();
+    const logger: StartupLogger = this.app.container.has(loggingToken)
+      ? this.app.container.resolve(loggingToken).getLogger('app')
+      : { warn: (bindings, message) => console.warn(message, bindings) };
 
     for (const account of DEMO_ACCOUNTS) {
       const existing = await connection.query
@@ -53,18 +64,39 @@ export default class DevAccountSwitcherProvider extends ServiceProvider<Applicat
       if (existing) {
         continue;
       }
-      await users.create({
-        name: account.name,
-        username: account.username,
-        email: demoAccountEmail(account.username),
-        password: randomBytes(32).toString('base64url'),
-        // R-026：演示账户里的「人」都带基线角色 staff。users.create 在建完之后按这份
-        // 清单整体替换直接角色，所以不能只靠建人初始化器；显式写进来。重跑时账户已
-        // 存在就跳过，不会重复指派。
-        roleScopes: {
-          app: [...new Set([account.role, STAFF_PERMISSION_SET])],
-        },
-      });
+      try {
+        await users.create({
+          name: account.name,
+          username: account.username,
+          email: demoAccountEmail(account.username),
+          password: randomBytes(32).toString('base64url'),
+          // R-026：演示账户里的「人」都带基线角色 staff。users.create 在建完之后按这份
+          // 清单整体替换直接角色，所以不能只靠建人初始化器；显式写进来。重跑时账户已
+          // 存在就跳过，不会重复指派。
+          roleScopes: {
+            app: [...new Set([account.role, STAFF_PERMISSION_SET])],
+          },
+        });
+      } catch (error) {
+        // R-075：执行过的 seed 没重跑，老环境可能缺后来加的角色。users.create 在
+        // 建号事务里抛这个错，事务回滚，不会留下没挂上角色的孤儿账号。跳过这一个，
+        // 继续建后面的；别的错误照旧抛出，不让启动失败掩盖真正的问题。
+        if (
+          error instanceof UserManagementError &&
+          error.code === 'INVALID_ROLE_SCOPE_VALUE'
+        ) {
+          logger.warn(
+            {
+              reason: 'DEMO_ACCOUNT_ROLE_MISSING',
+              username: account.username,
+              role: account.role,
+            },
+            `演示账号 ${account.username} 的角色 ${account.role} 不存在，已跳过；先 \`pnpm nocobase db apply\` 把缺的角色补上，再重启应用。`,
+          );
+          continue;
+        }
+        throw error;
+      }
     }
   }
 }

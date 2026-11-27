@@ -261,7 +261,8 @@ const compareEntries = (left: BizDictEntry, right: BizDictEntry): number => {
 
 export interface BizDictListQuery {
   readonly dictType: string;
-  readonly status?: 'active' | 'inactive';
+  /** `all` 是在用加已停用；不带仍只回在用，别的调用方不受影响。 */
+  readonly status?: 'active' | 'inactive' | 'all';
   readonly q?: string;
   readonly page: number;
   readonly pageSize: number;
@@ -289,10 +290,13 @@ export class DatabaseBizDictReader implements BizDictReader {
     readonly total: number;
   }> {
     const dictType = assertDictType(query.dictType);
-    const status = query.status ?? 'active';
+    const filter: Record<string, string> =
+      query.status === 'all'
+        ? { dictType }
+        : { dictType, status: query.status ?? 'active' };
     const rows = await this.database
       .repository<StoredEntry>('bizDictEntries')
-      .findMany({ filter: { dictType, status } });
+      .findMany({ filter });
     const term = query.q?.toLowerCase();
     const items = rows
       .filter(

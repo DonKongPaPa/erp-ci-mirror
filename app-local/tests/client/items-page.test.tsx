@@ -311,7 +311,7 @@ describe('R-019 物料页', () => {
         { name: enUS.items.units.newTitle },
         WAIT,
       ),
-    ).toHaveAttribute('href', '/items/units/new');
+    ).toHaveAttribute('href', '/items/units/new?view=units');
   });
 
   it('the categories tab names the parent category and leaves a root blank', async () => {
@@ -342,7 +342,7 @@ describe('R-019 物料页', () => {
         { name: enUS.items.categories.newTitle },
         WAIT,
       ),
-    ).toHaveAttribute('href', '/items/categories/new');
+    ).toHaveAttribute('href', '/items/categories/new?view=categories');
   });
 
   it('creates an item: the code is left to the server and the toast offers to view it', async () => {

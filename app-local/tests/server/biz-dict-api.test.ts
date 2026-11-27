@@ -150,6 +150,63 @@ test('默认唯一：后设的把先设的清掉；reorder 按给定顺序重写
   expect(ordered.every((row) => row.status === 'active')).toBe(true);
 });
 
+test('停用与启用都走 PATCH：状态值、默认列表与 status 筛选一起变', async ({
+  testApp,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const code = unique('ST');
+  const row = await createEntry(admin, {
+    dictType: 'settlement', code, name: '测试启停',
+  });
+  const url = `/biz-dict/entries/${String(row.id)}`;
+
+  const stopped = await admin.fetch(url, write({ status: 'inactive' }, 'PATCH'));
+  expect(stopped.status).toBe(200);
+  expect((await jsonOf(stopped)).status).toBe('inactive');
+  expect((await listEntries(admin, 'settlement', code)).items).toHaveLength(0);
+  const inactiveList = await jsonOf(
+    await admin.fetch(
+      `/biz-dict/entries?dictType=settlement&status=inactive&q=${encodeURIComponent(code)}`,
+      get(),
+    ),
+  );
+  expect(inactiveList.items).toHaveLength(1);
+
+  const activated = await admin.fetch(url, write({ status: 'active' }, 'PATCH'));
+  expect(activated.status).toBe(200);
+  expect((await jsonOf(activated)).status).toBe('active');
+  expect((await listEntries(admin, 'settlement', code)).items).toHaveLength(1);
+});
+
+test('status=all 同列在用与已停用，不带 status 仍只回在用', async ({ testApp }) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const activeCode = unique('ST');
+  const inactiveCode = unique('ST');
+  await createEntry(admin, {
+    dictType: 'settlement', code: activeCode, name: '在用行',
+  });
+  const stopped = await createEntry(admin, {
+    dictType: 'settlement', code: inactiveCode, name: '已停的行',
+  });
+  const stoppedResponse = await admin.fetch(
+    `/biz-dict/entries/${String(stopped.id)}`,
+    write({ status: 'inactive' }, 'PATCH'),
+  );
+  expect(stoppedResponse.status).toBe(200);
+
+  const base = '/biz-dict/entries?dictType=settlement&pageSize=100';
+  const codesOf = async (url: string): Promise<string[]> => {
+    const body = await jsonOf(await admin.fetch(url, get()));
+    return (body.items as Row[]).map((row) => String(row.code));
+  };
+  expect(await codesOf(base)).toContain(activeCode);
+  expect(await codesOf(base)).not.toContain(inactiveCode);
+
+  const both = await codesOf(`${base}&status=all`);
+  expect(both).toContain(activeCode);
+  expect(both).toContain(inactiveCode);
+});
+
 test('拒绝：字段不适用、码占用、码不可改、日期倒挂、空 PATCH、未知类型、找不到，且没有 DELETE', async ({
   testApp,
 }) => {

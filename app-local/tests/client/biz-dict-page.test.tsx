@@ -13,7 +13,7 @@ import {
   renderWithApp,
   type ApiCall,
 } from '@nocobase/app-testing/client';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -161,6 +161,47 @@ describe('R-072 业务字典页', () => {
     ).toBeDefined();
   });
 
+  it('sends status=all while include deactivated is checked, status=active once it is unchecked', async () => {
+    const active = entry();
+    const inactive = entry({
+      id: 'e2',
+      code: 'RATE-05',
+      name: 'Sample 5 percent (inactive)',
+      status: 'inactive',
+      sort: 2,
+    });
+    answer = (call) => {
+      if (call.method === 'GET' && call.path === 'biz-dict/types')
+        return { items: types };
+      if (call.method === 'GET' && call.path === 'biz-dict/entries')
+        return call.query?.status === 'all' ? page(active, inactive) : page(active);
+      return notFound();
+    };
+    await renderAt('/biz-dict?type=tax_rate', manager);
+    await screen.findByText(active.name, {}, WAIT);
+
+    const lastListStatus = () =>
+      calls('GET')
+        .filter((call) => call.path === 'biz-dict/entries')
+        .at(-1)?.query?.status;
+    expect(lastListStatus()).toBe('active');
+
+    await userEvent.click(
+      await screen.findByRole('checkbox', { name: 'Include deactivated' }, WAIT),
+    );
+    expect(await screen.findByText(inactive.name, {}, WAIT)).toBeInTheDocument();
+    expect(lastListStatus()).toBe('all');
+
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: 'Include deactivated' }),
+    );
+    await waitFor(
+      () => expect(screen.queryByText(inactive.name)).not.toBeInTheDocument(),
+      WAIT,
+    );
+    expect(lastListStatus()).toBe('active');
+  });
+
   it('shows write entries only to a session holding bizDict.manage', async () => {
     await listFixture();
 
@@ -216,6 +257,122 @@ describe('R-072 业务字典页', () => {
         name: 'Sample 15 percent',
         rate: 15,
       });
+    }, WAIT);
+  });
+
+  it('opens the edit dialog from the list row and saves a narrow PATCH body without a detail GET', async () => {
+    const original = entry();
+    answer = (call) => {
+      if (call.method === 'GET' && call.path === 'biz-dict/types')
+        return { items: types };
+      if (call.method === 'GET' && call.path === 'biz-dict/entries')
+        return page(original);
+      if (call.method === 'PATCH' && call.path === 'biz-dict/entries/e1')
+        return original;
+      return notFound();
+    };
+    await renderAt('/biz-dict/e1/edit?type=tax_rate', manager);
+
+    // 对话框先画「加载中」，真的等到表单字段再断言（loading 状态下没有 Name 输入框）。
+    const name = await screen.findByRole('textbox', { name: 'Name' }, WAIT);
+    const dialog = name.closest<HTMLElement>('[role="dialog"]')!;
+    expect(name).toHaveValue('Sample 13 percent');
+    const rate = await within(dialog).findByRole(
+      'spinbutton',
+      { name: 'Rate (%)' },
+      WAIT,
+    );
+    expect(rate).toHaveValue(13);
+    const save = await within(dialog).findByRole(
+      'button',
+      { name: 'Save' },
+      WAIT,
+    );
+    await userEvent.clear(name);
+    await userEvent.type(name, 'Sample 14 percent');
+    await userEvent.clear(rate);
+    await userEvent.type(rate, '14');
+    await userEvent.click(save);
+
+    await waitFor(() => {
+      const patch = calls('PATCH').find(
+        (call) => call.path === 'biz-dict/entries/e1',
+      );
+      expect(patch?.json).toEqual({
+        name: 'Sample 14 percent',
+        rate: 14,
+        isDefault: true,
+        sort: 1,
+      });
+    }, WAIT);
+    // 旧实现在这里 GET 一个并不存在的详情端点，弹窗永远打不开。
+    expect(
+      calls('GET').some((call) => call.path === 'biz-dict/entries/e1'),
+    ).toBe(false);
+  });
+
+  it('opens edit from the row menu without fetching a nonexistent detail endpoint', async () => {
+    const original = entry();
+    answer = (call) => {
+      if (call.method === 'GET' && call.path === 'biz-dict/types')
+        return { items: types };
+      if (call.method === 'GET' && call.path === 'biz-dict/entries')
+        return page(original);
+      return notFound();
+    };
+    await renderAt('/biz-dict?type=tax_rate', manager);
+    await screen.findByText(original.name, {}, WAIT);
+    await userEvent.click(
+      await screen.findByRole(
+        'button',
+        { name: `Actions for ${original.name}` },
+        WAIT,
+      ),
+    );
+    await userEvent.click(
+      await screen.findByRole('menuitem', { name: 'Edit' }, WAIT),
+    );
+
+    const name = await screen.findByRole('textbox', { name: 'Name' }, WAIT);
+    expect(name).toHaveValue(original.name);
+    expect(
+      calls('GET').some((call) => call.path === 'biz-dict/entries/e1'),
+    ).toBe(false);
+  });
+
+  it('reactivates a deactivated value through PATCH', async () => {
+    const inactive = entry({
+      name: 'Sample 13 (inactive)',
+      status: 'inactive',
+    });
+    answer = (call) => {
+      if (call.method === 'GET' && call.path === 'biz-dict/types')
+        return { items: types };
+      if (call.method === 'GET' && call.path === 'biz-dict/entries')
+        return call.query?.status === 'all' ? page(inactive) : page(entry());
+      if (call.method === 'PATCH' && call.path === 'biz-dict/entries/e1')
+        return entry();
+      return notFound();
+    };
+    await renderAt('/biz-dict?type=tax_rate', manager);
+    await userEvent.click(
+      await screen.findByRole('checkbox', { name: 'Include deactivated' }, WAIT),
+    );
+    const menu = await screen.findByRole(
+      'button',
+      { name: `Actions for ${inactive.name}` },
+      WAIT,
+    );
+    await userEvent.click(menu);
+    await userEvent.click(
+      await screen.findByRole('menuitem', { name: 'Activate' }, WAIT),
+    );
+
+    await waitFor(() => {
+      const patch = calls('PATCH').find(
+        (call) => call.path === 'biz-dict/entries/e1',
+      );
+      expect(patch?.json).toEqual({ status: 'active' });
     }, WAIT);
   });
 

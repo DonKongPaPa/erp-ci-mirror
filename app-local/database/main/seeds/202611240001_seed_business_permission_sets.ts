@@ -407,13 +407,16 @@ export const businessPermissionSets: readonly PermissionSet[] = [
  *
  * seed 的 run 只做这一件事：开发服务器可能在文件写入后立刻执行这颗 seed，
  * 逻辑放在这里，单元测试可以直接断言它写入的形状与幂等行为。
+ *
+ * R-075：这颗种子已经执行过，源文件不再改行为；只把这个函数导出，供后来的
+ * 补齐种子复用。已经存在的 key 依旧跳过，管理员改过的角色依旧不覆盖。
  */
-export async function persistBusinessPermissionSets(
-  query: QueryAdapter,
+export async function ensureBusinessPermissionSets(
+  adapter: QueryAdapter,
 ): Promise<readonly string[]> {
   const created: string[] = [];
   for (const set of businessPermissionSets) {
-    const existing = await query
+    const existing = await adapter
       .selectFrom('authorizationPermissionSets')
       .select('key')
       .where('key', '=', set.key)
@@ -423,7 +426,7 @@ export async function persistBusinessPermissionSets(
       continue;
     }
     const now = new Date();
-    await query
+    await adapter
       .insertInto('authorizationPermissionSets')
       .values({
         id: randomUUID(),
@@ -439,9 +442,12 @@ export async function persistBusinessPermissionSets(
   return created;
 }
 
+/** 旧名字保留，指向同一个函数；既有调用方不必改。 */
+export const persistBusinessPermissionSets = ensureBusinessPermissionSets;
+
 export default defineSeed({
   name: '202611240001_seed_business_permission_sets',
   async run({ query }) {
-    await persistBusinessPermissionSets(query);
+    await ensureBusinessPermissionSets(query);
   },
 });

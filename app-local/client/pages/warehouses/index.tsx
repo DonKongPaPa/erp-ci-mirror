@@ -137,7 +137,12 @@ export default function WarehousesPage(): ReactElement {
                           {
                             key: 'edit',
                             label: t('erp.actions.edit'),
-                            render: <Link to={editLink(row.original)} />,
+                            render: (
+                              <Link
+                                to={editLink(row.original)}
+                                state={{ warehouse: row.original }}
+                              />
+                            ),
                           },
                           {
                             key: 'deactivate',
@@ -156,7 +161,12 @@ export default function WarehousesPage(): ReactElement {
                           {
                             key: 'edit',
                             label: t('erp.actions.edit'),
-                            render: <Link to={editLink(row.original)} />,
+                            render: (
+                              <Link
+                                to={editLink(row.original)}
+                                state={{ warehouse: row.original }}
+                              />
+                            ),
                           },
                         ]
                   }

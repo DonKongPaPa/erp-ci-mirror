@@ -328,6 +328,13 @@ export function LinesEditor({
         <p className='text-sm text-muted-foreground'>
           {t('orderDocs.form.linesHint')}
         </p>
+        {lines.some(
+          (row) => itemsById.get(row.itemId)?.status === 'inactive',
+        ) ? (
+          <p role='status' className='text-sm text-muted-foreground'>
+            {t('items.form.inactive')}
+          </p>
+        ) : null}
       </DetailSection>
     </EditorContext.Provider>
   );

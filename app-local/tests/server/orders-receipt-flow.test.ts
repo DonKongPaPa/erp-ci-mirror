@@ -82,6 +82,14 @@ test('采购：部分入库过账回写 partially_received，全部入库过账�
 
   const done = await jsonOf(await admin.fetch(`/purchase-orders/${id}`, get()));
   expect(done.status).toBe('received');
+  // 列表行与详情必须给出同一个状态值：列表状态列靠它显示「已到货」。
+  const listed = await jsonOf(
+    await admin.fetch('/purchase-orders?page=1&pageSize=20', get()),
+  );
+  expect(
+    listed.items?.find((row) => row.id === id)?.status,
+    '列表行应带出已到货状态',
+  ).toBe('received');
   expect(progress(done, 'receivedQty', itemA)).toBe(10);
   expect(progress(done, 'receivedQty', itemB)).toBe(5);
   expect(progress(done, 'remainingQty', itemA)).toBe(0);
@@ -142,6 +150,14 @@ test('销售：先备货，部分出库过账回写 partially_shipped，全部�
 
   const done = await jsonOf(await admin.fetch(`/sales-orders/${id}`, get()));
   expect(done.status).toBe('shipped');
+  // 列表行与详情必须给出同一个状态值：列表状态列靠它显示「已发货」。
+  const listed = await jsonOf(
+    await admin.fetch('/sales-orders?page=1&pageSize=20', get()),
+  );
+  expect(
+    listed.items?.find((row) => row.id === id)?.status,
+    '列表行应带出已发货状态',
+  ).toBe('shipped');
   expect(progress(done, 'shippedQty', itemA)).toBe(10);
   expect(progress(done, 'shippedQty', itemB)).toBe(5);
   expect(progress(done, 'remainingQty', itemA)).toBe(0);

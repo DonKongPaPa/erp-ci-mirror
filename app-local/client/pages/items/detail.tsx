@@ -2,7 +2,7 @@ import { useApiClient } from '@nocobase/app-client';
 import { useCan } from '@nocobase/app-plugin-authorization/client';
 import { useTranslation } from '@nocobase/i18n/client';
 import { useMemo, type ReactElement } from 'react';
-import { Link, Outlet, useParams } from 'react-router';
+import { Link, Outlet, useLocation, useParams } from 'react-router';
 
 import {
   ActiveBadge,
@@ -102,6 +102,7 @@ function ItemDrawer({
   readonly category: string | null;
 }): ReactElement {
   const { t } = useTranslation();
+  const location = useLocation();
   const base = `/items/${encodeURIComponent(item.id)}`;
   const active = item.status === 'active';
   const { dialog, ask, activate } = useStatusChange<Item>({
@@ -134,7 +135,7 @@ function ItemDrawer({
             {active ? (
               <Button
                 nativeButton={false}
-                render={<Link to={`${base}/edit`} />}
+                render={<Link to={`${base}/edit${location.search}`} />}
               >
                 {t('erp.actions.edit')}
               </Button>

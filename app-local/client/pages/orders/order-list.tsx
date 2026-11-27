@@ -26,7 +26,12 @@ import { errorText } from '#components/erp/messages';
 import { RecordLink } from '#components/record-link';
 import { RowActions } from '#components/row-actions';
 
-import { OrdersClient, type Order } from './client.js';
+import {
+  OrdersClient,
+  toOrder,
+  type Order,
+  type OrderResponse,
+} from './client.js';
 import { Dash, DateFilter, OrderStatusBadge } from './fields.js';
 import type { OrderKindDef } from './kinds.js';
 import { useReferencePage, type PartnerOption } from './reference.js';
@@ -59,12 +64,17 @@ export function OrderListPage({
   // 没有任何写权限的人整列操作都不画（设计 2.7）。
   const writable = update.can || cancel.can || make.can;
 
-  const list = useEntityList<Order>({
+  // 端点回的是原始订单；列表行和详情一样过 toOrder，状态徽标才认得 received / shipped。
+  const list = useEntityList<OrderResponse>({
     path: def.api,
     filterKeys: [partnerKey, 'status', 'from', 'to'],
     enabled: view.can,
     pending: view.isPending,
   });
+  const rows = useMemo(
+    () => list.rows.map((raw) => toOrder(def, raw)),
+    [list.rows, def],
+  );
   const partners = useReferencePage<PartnerOption>(
     `partners?kind=${def.partnerKind}&status=active`,
     partnerView.can,
@@ -218,7 +228,7 @@ export function OrderListPage({
               )
             : columns
         }
-        data={skeleton ? skeletonRows<Order>(SKELETON_ROW_COUNT) : list.rows}
+        data={skeleton ? skeletonRows<Order>(SKELETON_ROW_COUNT) : rows}
         getRowId={(row, index) => (skeleton ? `skeleton-${index}` : row.id)}
         manualPagination
         rowCount={list.total}

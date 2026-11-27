@@ -4,6 +4,7 @@ import {
   signIn,
 } from '@nocobase/app-plugin-authentication/testing';
 import { authenticationToken } from '@nocobase/app-plugin-authentication/server';
+import { authorizationToken } from '@nocobase/app-plugin-authorization';
 import { loggingToken } from '@nocobase/app-server/logging';
 import type { Application } from '@nocobase/app-server/application';
 import type { DatabaseConnection } from '@nocobase/db';
@@ -480,6 +481,74 @@ describe('enabled in development', () => {
     const listed = (await readAccounts(admin)).map((a) => a.username);
     expect(listed).not.toContain('demo.staff');
     expect(listed).not.toContain('demo.dept_manager');
+  });
+});
+
+/**
+ * R-075：老环境里 seed 执行过之后又追加了角色，开发库缺 warehouse。启动初始化要
+ * 跳过挂不上的那一个账号，继续建其余账号，也不能留下没挂上角色的孤儿用户。
+ */
+describe('a missing application role is not fatal', () => {
+  const test = createAppTest({
+    createServer: createStandaloneServer,
+    scope: 'test',
+    server: { env: { NODE_ENV: 'development' } },
+    config: { ...config, devTools: { accountSwitcher: { enabled: true } } },
+  });
+
+  test('skips only the account whose role is missing and warns how to fix it', async ({
+    app,
+    testApp,
+    connection,
+  }) => {
+    const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+    // 先等启动初始化真的把演示账号建出来，再拆掉它们与一个后来加的角色。
+    expect(await readAccounts(admin)).toHaveLength(expectedAccounts.length);
+    await connection.query
+      .deleteFrom('user')
+      .where('username', 'like', 'demo.%')
+      .execute();
+    await app.container
+      .resolve(authorizationToken)
+      .permissionSets.delete('warehouse');
+
+    const warning = vi.spyOn(
+      app.container.resolve(loggingToken).getLogger('app'),
+      'warn',
+    );
+    try {
+      await expect(
+        new DevAccountSwitcherProvider(app).boot(),
+      ).resolves.toBeUndefined();
+
+      const accounts = await readAccounts(admin);
+      expect(accounts.map((account) => account.username).sort()).toEqual(
+        expectedAccounts
+          .filter((account) => account.username !== 'demo.warehouse')
+          .map((account) => account.username)
+          .sort(),
+      );
+      expect(
+        await connection.query
+          .selectFrom('user')
+          .select('id')
+          .where('username', '=', 'demo.warehouse')
+          .execute(),
+        '挂不上角色的账号不能留下用户行',
+      ).toEqual([]);
+
+      const call = warning.mock.calls.find(([bindings]) =>
+        JSON.stringify(bindings).includes('demo.warehouse'),
+      );
+      expect(call, '缺角色要留一条警告日志').toBeDefined();
+      const logged = JSON.stringify(warning.mock.calls);
+      expect(logged).toContain('warehouse');
+      expect(logged, '日志要写明补齐角色的命令').toContain(
+        'pnpm nocobase db apply',
+      );
+    } finally {
+      warning.mockRestore();
+    }
   });
 });
 

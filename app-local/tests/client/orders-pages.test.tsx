@@ -385,6 +385,53 @@ describe.each(KINDS)('$kind order pages', (kind: Kind) => {
     );
   });
 
+  it('shows the arrived / shipped status on the list row, the same as on the detail', async () => {
+    const done = kind.kind === 'purchase' ? 'received' : 'shipped';
+    const label = enUS[kind.l].status.done;
+    handlers = {
+      ...handlers,
+      [`GET ${kind.api}`]: () => page(rawOrder(kind, { status: done })),
+    };
+    await renderAt(kind.path, writer(kind));
+
+    // 先等到列表真的渲染出来，再断言状态列里的那枚徽标。
+    const row = await screen.findByRole('link', { name: kind.no.first }, WAIT);
+    expect(row.closest('tr')).not.toBeNull();
+    expect(
+      within(row.closest('tr')!).getByText(label),
+    ).toBeInTheDocument();
+  });
+
+  it('shows an inactive partner by code and name in the edit form, with a hint', async () => {
+    handlers = {
+      ...handlers,
+      [`GET ${kind.api}/o1`]: () =>
+        rawOrder(kind, {
+          [kind.kind === 'purchase' ? 'supplier' : 'customer']: {
+            ...PARTNER,
+            status: 'inactive',
+          },
+        }),
+    };
+    await renderAt(`${kind.path}/o1/edit`, writer(kind));
+
+    const trigger = await screen.findByRole(
+      'combobox',
+      { name: text.partnerLabel },
+      WAIT,
+    );
+    await waitFor(
+      () =>
+        expect(trigger).toHaveTextContent(
+          `${PARTNER.code} ${PARTNER.name}（Deactivated）`,
+        ),
+      WAIT,
+    );
+    expect(
+      screen.getByText('That partner is inactive; reactivate it first.'),
+    ).toBeInTheDocument();
+  });
+
   it('shows a read-only viewer no create button and no row menu', async () => {
     await renderAt(kind.path, viewer(kind));
 

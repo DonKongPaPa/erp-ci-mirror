@@ -3,7 +3,7 @@ import { useCan } from '@nocobase/app-plugin-authorization/client';
 import { useTranslation } from '@nocobase/i18n/client';
 import type { CellContext, ColumnDef } from '@tanstack/react-table';
 import { useMemo, useState, type ReactElement } from 'react';
-import { Link } from 'react-router';
+import { Link, useLocation } from 'react-router';
 
 import { ActiveBadge, TypeBadge } from '#components/erp/detail';
 import {
@@ -28,8 +28,10 @@ import { useStatusChange } from './status-change.js';
 const DASH = <span className='text-muted-foreground'>—</span>;
 /** 展开行里的两个筛选，都记在地址栏上。 */
 const ITEM_FILTER_KEYS = ['itemType', 'categoryCode'] as const;
-const detailLink = (item: Item) => `/items/${encodeURIComponent(item.id)}`;
-const editLink = (item: Item) => `${detailLink(item)}/edit`;
+const detailLink = (item: Item, search = '') =>
+  `/items/${encodeURIComponent(item.id)}${search}`;
+const editLink = (item: Item, search = '') =>
+  `${detailLink(item, search)}/edit`;
 
 /**
  * 物料清单这一张表（`/items`，默认标签）：首列点开详情抽屉，行尾「⋮」里是编辑、停用（启用）。
@@ -41,6 +43,7 @@ export function ItemList({
   pending,
 }: ListAccess): ReactElement {
   const { t } = useTranslation();
+  const location = useLocation();
   const api = useApiClient();
   const client = useMemo(() => new ItemsClient(api), [api]);
   const purchasePrice = useCan({
@@ -86,7 +89,7 @@ export function ItemList({
                     {
                       key: 'edit',
                       label: t('erp.actions.edit'),
-                      render: <Link to={editLink(item)} />,
+                      render: <Link to={editLink(item, location.search)} />,
                     },
                     {
                       key: 'deactivate',
@@ -113,7 +116,7 @@ export function ItemList({
         header: t('erp.fields.code'),
         // 首列点开详情抽屉，列表还在后面。
         cell: ({ row }) => (
-          <RecordLink to={detailLink(row.original)}>
+          <RecordLink to={detailLink(row.original, location.search)}>
             {row.original.code}
           </RecordLink>
         ),
@@ -226,6 +229,7 @@ export function ItemList({
     ];
   }, [
     t,
+    location.search,
     canManage,
     dictionaries.data,
     ask,

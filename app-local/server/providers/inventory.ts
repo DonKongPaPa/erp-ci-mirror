@@ -1054,8 +1054,9 @@ export class DatabaseStockMutations implements StockMutations {
       const current = await knex<DocRow>('stock_docs').where({ id }).first();
       if (current === undefined) return fail('doc-not-found');
       const effectiveReason: DocReason = input.reason ?? (current.reason as DocReason);
+      // 库里的 null 表示没有来源；按 undefined 处理，不能让补丁把「没带」误判成「带了」。
       const effectiveSourceType = input.sourceType === undefined
-        ? current.source_type as SourceType | undefined
+        ? (current.source_type ?? undefined) as SourceType | undefined
         : input.sourceType;
       const effectiveSourceId = input.sourceId === undefined ? (current.source_id ?? undefined) : input.sourceId;
       await assertPartnerReason(knex, effectiveReason,

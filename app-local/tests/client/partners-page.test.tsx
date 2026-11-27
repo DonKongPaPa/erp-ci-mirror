@@ -90,7 +90,12 @@ const getSession = vi.fn(async () => ({ data: null }));
 
 function LocationProbe(): ReactElement {
   const location = useLocation();
-  return <span data-testid='location'>{location.pathname}</span>;
+  return (
+    <>
+      <span data-testid='location'>{location.pathname}</span>
+      <span data-testid='location-search'>{location.search}</span>
+    </>
+  );
 }
 
 async function renderAt(route: string, grants: AuthorizationSnapshot) {
@@ -170,6 +175,37 @@ describe('R-014 客户与供应商页', () => {
     expect(
       screen.getByRole('link', { name: 'CU202611010001' }),
     ).toHaveAttribute('href', '/partners/p1');
+  });
+
+  it('keeps the tab and the include-inactive filter when a record is opened and closed', async () => {
+    answer = (call) => {
+      if (call.method === 'GET' && call.path === 'partners')
+        return page(partner({ isSupplier: true }));
+      if (call.path === 'partners/p1') return { ...partner(), contacts: [] };
+      return notFound();
+    };
+    await renderAt('/partners?kind=supplier&includeInactive=true', purchase);
+    const link = await screen.findByRole(
+      'link',
+      { name: 'CU202611010001' },
+      WAIT,
+    );
+    expect(link).toHaveAttribute(
+      'href',
+      '/partners/p1?kind=supplier&includeInactive=true',
+    );
+    await userEvent.click(link);
+    await screen.findByRole('dialog', { name: /Sample Buyer Co\./ }, WAIT);
+    await userEvent.keyboard('{Escape}');
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('location')).toHaveTextContent('/partners');
+        expect(screen.getByTestId('location-search')).toHaveTextContent(
+          '?kind=supplier&includeInactive=true',
+        );
+      },
+      WAIT,
+    );
   });
 
   it('purchase sees only the supplier tab', async () => {
@@ -314,6 +350,98 @@ describe('R-014 客户与供应商页', () => {
     expect(
       await within(drawer).findByRole('button', { name: 'Add contact' }, WAIT),
     ).toHaveAttribute('href', '/partners/p1/contacts/new');
+  });
+
+  it('a customer with no delivery addresses shows the empty state and an add button', async () => {
+    answer = (call) =>
+      call.method === 'GET' && call.path === 'partners/p1'
+        ? { ...partner(), contacts: [], addresses: [] }
+        : notFound();
+    await renderAt('/partners/p1', sales);
+
+    const drawer = await screen.findByRole(
+      'dialog',
+      { name: /Sample Buyer Co\./ },
+      WAIT,
+    );
+    expect(
+      await within(drawer).findByText('No delivery addresses yet', {}, WAIT),
+    ).toBeVisible();
+    expect(
+      await within(drawer).findByRole('button', { name: 'Add address' }, WAIT),
+    ).toHaveAttribute('href', '/partners/p1/addresses/new');
+  });
+
+  it('shows the customer group name from the dictionary, falling back to the code', async () => {
+    const groupCode = 'DY-CGROUP-R3';
+    const group = {
+      id: 'g1',
+      dictType: 'customer_group',
+      code: groupCode,
+      name: 'Sample Group Three',
+      rate: null,
+      startDate: null,
+      endDate: null,
+      description: null,
+      isDefault: false,
+      sort: 0,
+      status: 'active',
+      createdAt: '2026-11-01T00:00:00.000Z',
+      updatedAt: '2026-11-01T00:00:00.000Z',
+    };
+    answer = (call) => {
+      if (call.method === 'GET' && call.path === 'partners/p1')
+        return {
+          ...partner({ customerGroupCode: groupCode }),
+          contacts: [],
+          addresses: [],
+        };
+      if (
+        call.method === 'GET' &&
+        call.path === 'biz-dict/entries' &&
+        call.query?.dictType === 'customer_group'
+      )
+        return { items: [group], total: 1, page: 1, pageSize: 20 };
+      return notFound();
+    };
+    await renderAt('/partners/p1', sales);
+
+    const drawer = await screen.findByRole(
+      'dialog',
+      { name: /Sample Buyer Co\./ },
+      WAIT,
+    );
+    expect(
+      await within(drawer).findByText('Sample Group Three', {}, WAIT),
+    ).toBeVisible();
+    expect(within(drawer).queryByText(groupCode)).toBeNull();
+  });
+
+  it('keeps the group code when the dictionary has no name for it', async () => {
+    const groupCode = 'DY-CGROUP-R3';
+    answer = (call) => {
+      if (call.method === 'GET' && call.path === 'partners/p1')
+        return {
+          ...partner({ customerGroupCode: groupCode }),
+          contacts: [],
+          addresses: [],
+        };
+      if (
+        call.method === 'GET' &&
+        call.path === 'biz-dict/entries' &&
+        call.query?.dictType === 'customer_group'
+      )
+        return { items: [], total: 0, page: 1, pageSize: 20 };
+      return notFound();
+    };
+    await renderAt('/partners/p1', sales);
+
+    const drawer = await screen.findByRole(
+      'dialog',
+      { name: /Sample Buyer Co\./ },
+      WAIT,
+    );
+    expect(await within(drawer).findByText(groupCode, {}, WAIT)).toBeVisible();
   });
 
   it('purchase opening a customer-only record sees the server sentence, not the record', async () => {

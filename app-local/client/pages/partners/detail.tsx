@@ -10,7 +10,7 @@ import {
   useState,
   type ReactElement,
 } from 'react';
-import { Link, Outlet, useParams } from 'react-router';
+import { Link, Outlet, useLocation, useParams } from 'react-router';
 
 import { DataTable } from '#components/data-table';
 import { ConfirmDialog } from '#components/erp/confirm';
@@ -34,6 +34,7 @@ import {
   type Contact,
   type PartnerDetail,
 } from './client.js';
+import { useCustomerGroupName } from './dictionaries.js';
 import { CUSTOMERS_RESOURCE, SUPPLIERS_RESOURCE } from './page-id.js';
 
 const DASH = <span className='text-muted-foreground'>—</span>;
@@ -102,11 +103,18 @@ function PartnerDrawer({
   readonly canUpdateAddresses: boolean;
 }): ReactElement {
   const { t } = useTranslation();
+  const location = useLocation();
   const base = `/partners/${encodeURIComponent(detail.id)}`;
   const active = detail.status === 'active';
   const [stopping, setStopping] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const customerGroupCode =
+    'customerGroupCode' in detail ? detail.customerGroupCode : undefined;
+  const customerGroupName = useCustomerGroupName(
+    customerGroupCode,
+    customerGroupCode !== undefined,
+  );
 
   const changeStatus = async (): Promise<void> => {
     setBusy(true);
@@ -187,7 +195,7 @@ function PartnerDrawer({
                       label: t('erp.actions.edit'),
                       render: (
                         <Link
-                          to={`${base}/contacts/${encodeURIComponent(row.original.id)}/edit`}
+                          to={`${base}/contacts/${encodeURIComponent(row.original.id)}/edit${location.search}`}
                         />
                       ),
                     },
@@ -198,7 +206,7 @@ function PartnerDrawer({
           ]
         : []),
     ],
-    [t, canUpdate, active, base],
+    [t, canUpdate, active, base, location.search],
   );
 
   return (
@@ -227,7 +235,7 @@ function PartnerDrawer({
             >
               {active ? t('erp.actions.deactivate') : t('erp.actions.activate')}
             </Button>
-            <Button nativeButton={false} render={<Link to={`${base}/edit`} />}>
+            <Button nativeButton={false} render={<Link to={`${base}/edit${location.search}`} />}>
               {t('erp.actions.edit')}
             </Button>
           </>
@@ -266,7 +274,7 @@ function PartnerDrawer({
               ? [
                   {
                     label: t('partners.fields.customerGroup'),
-                    value: detail.customerGroupCode,
+                    value: customerGroupName,
                   },
                   {
                     label: t('partners.fields.salesperson'),
@@ -308,7 +316,7 @@ function PartnerDrawer({
             <Button
               size='sm'
               nativeButton={false}
-              render={<Link to={`${base}/contacts/new`} />}
+              render={<Link to={`${base}/contacts/new${location.search}`} />}
             >
               <PlusIcon aria-hidden='true' />
               {t('partners.contact.add')}
@@ -365,6 +373,7 @@ function AddressSection({
   readonly reload: () => void;
 }): ReactElement {
   const { t } = useTranslation();
+  const location = useLocation();
   const base = `/partners/${encodeURIComponent(detail.id)}`;
   const active = detail.status === 'active';
 
@@ -401,7 +410,7 @@ function AddressSection({
                 label: t('erp.actions.edit'),
                 render: (
                   <Link
-                    to={`${base}/addresses/${encodeURIComponent(address.id)}/edit`}
+                    to={`${base}/addresses/${encodeURIComponent(address.id)}/edit${location.search}`}
                   />
                 ),
               },
@@ -475,7 +484,7 @@ function AddressSection({
       },
       actions,
     ];
-  }, [t, base, active]);
+  }, [t, base, active, location.search]);
 
   return (
     <DetailSection
@@ -485,7 +494,7 @@ function AddressSection({
           <Button
             size='sm'
             nativeButton={false}
-            render={<Link to={`${base}/addresses/new`} />}
+            render={<Link to={`${base}/addresses/new${location.search}`} />}
           >
             <PlusIcon aria-hidden='true' />
             {t('partners.address.add')}
