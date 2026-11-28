@@ -951,3 +951,33 @@ describe.each(KINDS)('$kind order pages', (kind: Kind) => {
     expect(calls('GET', kind.api)).toEqual([]);
   });
 });
+
+// 缺陷 5：请购单转出的采购订单详情里，purchaseRequestId 要回链到请购单。
+describe('purchase order backlink to its purchase request', () => {
+  it('renders a labelled link back to the source purchase request', async () => {
+    handlers = {
+      ...handlers,
+      'GET purchase-orders/o1': () =>
+        rawOrder(KINDS[0]!, { purchaseRequestId: 'pr-20261128-0001' }),
+    };
+    await renderAt('/purchase-orders/o1', writer(KINDS[0]!));
+    expect(await screen.findByText(enUS.orderDocs.fields.sourcePurchaseRequest, {}, WAIT)).toBeVisible();
+    expect(
+      await screen.findByRole('link', { name: enUS.orderDocs.fields.sourcePurchaseRequest }, WAIT),
+    ).toHaveAttribute('href', '/purchase-requests/pr-20261128-0001');
+  });
+
+  it('shows no backlink on an order that did not come from a purchase request', async () => {
+    await renderAt('/purchase-orders/o1', writer(KINDS[0]!));
+    await expect(
+      screen.findByText(KINDS[0]!.no.first, {}, WAIT),
+    ).resolves.toBeVisible();
+    await waitFor(
+      () =>
+        expect(
+          screen.queryByText(enUS.orderDocs.fields.sourcePurchaseRequest),
+        ).not.toBeInTheDocument(),
+      WAIT,
+    );
+  });
+});

@@ -45,6 +45,7 @@ import {
 } from '#components/ui/select';
 import { Textarea } from '#components/ui/textarea';
 
+import { usePageLeave } from '../../routing/route-leave-boundary.js';
 import { useAncestorSearch } from '../../routing/route-context.js';
 import {
   itemChoices,
@@ -218,15 +219,21 @@ function TransferForm({
   const [errors, setErrors] = useState<FieldErrors>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [touched, setTouched] = useState(false);
+  const [saved, setSaved] = useState(false);
+  // 和订单、出入库表单同一套离开守卫：保存成功后先清未保存状态、放行离开，再导航。
+  const leave = usePageLeave(touched && !saved, busy);
 
   const set = <K extends keyof TransferFormValues>(
     key: K,
     value: TransferFormValues[K],
   ): void => {
+    setTouched(true);
     setValues((old) => ({ ...old, [key]: value }));
     setErrors((old) => (old[key] === undefined ? old : { ...old, [key]: undefined }));
   };
   const setLine = (key: string, patch: Partial<LineDraft>): void => {
+    setTouched(true);
     setValues((old) => ({
       ...old,
       lines: old.lines.map((line) => {
@@ -240,9 +247,11 @@ function TransferForm({
     }));
   };
   const addLine = (): void => {
+    setTouched(true);
     setValues((old) => ({ ...old, lines: [...old.lines, newTransferLine()] }));
   };
   const removeLine = (key: string): void => {
+    setTouched(true);
     setValues((old) => ({
       ...old,
       lines: old.lines.filter((line) => line.key !== key),
@@ -271,6 +280,9 @@ function TransferForm({
           ? t('transfer.toasts.saved', { docNo: saved.docNo })
           : t('transfer.toasts.created', { docNo: saved.docNo }),
       });
+      setSaved(true);
+      // 放行这一次的离开，否则慢请求下「未保存」守卫会把成功后的导航挡住。
+      leave.allow();
       await navigate(
         {
           pathname: `/transfers/${encodeURIComponent(saved.id)}`,
@@ -338,6 +350,7 @@ function TransferForm({
           savedValues={initial}
           className='flex flex-col gap-6'
         >
+          {leave.dialog}
           {error ? (
             <Alert variant='destructive'>
               <AlertDescription>{error}</AlertDescription>

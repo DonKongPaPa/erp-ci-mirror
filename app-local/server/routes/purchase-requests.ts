@@ -93,6 +93,11 @@ const RULE_REASON: Readonly<Record<PurchaseRequestRuleCode, string>> = {
   'approval-failed': 'PURCHASE_REQUEST_APPROVAL_FAILED',
 };
 
+/** 建审批单失败的内部原因码 → 语言包键：内部编码与服务端英文原句都不直接给用户看。 */
+const APPROVAL_FAILURE_KEY: Readonly<Record<string, string>> = {
+  'no-approver': 'purchaseRequest.errors.approvalFailedNoApprover',
+};
+
 const camelOf = (code: PurchaseRequestRuleCode): string =>
   code.replace(/-([a-z])/gu, (_, letter: string) => letter.toUpperCase());
 
@@ -141,6 +146,12 @@ function requestApiError(
   }
   if (!(error instanceof PurchaseRequestRuleError)) throw error;
   const rule = RULE_STATUS[error.code];
+  // 内部原因码不能原样进用户提示；已知的用专门词条，未知的默认文案仍带 reason。
+  const knownKey =
+    error.code === 'approval-failed' && error.detail !== undefined
+      ? APPROVAL_FAILURE_KEY[error.detail]
+      : undefined;
+  const messageKey = knownKey ?? `purchaseRequest.errors.${camelOf(error.code)}`;
   return new ApiError({
     status: rule.status,
     reason: RULE_REASON[error.code],
@@ -148,10 +159,12 @@ function requestApiError(
     message: error.message,
     localizedMessage: {
       locale,
-      message: translate(`purchaseRequest.errors.${camelOf(error.code)}`, {
-        reason: error.detail ?? '',
-        defaultValue: error.message,
-      }),
+      message: translate(
+        messageKey,
+        knownKey === undefined
+          ? { reason: error.detail ?? '', defaultValue: error.message }
+          : { defaultValue: error.message },
+      ),
     },
     metadata: error.detail === undefined ? undefined : { reason: error.detail },
     ...(rule.httpStatus === undefined ? {} : { httpStatus: rule.httpStatus }),

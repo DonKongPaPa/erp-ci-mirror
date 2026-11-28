@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import { authorizationToken, type AppAuthorization } from '@nocobase/app-plugin-authorization/server';
 import type { Application } from '@nocobase/app-server/application';
 import {
   databaseManagerToken,
@@ -224,6 +225,7 @@ export class PurchaseRequestService {
     private readonly docFiles: DocFiles,
     private readonly approvals: ApprovalsService,
     private readonly departments: DepartmentService,
+    private readonly authz: AppAuthorization,
   ) {}
 
   private connection(): DatabaseConnection {
@@ -431,7 +433,8 @@ export class PurchaseRequestService {
       .select('code').where('id', row.departmentId).first();
     if (department === undefined) fail('department-not-found', row.departmentId);
     const approvers = await this.resolveApprovers(connection, department.code, actor.id);
-    if (approvers.length === 0) fail('approval-failed', `department ${department.code}`);
+    // 这里只在连 root 都解析不到时走到；用内部原因码，不把部门编码露给用户。
+    if (approvers.length === 0) fail('approval-failed', 'no-approver');
 
     const snapshot = await this.snapshot(connection, row, approvers);
     try {
@@ -592,7 +595,20 @@ export class PurchaseRequestService {
     }
   }
 
-  /** 按部门编码走 R-017 的部门选择器；没有主管就逐级上报，到顶无人返回空。 */
+  /** R-021：部门与其上级都没有在职主管时，审批任务回落到 root（unrestricted 权限集的指派人）。 */
+  private async rootApprovers(): Promise<readonly string[]> {
+    const sets = this.authz.permissionSets;
+    const ids = new Set<string>();
+    for (const set of await sets.list()) {
+      if (sets.protection(set.key)?.unrestricted !== true) continue;
+      for (const assignment of await sets.listAssignments(set.key)) {
+        if (assignment.subject.type === 'user') ids.add(assignment.subject.id);
+      }
+    }
+    return [...(await activeIdsOf(this.connection(), [...ids]))];
+  }
+
+  /** 按部门编码走 R-017 的部门选择器；没有主管就逐级上报，到顶无人回落到 root。 */
   private async resolveApprovers(
     connection: DatabaseConnection,
     departmentCode: string,
@@ -630,7 +646,9 @@ export class PurchaseRequestService {
         return [manager];
       }
     }
-    return [];
+    // 整个部门链都没有主管，按 R-021 回落到 root；root 不是员工，不经过上面的 eligible 过滤。
+    const roots = await this.rootApprovers();
+    return roots.length > 0 ? roots : [];
   }
 
   /** 审批人只看到本节声明的窄列：没有电话、邮箱，没有附件的 storageKey 与上传人。 */
@@ -741,6 +759,7 @@ export default class PurchaseRequestsProvider extends ServiceProvider<Applicatio
         this.app.container.resolve(docFilesToken),
         this.app.container.resolve(approvalsServiceToken),
         this.app.container.resolve(departmentServiceToken),
+        this.app.container.resolve(authorizationToken),
       ),
     );
   }

@@ -146,7 +146,8 @@ export default function QuotationFormPage({
     ? t('quotations.editDescription', { docNo: quotation?.docNo ?? '' })
     : t('quotations.newDescription');
 
-  if (pending)
+  // 新建时要先看人员在不在在职选项里，再决定销售员默认值；否则会把 root 的裸 id 预填进去。
+  if (pending || (!editing && people.loading))
     return (
       <FormShell title={title} description={description}>
         <p role='status' className='text-sm text-muted-foreground'>
@@ -193,7 +194,14 @@ export default function QuotationFormPage({
       key={quotation?.updatedAt}
       client={client}
       initial={
-        quotation ? quotationFormOf(quotation) : emptyQuotationForm(session?.user.id ?? '')
+        quotation
+          ? quotationFormOf(quotation)
+          : emptyQuotationForm(
+              session?.user.id &&
+                people.items?.some((person) => person.userId === session.user.id)
+                ? session.user.id
+                : '',
+            )
       }
       quotation={quotation}
       items={items.items}

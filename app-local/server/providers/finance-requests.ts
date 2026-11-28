@@ -341,7 +341,7 @@ export class FinanceRequestService {
     const row = this.requireRow(await this.findRow(connection, id, policy));
     if (row.status !== 'draft' && row.status !== 'rejected') fail('not-editable', row.status);
     const approvers = await this.resolveApprovers();
-    if (approvers.length === 0) fail('approval-failed', 'no eligible finance approver');
+    if (approvers.length === 0) fail('approval-failed', 'no-approver');
     const snapshot = await this.snapshot(connection, row, approvers);
 
     try {

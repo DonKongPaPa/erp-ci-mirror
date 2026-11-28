@@ -304,6 +304,8 @@ const zhCN: AppServerResource = {
       dictCodeInvalid: '项目的码不在字典里，或已经停用：{{reason}}。',
       personInvalid: '请购人不是在职员工：{{reason}}。',
       approvalFailed: '建审批单失败：{{reason}}。',
+      // 内部原因码 no-approver 走这一条，不把部门编码或英文原句给用户。
+      approvalFailedNoApprover: '找不到这个部门的主管，逐级上报也没有可审批的人。',
     },
   },
   financeRequest: {
@@ -316,6 +318,7 @@ const zhCN: AppServerResource = {
       notApproved: '只有审批通过的请款单才能转支出记录。',
       converted: '这张请款单已经转过支出记录。',
       approvalFailed: '建审批单失败：{{reason}}。',
+      approvalFailedNoApprover: '没有可以审批这张请款单的人。',
     },
   },
 

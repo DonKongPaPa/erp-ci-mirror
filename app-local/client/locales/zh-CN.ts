@@ -1180,6 +1180,8 @@ const zhCN: AppResource = {
   orderDocs: {
     fields: {
       orderNo: '单号',
+      // R-021 请购单转单回链：只有带 purchaseRequestId 的采购订单才画这一行。
+      sourcePurchaseRequest: '来源请购单',
       orderDate: '单据日期',
       submittedAt: '提交时间',
       item: '物料',
@@ -1745,7 +1747,10 @@ const zhCN: AppResource = {
     scopeUpcoming: '即将到期',
     days: '提前天数',
     empty: '暂无需要提醒的订单。',
-    overdueDays: '超期 {{days}} 天',
+    // 服务端把 days 算成「今天 - 基准日」：负数是将来、0 是今天、正数才是已过。
+    dueInDays: '还有 {{days}} 天到期',
+    dueToday: '今天到期',
+    overdueDays: '已超期 {{days}} 天',
     open: '打开订单',
   },
   departments: {

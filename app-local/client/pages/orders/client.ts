@@ -77,6 +77,8 @@ export interface Order extends OrderHeaderFields {
   readonly partnerId: string;
   readonly partner: OrderPartner | null;
   readonly orderDate: string;
+  /** 请购单转出的采购订单才带；详情把它画成回链。 */
+  readonly purchaseRequestId?: string | null;
   readonly status: OrderStatus;
   /** 端点上的状态值，照原样留着（遇到没登记的状态时显示它）。 */
   readonly apiStatus: string;
@@ -182,6 +184,8 @@ export interface OrderLineResponse {
 export interface OrderResponse extends OrderHeaderFields {
   readonly id: string;
   readonly orderNo: string;
+  /** 请购单转单时带上；详情用它回链到请购单（R-021 加片）。 */
+  readonly purchaseRequestId?: string | null;
   readonly status: string;
   readonly orderDate: string;
   readonly remark: string;
@@ -285,6 +289,7 @@ export function toOrder(def: OrderKindDef, raw: OrderResponse): Order {
     partnerId: purchase ? (raw.supplierId ?? '') : (raw.customerId ?? ''),
     partner: purchase ? (raw.supplier ?? null) : (raw.customer ?? null),
     orderDate: raw.orderDate,
+    ...optional({ purchaseRequestId: raw.purchaseRequestId }),
     status:
       def.statuses.find((entry) => entry.api === raw.status)?.value ??
       'unknown',

@@ -211,6 +211,31 @@ describe('R-020 调拨单页面', () => {
     );
   });
 
+  // 缺陷 4：慢请求下守卫不能把「保存草稿」后的导航挡住。
+  it('a slow create still opens the detail without a discard prompt', async () => {
+    const user = userEvent.setup();
+    const saved = rawTransfer({ id: 't-slow', docNo: 'DB-20261127-0003' });
+    handlers = {
+      ...handlers,
+      'POST transfers': async () => {
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        return saved;
+      },
+      'GET transfers/t-slow': () => saved,
+    };
+    await renderAt('/transfers/new', warehouse);
+    await choose(user, L.fields.warehouseIn, WAREHOUSE_IN.name);
+    await choose(user, L.fields.itemLine.replace('{{n}}', '1'), `${ITEM.code} ${ITEM.name}`);
+    fireEvent.change(
+      await screen.findByRole('textbox', { name: L.fields.qtyLine.replace('{{n}}', '1') }, WAIT),
+      { target: { value: '10' } },
+    );
+    await user.click(await screen.findByRole('button', { name: L.actions.saveDraft }, WAIT));
+    // 这个夹具没有 LocationProbe：详情的单号出现才说明慢保存后的导航真的发生了。
+    expect(await screen.findByText('DB-20261127-0003', {}, WAIT)).toBeVisible();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
+
   it('过账前先确认，明确说明过账才改库存，确认前不发请求', async () => {
     const user = userEvent.setup();
     handlers = {

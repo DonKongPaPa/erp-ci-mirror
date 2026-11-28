@@ -479,3 +479,25 @@ describe('R-022 波 2 报价单页面', () => {
     );
   });
 });
+
+// 缺陷 6：默认销售员只预填「当前登录人确实是在职员工」的情况；root/管理员不是员工就留空。
+describe('quotation salesperson default (R-022)', () => {
+  const sessionOf = (userId: string) => ({
+    data: { user: { id: userId }, session: { id: `s-${userId}` } },
+  });
+
+  it('prefills the signed-in user only when they are among the active employees', async () => {
+    getSession.mockResolvedValue(sessionOf(PERSON.userId));
+    await renderAt('/quotations/new', seller);
+    const handler = await screen.findByRole('combobox', { name: L.fields.handler }, WAIT);
+    expect(handler).toHaveTextContent(PERSON.name);
+  });
+
+  it('leaves the salesperson empty for a signed-in user who is not an active employee', async () => {
+    getSession.mockResolvedValue(sessionOf('root-admin-not-an-employee'));
+    await renderAt('/quotations/new', seller);
+    const handler = await screen.findByRole('combobox', { name: L.fields.handler }, WAIT);
+    expect(handler).not.toHaveTextContent(PERSON.name);
+    expect(handler).not.toHaveTextContent('root-admin-not-an-employee');
+  });
+});

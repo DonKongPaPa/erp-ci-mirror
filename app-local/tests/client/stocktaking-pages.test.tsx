@@ -233,6 +233,34 @@ describe('R-020 盘点单页面', () => {
     );
   });
 
+  // 缺陷 4：慢请求下守卫不能把「暂存成功」后的导航挡住。
+  it('a slow staging still opens the detail without a discard prompt', async () => {
+    const user = userEvent.setup();
+    const saved = rawStocktaking({ id: 'r-slow', docNo: 'PD-20261127-0003', status: 'staging' });
+    handlers = {
+      ...handlers,
+      'POST stocktakings': async () => {
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        return saved;
+      },
+      'GET stocktakings/r-slow': () => saved,
+    };
+    await renderAt('/stocktakings/new', warehouse);
+    await choose(user, L.fields.warehouse, WAREHOUSE.name);
+    await user.click(await screen.findByRole('button', { name: L.actions.addLine }, WAIT));
+    await choose(user, L.fields.itemLine.replace('{{n}}', '1'), `${ITEM.code} ${ITEM.name}`);
+    fireEvent.change(
+      await screen.findByRole('textbox', { name: L.fields.actualQtyLine.replace('{{n}}', '1') }, WAIT),
+      { target: { value: '12' } },
+    );
+    await user.click(await screen.findByRole('button', { name: L.actions.stage }, WAIT));
+    await waitFor(
+      () => expect(screen.getByTestId('location')).toHaveTextContent('/stocktakings/r-slow'),
+      WAIT,
+    );
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
+
   it('结束按钮按会话实际持有的 finish 动作显隐：仓管看不到，财务看得到', async () => {
     await renderAt('/stocktakings/r1', warehouse);
     expect(await screen.findByText('PD-20261127-0001', {}, WAIT)).toBeVisible();

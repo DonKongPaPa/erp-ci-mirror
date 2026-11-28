@@ -1030,6 +1030,8 @@ const enUS = {
   orderDocs: {
     fields: {
       orderNo: 'Order number',
+      // R-021 请购单转单回链：只有带 purchaseRequestId 的采购订单才画这一行。
+      sourcePurchaseRequest: 'Source purchase request',
       orderDate: 'Order date',
       submittedAt: 'Submitted at',
       item: 'Item',
@@ -1616,7 +1618,10 @@ const enUS = {
     scopeUpcoming: 'Upcoming',
     days: 'Days ahead',
     empty: 'No orders to remind you about.',
-    overdueDays: '{{days}} day(s) overdue',
+    // The server computes days as "today - baseline": negative is in the future, 0 is today, positive is past.
+    dueInDays: 'Due in {{days}} day(s)',
+    dueToday: 'Due today',
+    overdueDays: 'Overdue by {{days}} day(s)',
     open: 'Open order',
   },
   // R-012: the department maintenance page. Rejections say what to do next, not just what failed.

@@ -24,6 +24,8 @@ const REMINDER = {
   overdueDays: 8,
   scope: 'overdue',
 };
+/** 天数由夹具决定：负数是即将到期，服务端把它算成今天减基准日。 */
+let reminderDays = 8;
 const reader: AuthorizationSnapshot = {
   unrestricted: false,
   permissions: [
@@ -39,7 +41,7 @@ let permissions: AuthorizationSnapshot;
 const api = vi.fn((call: ApiCall) => {
   if (call.path === 'authorization/permissions') return { data: permissions };
   if (call.path === 'home/delivery-reminders') {
-    return { items: [REMINDER], total: 1 };
+    return { items: [{ ...REMINDER, overdueDays: reminderDays }], total: 1 };
   }
   return new Response(null, { status: 404 });
 });
@@ -86,6 +88,19 @@ describe('home delivery reminders (R-064)', () => {
       expect(reminders().at(-1)?.query?.scope).toBe('upcoming');
       expect(reminders().at(-1)?.query?.days).toBe('14');
     }, WAIT);
+  });
+
+  // 缺陷 7：服务端把即将到期算成负的 overdueDays，页面不能把它读成「超期 -17 天」。
+  it.each([
+    [-17, 'Due in 17 day(s)'],
+    [0, 'Due today'],
+    [8, 'Overdue by 8 day(s)'],
+  ])('renders overdueDays=%i as "%s"', async (days, text) => {
+    api.mockClear();
+    reminderDays = days;
+    await renderHome(reader);
+    const block = await screen.findByTestId('home-delivery-reminders', {}, WAIT);
+    expect(await within(block).findByText(text, {}, WAIT)).toBeVisible();
   });
 
   it('renders nothing and fetches nothing without ledgerView', async () => {

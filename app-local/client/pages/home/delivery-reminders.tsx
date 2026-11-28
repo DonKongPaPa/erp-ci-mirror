@@ -126,8 +126,13 @@ export function DeliveryReminders(): ReactElement | null {
                 {row.customer?.name ?? ''}
               </span>
               <span className='tabular-nums'>{row.baselineDate}</span>
-              <span className='text-destructive'>
-                {t('homeDelivery.overdueDays', { days: row.overdueDays })}
+              <span className={row.overdueDays > 0 ? 'text-destructive' : undefined}>
+                {/* 服务端 days = 今天 - 基准日：负数是还有几天，0 是今天，正数才是超期。 */}
+                {row.overdueDays < 0
+                  ? t('homeDelivery.dueInDays', { days: -row.overdueDays })
+                  : row.overdueDays === 0
+                    ? t('homeDelivery.dueToday')
+                    : t('homeDelivery.overdueDays', { days: row.overdueDays })}
               </span>
             </Link>
           </li>

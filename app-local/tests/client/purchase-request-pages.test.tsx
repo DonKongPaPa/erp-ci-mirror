@@ -415,6 +415,47 @@ describe('R-021 请购单页面', () => {
     );
   });
 
+  // 缺陷 4：服务端慢一点时，FeedbackForm 的「保存中」先结束，离开守卫会把成功后的导航挡住。
+  it('a slow save still navigates to the detail without a discard prompt', async () => {
+    const user = userEvent.setup();
+    const saved = rawRequest({
+      id: 'r-slow',
+      docNo: 'QG-20261127-0003',
+      status: 'draft',
+      lines: [],
+      totalQty: 0,
+      estimatedTotal: 0,
+    });
+    handlers = {
+      ...handlers,
+      'POST purchase-requests': async () => {
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        return saved;
+      },
+      'POST purchase-requests/r-slow/lines': () => saved,
+      'GET purchase-requests/r-slow': () => saved,
+    };
+    await renderAt('/purchase-requests/new', writer);
+    await choose(user, L.fields.department, DEPARTMENT.name);
+    await choose(user, L.fields.requester, PERSON.name);
+    const dateField = await screen.findByRole('textbox', { name: L.fields.requestDate }, WAIT);
+    await user.clear(dateField);
+    await user.type(dateField, '2026-11-27');
+    await user.click(await screen.findByRole('button', { name: L.actions.addLine }, WAIT));
+    await choose(user, L.fields.itemLine.replace('{{n}}', '1'), `${ITEM_A.code} ${ITEM_A.name}`);
+    await user.type(
+      await screen.findByRole('textbox', { name: L.fields.qtyLine.replace('{{n}}', '1') }, WAIT),
+      '10',
+    );
+    await user.click(await screen.findByRole('button', { name: L.actions.saveDraft }, WAIT));
+
+    await waitFor(
+      () => expect(screen.getByTestId('location')).toHaveTextContent('/purchase-requests/r-slow'),
+      WAIT,
+    );
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
+
   it.each([
     ['draft', 'draft', true, false],
     ['approving', 'approving', false, false],

@@ -370,6 +370,21 @@ export function OrderDetailPage({
               },
             ]
           : []),
+        ...(def.id === 'purchase' && order.purchaseRequestId
+          ? [
+              {
+                label: t('orderDocs.fields.sourcePurchaseRequest'),
+                value: (
+                  <Link
+                    aria-label={t('orderDocs.fields.sourcePurchaseRequest')}
+                    to={`/purchase-requests/${encodeURIComponent(order.purchaseRequestId)}`}
+                  >
+                    {order.purchaseRequestId}
+                  </Link>
+                ),
+              },
+            ]
+          : []),
         {
           label: t(`${def.l}.handlerLabel`),
           value: order.handler?.name,

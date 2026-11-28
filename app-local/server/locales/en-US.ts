@@ -309,6 +309,8 @@ const enUS = {
       dictCodeInvalid: 'That project code is not an active dictionary entry: {{reason}}.',
       personInvalid: 'That requester is not an active employee: {{reason}}.',
       approvalFailed: 'The approval could not be created: {{reason}}.',
+      // The internal "no-approver" reason gets its own sentence, never a raw department code.
+      approvalFailedNoApprover: 'No manager was found for this department, and escalating did not find an approver.',
     },
   },
   // R-066：请款单规则码文案；端点在缺键时用英文原句兜底。
@@ -322,6 +324,7 @@ const enUS = {
       notApproved: 'Only an approved finance request can be converted into an expense record.',
       converted: 'This finance request has already been converted.',
       approvalFailed: 'The approval could not be created: {{reason}}.',
+      approvalFailedNoApprover: 'No approver is available for this finance request.',
     },
   },
   // R-065: readable finance rule messages; returned in localizedMessage.

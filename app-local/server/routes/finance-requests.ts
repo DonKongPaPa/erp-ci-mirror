@@ -79,6 +79,11 @@ const RULE_REASON: Readonly<Record<FinanceRequestRuleCode, string>> = {
   'approval-failed': 'FINANCE_REQUEST_APPROVAL_FAILED',
 };
 
+/** 内部原因码 → 语言包键；不把英文原句塞给用户。 */
+const APPROVAL_FAILURE_KEY: Readonly<Record<string, string>> = {
+  'no-approver': 'financeRequest.errors.approvalFailedNoApprover',
+};
+
 const camelOf = (code: FinanceRequestRuleCode): string =>
   code.replace(/-([a-z])/gu, (_, letter: string) => letter.toUpperCase());
 
@@ -127,6 +132,11 @@ function requestApiError(
   }
   if (!(error instanceof FinanceRequestRuleError)) throw error;
   const rule = RULE_STATUS[error.code];
+  const knownKey =
+    error.code === 'approval-failed' && error.detail !== undefined
+      ? APPROVAL_FAILURE_KEY[error.detail]
+      : undefined;
+  const messageKey = knownKey ?? `financeRequest.errors.${camelOf(error.code)}`;
   return new ApiError({
     status: rule.status,
     reason: RULE_REASON[error.code],
@@ -134,10 +144,12 @@ function requestApiError(
     message: error.message,
     localizedMessage: {
       locale,
-      message: translate(`financeRequest.errors.${camelOf(error.code)}`, {
-        reason: error.detail ?? '',
-        defaultValue: error.message,
-      }),
+      message: translate(
+        messageKey,
+        knownKey === undefined
+          ? { reason: error.detail ?? '', defaultValue: error.message }
+          : { defaultValue: error.message },
+      ),
     },
     metadata: error.detail === undefined ? undefined : { reason: error.detail },
     ...(rule.httpStatus === undefined ? {} : { httpStatus: rule.httpStatus }),
