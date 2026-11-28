@@ -46,8 +46,16 @@ function notifier() {
   };
 }
 
-async function seedRow(connection: DatabaseConnection, status = 'pending') {
-  const now = new Date();
+/**
+ * 造数据用的时钟必须就是扫描时传入的那个 `now`：到期时间按它减一分钟算。
+ * 原先这里取真实时间、扫描却用写死的时刻 —— 真实时间一过那个时刻，任务相对写死的时钟
+ * 就「还没到期」，测试从此永远红（镜像全量 `46099900006`，2026-11-28 03:18Z 之后）。
+ */
+async function seedRow(
+  connection: DatabaseConnection,
+  status = 'pending',
+  now = new Date(),
+) {
   await connection.query
     .insertInto('approvals')
     .values({ id: 'approval-1', status: 'submitted' })
@@ -71,13 +79,10 @@ async function seedRow(connection: DatabaseConnection, status = 'pending') {
 
 test('R-017 任务级超时：到期只提醒一次，重复扫描不再发', async ({ connection }) => {
   await createCollections(connection);
-  await seedRow(connection);
+  const now = new Date('2026-11-28T02:00:00.000Z');
+  await seedRow(connection, 'pending', now);
   const fake = notifier();
-  const options: ScanApprovalTimeoutsOptions = {
-    connection,
-    notifier: fake,
-    now: new Date('2026-11-28T02:00:00.000Z'),
-  };
+  const options: ScanApprovalTimeoutsOptions = { connection, notifier: fake, now };
   expect(await scanApprovalTimeouts(options)).toBe(1);
   expect(fake.sent).toHaveLength(1);
   expect(fake.sent[0]?.kind).toBe('reminder');
@@ -94,9 +99,9 @@ test('R-017 任务级超时：到期只提醒一次，重复扫描不再发', as
 
 test('R-017 任务级超时：未到期、已处理、已提醒的任务都不发', async ({ connection }) => {
   await createCollections(connection);
-  await seedRow(connection, 'approved');
-  const fake = notifier();
   const now = new Date('2026-11-28T02:00:00.000Z');
+  await seedRow(connection, 'approved', now);
+  const fake = notifier();
   expect(await scanApprovalTimeouts({ connection, notifier: fake, now })).toBe(0);
   expect(fake.sent).toHaveLength(0);
 });
