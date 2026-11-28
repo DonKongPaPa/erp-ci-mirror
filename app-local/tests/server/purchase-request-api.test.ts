@@ -224,6 +224,7 @@ test('正向：建草稿、提两行、提交、审批通过、转采购订单�
   );
   expect(order.status).toBe('draft');
   expect(order.purchaseRequestId).toBe(String(draft.id));
+  expect(order.purchaseRequestDocNo, '回链要带请购单的单据号').toBe(draft.docNo);
   expect(order.lines).toHaveLength(2);
   for (const line of order.lines ?? []) {
     expect(line.price, '预计单价不能写进订单价格').toBeNull();

@@ -12,14 +12,19 @@ import DepartmentProvider from './departments.js';
 import DevToolsGuardProvider from './dev-tools-guard.js';
 import EmployeesProvider from './employee-service.js';
 import FinanceProvider from './finance.js';
+import ReconciliationProvider from './reconciliation.js';
+import ReportEngineProvider from './report-engine.js';
 import EmployeeMutationsProvider from './employees.js';
 import FeedbackReminderProvider from './feedback-reminder.js';
 import ImportToolProvider from './import-tool.js';
 import InventoryProvider from './inventory.js';
 import ItemsProvider from './items.js';
+import BomsProvider from './boms.js';
+import BomExplodeProvider from './bom-explode.js';
 import IqcProvider from './iqc.js';
 import KnowledgeAccessProvider from './knowledge-access.js';
 import LifecycleProvider from './lifecycles.js';
+import MesSettingsProvider from './mes-settings.js';
 import NotificationManagementProvider from './notification-management.js';
 import OrdersProvider from './orders.js';
 import PurchaseRequestsProvider from './purchase-requests.js';
@@ -35,6 +40,7 @@ import ShiftsProvider from './shifts.js';
 import StaffBaselineProvider from './staff-baseline.js';
 import StocktakingProvider from './stocktaking.js';
 import TransferProvider from './transfer.js';
+import ReturnsProvider from './returns.js';
 import SubmissionProvider from './submission.js';
 import TicketNotificationsProvider from './ticket-notifications.js';
 import type { ApplicationServiceProviderConstructor } from '@nocobase/app-server/application';
@@ -58,6 +64,10 @@ const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
   EmployeesProvider,
   // R-065：支出与到票的读写服务；登记顺序无关。
   FinanceProvider,
+  // R-065 复刻波 2：收入、开票与应收应付对账的读写服务；登记顺序无关。
+  ReconciliationProvider,
+  // R-078：报表取数与裁列服务；依赖上面各单据读服务，登记顺序无关。
+  ReportEngineProvider,
   EmployeeMutationsProvider,
   // R-025：内部只读服务、HTTP 读服务与写服务。无调用方时也能被容器解析。
   ShiftsProvider,
@@ -65,6 +75,9 @@ const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
   PartnersProvider,
   // R-019：物料、单位、分类的读服务与写服务；发号器由 CodesProvider 提供。
   ItemsProvider,
+  // R-019 波 2：BOM 读写、版本选取与唯一的递归展开服务；登记顺序无关。
+  BomsProvider,
+  BomExplodeProvider,
   // R-020：仓库、单据、现存量与流水的读服务与写服务；过账在写服务里取行锁。
   InventoryProvider,
   // R-070：采购检验单的读写服务；入库挂点在库存写服务里按需调用，顺序无关。
@@ -72,6 +85,8 @@ const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
   // R-020 波 1：盘点与调拨复用库存过账，登记顺序无关。
   StocktakingProvider,
   TransferProvider,
+  // R-020 波 2：退货单复用库存过账，登记顺序无关。
+  ReturnsProvider,
   // R-068：导入工具，进程内令牌 + 三步端点共用的写服务；无页面资源、无种子。
   ImportToolProvider,
   // R-021/R-022：订单读写服务；生成单据复用库存写服务，回写由 order-progress 挂在过账事务里。
@@ -84,6 +99,8 @@ const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
   FinanceRequestsProvider,
   // R-072：业务字典的读服务与写服务；assertActiveCodes 供各单据片共用。无调用方时也可解析。
   BizDictProvider,
+  // R-023 W3-1：基础设置的读写服务；发号器复用 CodesProvider，顺序无关。
+  MesSettingsProvider,
   // R-064：订单评审的读写服务与总台账的只读投影；无调用方时也能被容器解析。
   OrderReviewsProvider,
   OrderLedgerProvider,

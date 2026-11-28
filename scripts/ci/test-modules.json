@@ -1,0 +1,179 @@
+{
+  "version": 1,
+  "preciseLimit": 40,
+  "stemSuffixes": ["resources", "schemas", "provider", "providers"],
+  "docOnlyPatterns": [
+    "*.md",
+    "*.mdx",
+    "app-local/**/*.md",
+    "app-local/**/*.mdx",
+    "wiki/**",
+    "raw/**",
+    "HANDOFF/**",
+    "HANDOFF.md",
+    "AGENTS.md",
+    "app-local/AGENTS.md",
+    ".agents/**",
+    "app-local/.agents/**",
+    "docs/**",
+    ".github/**/*.md"
+  ],
+  "testRoots": [
+    "tests/server",
+    "tests/client",
+    "tests/database",
+    "tests/cli",
+    "tests/project"
+  ],
+  "testFilePattern": "app-local/tests/**/*.test.{ts,tsx}",
+  "stopwords": [
+    "index",
+    "server",
+    "client",
+    "local",
+    "app",
+    "src",
+    "lib",
+    "tests",
+    "test",
+    "project",
+    "cli",
+    "fixtures",
+    "fixture",
+    "resources",
+    "providers",
+    "routes",
+    "pages",
+    "extensions",
+    "database",
+    "main",
+    "migrations",
+    "seeds",
+    "scripts",
+    "github",
+    "workflows",
+    "release",
+    "locales",
+    "system",
+    "components",
+    "utils",
+    "helpers",
+    "types",
+    "config",
+    "dist",
+    "build",
+    "dev",
+    "tools"
+  ],
+  "fixedGroups": {
+    "sharedRegistry": [
+      "tests/server/app-server.test.ts",
+      "tests/server/business-permission-sets.test.ts",
+      "tests/server/authorization-resources.test.ts",
+      "tests/server/codes.test.ts",
+      "tests/cli/authz-export-import.test.ts",
+      "tests/client/client-routes.test.ts",
+      "tests/client/settings-navigation.test.ts"
+    ],
+    "locale": [
+      "tests/client/app-locale-coverage.test.ts",
+      "tests/client/layout-i18n.test.tsx",
+      "tests/client/auth-i18n.test.tsx",
+      "tests/server/approval-failure-copy.test.ts"
+    ],
+    "seeds": [
+      "tests/database/seeds-immutable.test.ts",
+      "tests/server/business-permission-sets.test.ts",
+      "tests/cli/authz-export-import.test.ts"
+    ],
+    "authz": [
+      "tests/cli/authz-export-import.test.ts",
+      "tests/cli/authz-import-validation.test.ts",
+      "tests/cli/authz-upgrade-parse.test.ts"
+    ],
+    "ciScripts": [
+      "tests/project/gate-fast-stage.test.ts",
+      "tests/project/gate-fast-selection.test.ts",
+      "tests/project/frontend-gates.test.ts",
+      "tests/project/ci-mirror.test.ts",
+      "tests/project/test-tiering.test.ts",
+      "tests/project/gate-concurrency.test.ts",
+      "tests/project/gate-db-tier-static.test.ts",
+      "tests/project/gate-upstream-unit.test.ts",
+      "tests/project/deploy-dist-configs.test.ts",
+      "tests/project/compliance-audit.test.ts"
+    ],
+    "migrationOrder": [
+      "tests/database/employees-migration.test.ts"
+    ]
+  },
+  "rules": [
+    {
+      "id": "testFile",
+      "paths": ["app-local/tests/**"],
+      "derive": "testFile",
+      "searchRoots": ["tests/server", "tests/client", "tests/database", "tests/cli", "tests/project"]
+    },
+    {
+      "id": "sharedRegistry",
+      "paths": [
+        "app-local/server/providers/index.ts",
+        "app-local/server/routes/index.ts",
+        "app-local/server/*-resources.ts",
+        "app-local/server/providers/authorization-resources.ts",
+        "app-local/server/providers/codes.ts",
+        "app-local/cli/authz/index.ts"
+      ],
+      "group": "sharedRegistry"
+    },
+    {
+      "id": "locale",
+      "paths": [
+        "app-local/client/locales/**",
+        "app-local/server/locales/**",
+        "app-local/client/**/locales/**",
+        "app-local/server/**/locales/**"
+      ],
+      "group": "locale"
+
+    },
+    {
+      "id": "seeds",
+      "paths": ["app-local/database/main/seeds/**"],
+      "group": "seeds"
+    },
+    {
+      "id": "migration",
+      "paths": ["app-local/database/main/migrations/**"],
+      "group": "migrationOrder",
+      "derive": "moduleTokens",
+      "searchRoots": ["tests/database"]
+    },
+    {
+      "id": "authzCli",
+      "paths": ["app-local/cli/**"],
+      "group": "authz",
+      "derive": "moduleTokens",
+      "searchRoots": ["tests/cli", "tests/server", "tests/project"]
+    },
+    {
+      "id": "ciScripts",
+      "paths": ["scripts/**", ".github/**"],
+      "group": "ciScripts",
+      "derive": "moduleTokens",
+      "searchRoots": ["tests/project"]
+    },
+    {
+      "id": "serverModule",
+      "paths": ["app-local/server/**"],
+      "derive": "moduleTokens",
+      "searchRoots": ["tests/server", "tests/client", "tests/database", "tests/cli"]
+    },
+    {
+      "id": "clientArea",
+      "paths": ["app-local/client/pages/**", "app-local/client/extensions/**", "app-local/client/**"],
+      "derive": "areaToken",
+      "searchRoots": ["tests/client"]
+    }
+  ]
+}

@@ -32,6 +32,12 @@ const EXECUTED_SEED_HASHES: Readonly<Record<string, string>> = {
     '4e6cca552126636f55e0081ed53df61ca205c787ee0b907727dbeab0ac0edcea',
   '202611280017_seed_finance_request_grants.ts':
     'b2536823bd829c4f22637cd26c6dc22bfa7565a9e2d67b98e19e8e56e3fcac90',
+  // R-020 波 2 加片二：退货授权的新种子，随本片入库后同样不可改。
+  '202611280020_seed_returns_grants.ts':
+    '2d067329e2f47fae4828c9968d30070eedaed099ed446048b1066d3e00e8975b',
+  // R-020 波 2 加片二页面片：退货页面授权的新种子，随本片入库后同样不可改。
+  '202611280027_seed_returns_page_grants.ts':
+    'c7b383ff26023191e560c17459240b62e9564dd5c8acf6ecbb7d6d7a88658089',
   // R-066 页面片：请款 / 报销页面授权的新种子，随本片入库后同样不可改。
   '202611280018_seed_finance_request_page_grants.ts':
     'dd8f6ce2725876095f2fbc91ab5437df57b47a42c294556ec9a25a5ca5fd3722',
@@ -47,9 +53,27 @@ const EXECUTED_SEED_HASHES: Readonly<Record<string, string>> = {
   // R-022 波 2：报价单页面授权的新种子，排在 015 之后；随本片入库后同样不可改。
   '202611280016_seed_quotation_page_grants.ts':
     'decc8433ac042d6fad58dae1bfeb3b769cf5c1990234d60f0b2451b0bf923d0a',
+  // R-065 复刻波 2：对账、核销、收入与开票授权的新种子，排在 018 之后。
+  '202611280019_seed_finance_reconciliation_grants.ts':
+    'daa6b040e65254bf0217c9241921a25f733cbfb658d55a3356691f19ae7493d5',
+  // R-065 第二片页面片：四张财务页面授权的新种子，排在 019 之后。
+  '202611280028_seed_finance_reconciliation_page_grants.ts':
+    'efe012649faa2d9bcbf384e87f711e6c9fda49fe8f5f94f227b5f487890e3574',
+  // R-019 波 2：BOM 授权新种子，排在 018 之后；随本片入库后同样不可改。
+  '202611280022_seed_bom_grants.ts':
+    'e0f6e4a0364b7da8365bc96c68c549b54465d095ce78f00ff3bde4cd7dd6a958',
+  // R-019 波 2 页面片：BOM 页面授权新种子，排在 022 之后；随本片入库后同样不可改。
+  '202611280026_seed_bom_page_grants.ts':
+    '8a9e740bef680e3862fd5e386fb8ff62619dddb39ce0317dc0543a3ae281b2f6',
   // R-070 IQC：来料检验授权的新种子，随本片入库后同样不可改。
   '202611280021_seed_iqc_grants.ts':
     '134b9e56c9bd5635848378c7b5b9ab3ca4f6eabc51f639ef4b5921bb2dd0e765',
+  // R-023 W3-1：MES 授权新种子，排在 026 之后；随本片入库后同样不可改。
+  '202611280031_seed_mes_grants.ts':
+    '97ecba31f9d7ef84c9cc436e3dafac3e7fcd6ea8a8186667dd4b0013d9a47ea6',
+  // R-023 W3-1：报工规则默认值的新种子，排在 031 之后；随本片入库后同样不可改。
+  '202611280032_seed_mes_report_rules.ts':
+    '5da334a46704c075062aa282afb2cbfffc80ce94f7de4bc58569a8b985a7c9be',
 };
 
 const RULE =

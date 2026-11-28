@@ -81,6 +81,24 @@ it('locks immediately, preserves native props/ref, announces once and clears on 
   expect(screen.queryByRole('status')).not.toBeInTheDocument();
 });
 
+it('puts the mapped action icon before the label', () => {
+  const view = render(
+    <PendingButton busy={false} action='post'>
+      Post
+    </PendingButton>,
+  );
+  const button = screen.getByRole('button', { name: 'Post' });
+  expect(button.querySelector('[data-icon="inline-start"]')).not.toBeNull();
+  view.rerender(
+    <PendingButton busy={false}>Post</PendingButton>,
+  );
+  expect(
+    screen
+      .getByRole('button', { name: 'Post' })
+      .querySelector('[data-icon="inline-start"]'),
+  ).toBeNull();
+});
+
 it('shares the submission lock across click and form submission, retains input on failure and permits retry', async () => {
   vi.useRealTimers();
   let reject!: (error: Error) => void;

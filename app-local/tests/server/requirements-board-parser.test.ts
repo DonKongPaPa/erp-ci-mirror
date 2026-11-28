@@ -9,6 +9,7 @@ import {
 import {
   blockingFor,
   buildRequirementsBoard,
+  parseAllFollowUps,
   parseFollowUps,
   parseRequirementsPool,
   stripCell,
@@ -68,6 +69,53 @@ describe('解析需求池主表', () => {
   });
 });
 
+describe('跟进记录全集 entries（抽屉时间线用）', () => {
+  it('一条跟进都没有的需求 entries 是空数组，lastEntry 仍是 null', () => {
+    const board = buildRequirementsBoard(POOL_FIXTURE, FOLLOW_UPS_FIXTURE);
+    const item = board.requirements.find((row) => row.id === 'R-004');
+    expect(item?.entries).toEqual([]);
+    expect(item?.lastEntry).toBeNull();
+  });
+
+  it('多条按时间升序，不按文件里的倒序；文字给全文不截断', () => {
+    const followUps = `# 需求跟进记录
+
+## R-002 知识库累积与 AI 代填
+
+- **2026-11-27T03:15:44+08:00** ${'最长的一句。'.repeat(40)}
+- **2026-11-25T10:00:00+08:00** 中间一条。
+- **2026-11-24T03:21:13+08:00** 最早一条。
+`;
+    const board = buildRequirementsBoard(POOL_FIXTURE, followUps);
+    const item = board.requirements.find((row) => row.id === 'R-002');
+    expect(item?.entries.map((entry) => entry.text)).toEqual([
+      '最早一条。',
+      '中间一条。',
+      `${'最长的一句。'.repeat(40)}`,
+    ]);
+    expect(item?.entries[2]?.text.length).toBe(240);
+    // lastEntry 原样保留：仍是文件里第一条、仍截到 160 字。
+    expect(item?.lastEntry?.at).toBe('2026-11-27T03:15:44+08:00');
+    expect(item?.lastEntry?.text.length).toBe(160);
+  });
+
+  it('小节里的续行并进那一条；其他小节的跟进不串过来', () => {
+    const all = parseAllFollowUps(FOLLOW_UPS_FIXTURE);
+    expect(all.get('R-002')).toEqual([
+      {
+        at: '2026-11-24T03:21:13+08:00',
+        text: '第一轮调研完成。',
+      },
+      {
+        at: '2026-11-27T03:15:44+08:00',
+        text: '第二轮调研完成，三个技术缺口都有了一手依据。 取库密钥首选工具把服务拉起为子进程；现用扫描器遇到混淆密钥会找到 0 个候选。',
+      },
+    ]);
+    expect(all.get('R-021')).toHaveLength(1);
+    expect(all.has('R-013')).toBe(false);
+  });
+});
+
 describe('blocking 算法六种正反例', () => {
   const statuses = new Map<string, string>([
     ['R-003', '待设计'],
@@ -108,10 +156,12 @@ describe('blocking 算法六种正反例', () => {
       blocking: '等依赖',
       blockingDetail: 'R-003',
     });
-    expect(blockingFor('方案已定', ['R-013', 'R-020'], statuses, null)).toEqual({
-      blocking: '等依赖',
-      blockingDetail: 'R-020',
-    });
+    expect(blockingFor('方案已定', ['R-013', 'R-020'], statuses, null)).toEqual(
+      {
+        blocking: '等依赖',
+        blockingDetail: 'R-020',
+      },
+    );
   });
 
   it('方案已定且硬依赖都完成 → 可开工', () => {

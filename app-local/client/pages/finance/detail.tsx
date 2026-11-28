@@ -9,6 +9,7 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { useMemo, useState, type ReactElement } from 'react';
 import { Link, Outlet, useLocation, useParams, useResolvedPath } from 'react-router';
 
+import { ActionGlyph } from '#components/action-glyph';
 import { ConfirmDialog } from '#components/erp/confirm';
 import {
   DocumentHeaderFields,
@@ -241,12 +242,13 @@ export function FinanceDetailPage({
             </Button>
           ) : null}
           {doc.status === 'draft' && confirm.can ? (
-            <PendingButton busy={busy} onClick={() => setConfirming('confirm')}>
+            <PendingButton busy={busy} action='review' onClick={() => setConfirming('confirm')}>
               {t('finance.register')}
             </PendingButton>
           ) : null}
           {doc.status !== 'void' && voiding.can ? (
             <Button variant='outline' disabled={busy} onClick={() => setConfirming('void')}>
+              <ActionGlyph action='void' />
               {t('finance.void')}
             </Button>
           ) : null}

@@ -9,6 +9,7 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { useCallback, useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
 import { Link, Outlet, useLocation, useParams, useResolvedPath } from 'react-router';
 
+import { ActionGlyph } from '#components/action-glyph';
 import { ConfirmDialog } from '#components/erp/confirm';
 import {
   DocumentHeaderFields,
@@ -247,12 +248,13 @@ export default function TransferDetailPage(): ReactElement {
               ) : null}
               {transfer.status === 'draft' && voiding.can ? (
                 <Button variant='outline' disabled={busy} onClick={() => void runVoid()}>
+                  <ActionGlyph action='void' />
                   {t('transfer.actions.void')}
                 </Button>
               ) : null}
               {/* 过账才改库存，先按会话实际持有的 post 动作显隐，再明确确认。 */}
               {transfer.status === 'draft' && post.can ? (
-                <PendingButton busy={busy} onClick={() => setPosting(true)}>
+                <PendingButton busy={busy} action='post' onClick={() => setPosting(true)}>
                   {t('transfer.actions.post')}
                 </PendingButton>
               ) : null}

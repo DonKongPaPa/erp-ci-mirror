@@ -33,6 +33,7 @@ import { z } from 'zod';
 import {
   InspectionListQuery,
   CreateInspectionBody,
+  OrderOptionsQuery,
   ReceivableQuery,
   UpdateInspectionBody,
 } from './iqc-schemas.js';
@@ -128,6 +129,18 @@ const ReceivableSchema = z.object({
 });
 const ReceivableListSchema = z.object({
   items: z.array(ReceivableSchema), total: z.number(), page: z.number(),
+  pageSize: z.number(),
+});
+// 页面片新增：新建检验单的选单数据源，窄形状，只回可检订单行。
+const orderOptionLine = z.object({
+  itemId: z.string(), item, purchaseQty: z.number(), receivedRemainQty: z.number(),
+});
+const OrderOptionSchema = z.object({
+  id: z.string(), orderNo: z.string(), orderDate: z.string(),
+  supplier: supplier.nullable(), lines: z.array(orderOptionLine),
+});
+const OrderOptionsListSchema = z.object({
+  items: z.array(OrderOptionSchema), total: z.number(), page: z.number(),
   pageSize: z.number(),
 });
 
@@ -264,6 +277,28 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes((
       await authorizeIqc(context, 'receiveView');
       const query = context.req.valid('query');
       const result = await reader.receivable(query);
+      return context.json({ ...result, page: query.page, pageSize: query.pageSize });
+    },
+  );
+
+  // 页面片新增，静态段先于 /inspections/:id 注册。授权走通用的 GET → view：
+  // 质量岗与采购本来就有 view，仓管只有 receiveView 拿不到，授权范围不变。
+  router.get(
+    '/inspections/order-options',
+    describeRoute({
+      tags: ['Inspections'],
+      summary: 'List purchasable orders with lines to inspect',
+      operationId: 'listInspectionOrderOptions',
+      responses: {
+        '200': objectResponse(OrderOptionsListSchema, 'One page of orders to inspect'),
+        '401': apiErrorResponse(401), '403': apiErrorResponse(403), '500': apiErrorResponse(500),
+      },
+    }),
+    apiValidator('query', OrderOptionsQuery),
+    async (context) => {
+      await authorizeIqc(context, 'view');
+      const query = context.req.valid('query');
+      const result = await reader.orderOptions(query);
       return context.json({ ...result, page: query.page, pageSize: query.pageSize });
     },
   );

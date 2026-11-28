@@ -46,9 +46,8 @@ const BoardSchema = z.object({
       hardDeps: z.array(z.string()),
       softDeps: z.array(z.string()),
       note: z.string(),
-      lastEntry: z
-        .object({ at: z.string(), text: z.string() })
-        .nullable(),
+      lastEntry: z.object({ at: z.string(), text: z.string() }).nullable(),
+      entries: z.array(z.object({ at: z.string(), text: z.string() })),
       blocking: z.string(),
       blockingDetail: z.string(),
     }),
@@ -87,7 +86,11 @@ export function createRequirementsBoardRoutes(): AppApiRouteContribution<Applica
     const auth = app.container.resolve(authenticationToken);
     const authz = app.container.resolve(authorizationToken);
 
-    router.use('/dev/requirements-board', auth.optional(), requireSignInSession());
+    router.use(
+      '/dev/requirements-board',
+      auth.optional(),
+      requireSignInSession(),
+    );
     router.get(
       '/dev/requirements-board',
       describeRoute({

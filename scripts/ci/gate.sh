@@ -522,24 +522,48 @@ fi
 
 cd "$APP" || fail "进不去 app-local"
 
-# fast 档：只跑受改动影响的测试 + 文档守门。
-# 用途是日常迭代的快速反馈 —— 本地 unit 要 110s，fast 约 20-40s。
-# **提交前仍必须跑 unit**：--changed 只看 git 有改动的文件，
-# 漏掉间接依赖（例如改了共享类型但某个测试没直接 import）是可能的。
+# fast 档：只跑选出来的测试 + 文档守门。
+# R-084：选哪些测试由 scripts/ci/select-tests.mjs 决定 —— 改动集按相对主线的差异
+# 加未提交改动算（提交前后同一份集合），先取依赖闭包，超上限回落到模块映射。
+# 用途是日常迭代的快速反馈 —— 本地 unit 要 110s，fast 应远快于此。
+# **提交前仍必须跑 unit**：依赖闭包只覆盖直接关联，模块映射也可能漏跨模块测试。
 if [ "$STAGE" = "fast" ]; then
-  run_stage lint pnpm lint
+  step select-tests
+  if ! node "$ROOT/scripts/ci/select-tests.mjs" --root "$ROOT" --out "$CI_DIR/selected-tests.json"; then
+    fail "选测试失败：模块映射之外有新文件路径，或依赖集合取不到。"
+  fi
+  read_selected() {
+    node -e '
+      const fs = require("node:fs");
+      const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      for (const value of data[process.argv[2]] ?? []) console.log(value);
+    ' "$CI_DIR/selected-tests.json" "$1"
+  }
+
+  # lint 只查这次改动的 JS/TS 文件；一个都没改就从判据计划里摘掉，全量留给 unit。
+  mapfile -t fast_lint_files < <(read_selected lintFiles)
+  if [ "${#fast_lint_files[@]}" -gt 0 ]; then
+    run_stage lint pnpm exec eslint --max-warnings 0 "${fast_lint_files[@]}"
+  else
+    skip_stage "lint" "本次没有改动的 JS/TS 文件（全量 lint 在 unit 档）"
+  fi
   run_stage component-check run_component_check changed
   step test
   started="$(date +%s%3N 9>&-)"
   rm -f "$CI_DIR/vitest.json"
   # 两个集合都要跑：
-  #   1. 受 git 改动影响的测试（--changed）
+  #   1. 选出来的测试（精确集合或模块映射）
   #   2. 快信道的守门测试：文档守门四个（查 wiki/ 与 HANDOFF，
-  #      --changed 对 md 改动关联不到它们）与样式守门（R-039 第一道门，
+  #      选测试按路径映射关联不到它们）与样式守门（R-039 第一道门，
   #      扫 client/ 与改动文件无关）。
-  # 用 --changed 与显式文件混跑会让 vitest 只按 changed 过滤，所以分两次：
+  # 已不再用 vitest 的旧改动过滤开关：它只认未提交改动，且与显式文件混跑会过滤掉守门。
+  mapfile -t fast_tests < <(read_selected tests)
+  if [ "${#fast_tests[@]}" -eq 0 ]; then
+    # 纯文档改动：第一份报告要产出「0 条」，不能因为没给文件参数而跑成全量。
+    fast_tests=("tests/__r084_no_tests__")
+  fi
   fast_ok=1
-  pnpm exec vitest run --maxWorkers="$GATE_VITEST_WORKERS" --changed --reporter=default \
+  pnpm exec vitest run --maxWorkers="$GATE_VITEST_WORKERS" "${fast_tests[@]}" --reporter=default \
     --reporter=json --outputFile.json="$CI_DIR/vitest-fast-changed.json" 9>&- \
     || fast_ok=0
   # 镜像里没有仓库级文档，四个文档守门不在导出树里，跳过；样式守门扫的是

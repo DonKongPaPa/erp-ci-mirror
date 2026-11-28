@@ -9,6 +9,7 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { useCallback, useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
 import { Link, Outlet, useLocation, useParams, useResolvedPath } from 'react-router';
 
+import { ActionGlyph } from '#components/action-glyph';
 import { ConfirmDialog } from '#components/erp/confirm';
 import {
   DocumentHeaderFields,
@@ -303,12 +304,13 @@ export default function StocktakingDetailPage(): ReactElement {
                   disabled={busy}
                   onClick={() => setVoidingOpen(true)}
                 >
+                  <ActionGlyph action='void' />
                   {t('stocktaking.actions.void')}
                 </Button>
               ) : null}
               {/* 结束盘点只按会话实际持有的 finish 动作显隐，不按角色名猜。 */}
               {stock.status === 'staging' && finish.can ? (
-                <PendingButton busy={busy} onClick={() => setFinishing(true)}>
+                <PendingButton busy={busy} action='post' onClick={() => setFinishing(true)}>
                   {t('stocktaking.actions.finish')}
                 </PendingButton>
               ) : null}

@@ -41,7 +41,7 @@ const DOC_FIELDS = [
   'customerOrderNo', 'projectCode', 'handlerUserId', 'takerDepartmentId',
   'takerUserId', 'discountAmount', 'totalQty', 'taxIncludedTotal',
   'taxExcludedTotal', 'taxTotal', 'payableTotal',
-  'stocktakingId', 'transferDocId',
+  'stocktakingId', 'transferDocId', 'returnDocId',
   'printCount', 'lastPrintedAt', 'lastPrintedBy',
   'inspectionId',
 ].sort();

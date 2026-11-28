@@ -10,6 +10,7 @@ import {
 import { Tooltip } from '@base-ui/react/tooltip';
 import { cn } from 'cn';
 import { Button } from '#components/ui/button';
+import { ACTION_ICONS, type ActionIconKey } from '#lib/action-icons';
 import { BrandLoadingMark } from './brand-loading-mark.js';
 
 export interface PendingButtonProps extends Omit<
@@ -20,6 +21,8 @@ export interface PendingButtonProps extends Omit<
   readonly identity?: unknown;
   readonly pendingLabel?: string;
   readonly longWaitLabel?: string;
+  /** 主操作键：从 action-icons 取图标放文字左边；没有对应图标的动作不传。 */
+  readonly action?: ActionIconKey;
   readonly children: ReactNode;
   readonly className?: string;
 }
@@ -30,6 +33,7 @@ export function PendingButton({
   identity,
   pendingLabel,
   longWaitLabel,
+  action,
   children,
   ref,
   disabled,
@@ -38,6 +42,7 @@ export function PendingButton({
   ...props
 }: PendingButtonProps): ReactElement {
   const { t } = useTranslation();
+  const Icon = action ? ACTION_ICONS[action] : undefined;
   const anchorRef = useRef<HTMLButtonElement>(null);
   useImperativeHandle(ref, () => anchorRef.current!, []);
   const feedback = usePendingFeedback(busy, identity);
@@ -67,6 +72,9 @@ export function PendingButton({
             )}
             aria-hidden={feedback.visible || undefined}
           >
+            {Icon ? (
+              <Icon data-icon='inline-start' aria-hidden='true' />
+            ) : null}
             {children}
           </span>
           <span

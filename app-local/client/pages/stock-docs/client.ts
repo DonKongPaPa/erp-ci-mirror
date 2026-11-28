@@ -65,6 +65,8 @@ export interface StockDoc {
   readonly remark: string;
   readonly sourceType: SourceType | null;
   readonly sourceId: string | null;
+  /** R-070：采购入库单来自哪张检验单；老单据没有这个键。 */
+  readonly inspectionId?: string | null;
   readonly createdById: string;
   readonly postedAt: string | null;
   readonly postedById: string | null;
@@ -102,6 +104,8 @@ export interface StockLineInput {
   readonly batchNo?: string;
   /** 大于 0，小数最多四位。 */
   readonly qty: number;
+  /** R-070：带检验单建采购入库时指到检验明细行；普通入库不传。 */
+  readonly inspectionLineId?: string;
   readonly taxIncludedPrice?: number | null;
   readonly taxExcludedPrice?: number | null;
   readonly taxRate?: number | null;
@@ -132,6 +136,8 @@ export interface CreateStockDocInput extends StockWriteFields {
   readonly remark?: string;
   readonly sourceType?: SourceType | null;
   readonly sourceId?: string | null;
+  /** R-070：只对 reason=purchase_receipt 生效；不带这个键的请求逐字节照旧。 */
+  readonly inspectionId?: string;
   readonly lines: readonly StockLineInput[];
 }
 
@@ -191,6 +197,8 @@ function lineFields(line: StockLineInput): Record<string, unknown> {
     warehouseId: line.warehouseId,
     batchNo: line.batchNo,
     qty: line.qty,
+    // 只有选了检验单的行才带；普通入库的请求体没有这个键。
+    ...(line.inspectionLineId ? { inspectionLineId: line.inspectionLineId } : {}),
     ...optional({
       taxIncludedPrice: line.taxIncludedPrice,
       taxExcludedPrice: line.taxExcludedPrice,
@@ -237,6 +245,8 @@ export class StockDocsClient {
         ...(input.sourceType && input.sourceId
           ? { sourceType: input.sourceType, sourceId: input.sourceId }
           : {}),
+        // 不带检验单时不出现这个键，老请求逐字节不变。
+        ...(input.inspectionId ? { inspectionId: input.inspectionId } : {}),
         ...writeFields(input),
         lines: input.lines.map(lineFields),
       },

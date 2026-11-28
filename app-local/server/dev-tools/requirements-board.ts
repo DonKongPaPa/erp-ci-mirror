@@ -26,6 +26,8 @@ export interface ParsedRequirement {
 
 export interface RequirementBoardItem extends ParsedRequirement {
   readonly lastEntry: FollowUpEntry | null;
+  /** 这一条的全部跟进记录，按时间升序；没有就是空数组（看板抽屉的时间线用）。 */
+  readonly entries: readonly FollowUpEntry[];
   readonly blocking: Blocking;
   readonly blockingDetail: string;
 }
@@ -88,10 +90,7 @@ export function parseRequirementsPool(markdown: string): {
   for (const line of lines.slice(start + 1, end)) {
     if (!REQUIREMENT_ROW.test(line)) continue;
     pool += 1;
-    const cells = line
-      .split('|')
-      .slice(1, -1)
-      .map(stripCell);
+    const cells = line.split('|').slice(1, -1).map(stripCell);
     if (cells.length < 7) {
       skipped += 1;
       continue;
@@ -111,19 +110,26 @@ export function parseRequirementsPool(markdown: string): {
   return { rows, skipped, pool };
 }
 
-/** 每个 `## R-xxx` 小节的最新一条（倒序，标题下第一条就是最新的）。 */
-export function parseFollowUps(markdown: string): ReadonlyMap<string, FollowUpEntry> {
-  const entries = new Map<string, FollowUpEntry>();
+interface CollectedEntry {
+  readonly id: string;
+  readonly at: string;
+  readonly text: string;
+}
+
+/** 走一遍跟进记录：每个 `## R-xxx` 小节下的每一条 `- **时间** 正文`，带续行，按文件里的顺序。 */
+function collectFollowUps(markdown: string, limit: number): CollectedEntry[] {
+  const collected: CollectedEntry[] = [];
   let currentId: string | undefined;
   let collecting = false;
   let at = '';
   let parts: string[] = [];
 
   const finish = (): void => {
-    if (collecting && currentId !== undefined && !entries.has(currentId)) {
-      entries.set(currentId, {
+    if (collecting && currentId !== undefined) {
+      collected.push({
+        id: currentId,
         at,
-        text: stripCell(parts.join(' ')).slice(0, 160),
+        text: stripCell(parts.join(' ')).slice(0, limit),
       });
     }
     collecting = false;
@@ -149,7 +155,42 @@ export function parseFollowUps(markdown: string): ReadonlyMap<string, FollowUpEn
     }
   }
   finish();
+  return collected;
+}
+
+const momentOf = (at: string): number => {
+  const moment = Date.parse(at);
+  return Number.isNaN(moment) ? 0 : moment;
+};
+
+/** 每个 `## R-xxx` 小节的最新一条（倒序，标题下第一条就是最新的）。 */
+export function parseFollowUps(
+  markdown: string,
+): ReadonlyMap<string, FollowUpEntry> {
+  const entries = new Map<string, FollowUpEntry>();
+  for (const { id, ...entry } of collectFollowUps(markdown, 160)) {
+    if (!entries.has(id)) entries.set(id, entry);
+  }
   return entries;
+}
+
+/**
+ * 每个 `## R-xxx` 小节的全部跟进记录，按时间升序（文件是倒序写的），文字给全文不截断。
+ * 没有跟进的需求不在表里，由调用方按空数组处理。
+ */
+export function parseAllFollowUps(
+  markdown: string,
+): ReadonlyMap<string, readonly FollowUpEntry[]> {
+  const grouped = new Map<string, FollowUpEntry[]>();
+  for (const { id, ...entry } of collectFollowUps(markdown, Infinity)) {
+    const list = grouped.get(id);
+    if (list) list.push(entry);
+    else grouped.set(id, [entry]);
+  }
+  for (const list of grouped.values()) {
+    list.sort((left, right) => momentOf(left.at) - momentOf(right.at));
+  }
+  return grouped;
 }
 
 /**
@@ -174,9 +215,7 @@ export function blockingFor(
     return { blocking: '待设计', blockingDetail: '' };
   }
   if (status === '方案已定') {
-    const waiting = hardDeps.filter(
-      (dep) => statusById.get(dep) !== '已实现',
-    );
+    const waiting = hardDeps.filter((dep) => statusById.get(dep) !== '已实现');
     return waiting.length > 0
       ? { blocking: '等依赖', blockingDetail: waiting.join(', ') }
       : { blocking: '可开工', blockingDetail: '' };
@@ -191,13 +230,15 @@ export function buildRequirementsBoard(
   generatedAt: string = new Date().toISOString(),
 ): RequirementsBoardSnapshot {
   const { rows, skipped, pool } = parseRequirementsPool(poolMarkdown);
-  const entries = parseFollowUps(followUpMarkdown);
+  const latest = parseFollowUps(followUpMarkdown);
+  const all = parseAllFollowUps(followUpMarkdown);
   const statusById = new Map(rows.map((row) => [row.id, row.status]));
   const requirements = rows.map((row) => {
-    const lastEntry = entries.get(row.id) ?? null;
+    const lastEntry = latest.get(row.id) ?? null;
     return {
       ...row,
       lastEntry,
+      entries: all.get(row.id) ?? [],
       ...blockingFor(row.status, row.hardDeps, statusById, lastEntry),
     };
   });

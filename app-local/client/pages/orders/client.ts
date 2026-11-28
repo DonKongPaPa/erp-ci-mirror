@@ -67,6 +67,8 @@ export interface OrderHeaderFields {
   readonly payableTotal?: number | null;
   readonly latestDeliveryDate?: string | null;
   readonly paidAmount?: number | null;
+  /** R-065 第二片：销售订单详情的已收金额，服务端按已确认收入记录重算。 */
+  readonly receivedAmount?: number | null;
   readonly invoicedAmount?: number | null;
   readonly files?: readonly DocFile[];
 }
@@ -79,6 +81,8 @@ export interface Order extends OrderHeaderFields {
   readonly orderDate: string;
   /** 请购单转出的采购订单才带；详情把它画成回链。 */
   readonly purchaseRequestId?: string | null;
+  /** D-077：回链上显示的单据号；没有来源时是 undefined。 */
+  readonly purchaseRequestDocNo?: string | null;
   readonly status: OrderStatus;
   /** 端点上的状态值，照原样留着（遇到没登记的状态时显示它）。 */
   readonly apiStatus: string;
@@ -186,6 +190,8 @@ export interface OrderResponse extends OrderHeaderFields {
   readonly orderNo: string;
   /** 请购单转单时带上；详情用它回链到请购单（R-021 加片）。 */
   readonly purchaseRequestId?: string | null;
+  /** D-077：回链上显示的单据号；没有来源时端点不带这个键。 */
+  readonly purchaseRequestDocNo?: string | null;
   readonly status: string;
   readonly orderDate: string;
   readonly remark: string;
@@ -281,6 +287,7 @@ export function toOrder(def: OrderKindDef, raw: OrderResponse): Order {
       payableTotal: raw.payableTotal,
       latestDeliveryDate: raw.latestDeliveryDate,
       paidAmount: raw.paidAmount,
+      receivedAmount: raw.receivedAmount,
       invoicedAmount: raw.invoicedAmount,
       files: raw.files,
     }),
@@ -289,7 +296,10 @@ export function toOrder(def: OrderKindDef, raw: OrderResponse): Order {
     partnerId: purchase ? (raw.supplierId ?? '') : (raw.customerId ?? ''),
     partner: purchase ? (raw.supplier ?? null) : (raw.customer ?? null),
     orderDate: raw.orderDate,
-    ...optional({ purchaseRequestId: raw.purchaseRequestId }),
+    ...optional({
+      purchaseRequestId: raw.purchaseRequestId,
+      purchaseRequestDocNo: raw.purchaseRequestDocNo,
+    }),
     status:
       def.statuses.find((entry) => entry.api === raw.status)?.value ??
       'unknown',

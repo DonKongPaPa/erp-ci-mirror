@@ -351,7 +351,7 @@ function RequestForm({
               <Button variant='outline' disabled={busy} onClick={leavePage}>
                 {t('actions.cancel')}
               </Button>
-              <PendingButton type='submit' form={formId} busy={busy}>
+              <PendingButton type='submit' form={formId} busy={busy} action='save'>
                 {t('purchaseRequests.actions.saveDraft')}
               </PendingButton>
             </>

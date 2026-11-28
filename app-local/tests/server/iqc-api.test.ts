@@ -248,3 +248,51 @@ test('IQC 作废只限 pending，完成后另一张单仍按余额校验收货',
   expect(completed.status).toBe(200);
   expect((await jsonOf(completed)).status).toBe('partial');
 }, 30_000);
+
+/**
+ * R-070 页面片新增的选单数据源：只读、走 inspectionOrders.view，仓管只有 receiveView 拿不到。
+ * 行的尚可收货数量按其它未作废检验单已占的收货数量扣减，四个算列仍由写端点算。
+ */
+test('IQC 页面片：order-options 按 view 授权并回可检行与已占余额', async ({
+  testApp, connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const inspector = await makeRoleUser(admin, testApp, 'iqcoptinsp', 'quality_inspector');
+  await createEmployee(connection, inspector.id);
+  const buyer = await makeRoleUser(admin, testApp, 'iqcoptbuyer', 'purchase');
+  const keeper = await makeRoleUser(admin, testApp, 'iqcoptkeep', 'warehouse');
+  const itemId = await createItem(connection);
+  const order = await submittedPurchase(admin, itemId);
+
+  const before = await inspector.session.fetch('/inspections/order-options');
+  expect(before.status, `选单失败：${await before.clone().text()}`).toBe(200);
+  const list = await jsonOf(before);
+  const option = (list.items as Row[]).find((row) => row.id === order.id);
+  expect(option).toBeDefined();
+  expect(option?.orderNo).toBe(order.orderNo);
+  const optionLine = (option?.lines as Row[])[0]!;
+  expect(Number(optionLine.purchaseQty)).toBe(10);
+  expect(Number(optionLine.receivedRemainQty)).toBe(10);
+  expect(Object.keys(optionLine.item as Row).sort()).toEqual([
+    'code', 'id', 'name', 'spec', 'unitCode',
+  ]);
+  for (const key of FORBIDDEN_KEYS) {
+    expect(Object.keys(optionLine), `选单行不该回 ${key}`).not.toContain(key);
+  }
+
+  // 建一张收货 6 的检验单后，尚可收货数量从 10 降到 4。
+  const created = await inspector.session.fetch('/inspections', write({
+    purchaseOrderId: order.id,
+    lines: [line(itemId, { receivedQty: 6, inspectionQty: 5, qualifiedQty: 5 })],
+  }));
+  expect(created.status).toBe(201);
+  const after = await jsonOf(await inspector.session.fetch('/inspections/order-options'));
+  const optionAfter = (after.items as Row[]).find((row) => row.id === order.id);
+  expect(Number((optionAfter?.lines as Row[])[0]!.receivedRemainQty)).toBe(4);
+
+  expect((await buyer.session.fetch('/inspections/order-options')).status, '采购有 view').toBe(200);
+  expect(
+    (await keeper.session.fetch('/inspections/order-options')).status,
+    '仓管只有 receiveView，拿不到选单数据源',
+  ).toBe(403);
+}, 30_000);

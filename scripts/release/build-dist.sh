@@ -31,8 +31,14 @@ DEV_TOOLS_DIST_MODULES=(
   dist/server/dev-tools/settings
   dist/server/dev-tools/requirements-board
   dist/server/dev-tools/requirements-board-files
+  dist/server/dev-tools/confirmations
+  dist/server/dev-tools/confirmations-files
+  dist/server/dev-tools/feedback
+  dist/server/dev-tools/feedback-files
   dist/server/routes/dev-account-switcher
   dist/server/routes/dev-requirements-board
+  dist/server/routes/dev-confirmations
+  dist/server/routes/dev-feedback
   dist/server/providers/dev-account-switcher
   dist/server/config/dev-tools
 )

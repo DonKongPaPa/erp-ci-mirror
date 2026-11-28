@@ -1,6 +1,14 @@
-import type { MouseEvent, ReactElement, ReactNode } from 'react';
+import {
+  createElement,
+  type ComponentProps,
+  type MouseEvent,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import { EllipsisVerticalIcon } from 'lucide-react';
 import { Button } from '#components/ui/button';
+import { iconForAction, type ActionIconKey } from '#lib/action-icons';
+import { iconForRowAction } from '#lib/row-action-icons';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,8 +20,10 @@ import {
 
 /** One action on a table row or phone card. */
 export interface RowAction {
-  /** Stable identifier; `exposed` names actions by it. */
+  /** Stable identifier; `exposed` names actions by it and it selects the action icon. */
   readonly key: string;
+  /** 覆盖动作键推出的图标；用于键与动作名不一致的菜单项。 */
+  readonly icon?: ActionIconKey;
   /** A verb only, such as "Edit": the row names the record (C3). */
   readonly label: ReactNode;
   readonly onClick?: () => void;
@@ -73,20 +83,31 @@ export function RowActions({
       className='flex items-center justify-end gap-1 whitespace-nowrap'
       onClick={stop}
     >
-      {outside.map((action) => (
-        <Button
-          key={action.key}
-          variant={action.destructive ? 'destructive' : 'ghost'}
-          size='sm'
-          disabled={action.disabled}
-          onClick={action.onClick}
-          {...(action.render
-            ? { render: action.render, nativeButton: false }
-            : {})}
-        >
-          {action.label}
-        </Button>
-      ))}
+      {outside.map((action) => {
+        const glyph = action.icon
+          ? iconForAction(action.icon)
+          : iconForRowAction(action.key, action.label);
+        return (
+          <Button
+            key={action.key}
+            variant={action.destructive ? 'destructive' : 'ghost'}
+            size='sm'
+            disabled={action.disabled}
+            onClick={action.onClick}
+            {...(action.render
+              ? { render: action.render, nativeButton: false }
+              : {})}
+          >
+            {glyph
+              ? createElement(glyph, {
+                  'data-icon': 'inline-start',
+                  'aria-hidden': true,
+                } as ComponentProps<typeof glyph>)
+              : null}
+            {action.label}
+          </Button>
+        );
+      })}
       {inside.length > 0 ? (
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -129,6 +150,10 @@ function RowActionItem({
 }: {
   readonly action: RowAction;
 }): ReactElement {
+  // 行内操作仍在 ⋮ 菜单里（T1.5）：先按动作键、再按键名与文案兜底，每类菜单项都有图标。
+  const glyph = action.icon
+    ? iconForAction(action.icon)
+    : iconForRowAction(action.key, action.label);
   return (
     <DropdownMenuItem
       variant={action.destructive ? 'destructive' : 'default'}
@@ -136,6 +161,7 @@ function RowActionItem({
       onClick={action.onClick}
       render={action.render}
     >
+      {glyph ? createElement(glyph, { 'aria-hidden': true }) : null}
       {action.label}
     </DropdownMenuItem>
   );

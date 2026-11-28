@@ -1,5 +1,6 @@
 import { groupFoundationNavigation } from '@nocobase/app-plugin-foundation/client';
 import type { AppClientRegisteredRoute } from '@nocobase/app-client/plugins';
+import { AI_ROUTE_NAMES, organizeCompanyNavigation } from './business-navigation.js';
 import type { RouteNavigationItem } from '../routing/route-navigation.js';
 
 /**
@@ -21,7 +22,7 @@ export function organizeNavigation(
   routes: readonly AppClientRegisteredRoute[],
 ): RouteNavigationItem[] {
   return groupFoundationNavigation(
-    withSettingsGroup(items, routes),
+    organizeCompanyNavigation(withSettingsGroup(items, routes), routes),
     SETTINGS_GROUP,
   );
 }
@@ -32,31 +33,24 @@ export function transformNavigation(
   routes: readonly AppClientRegisteredRoute[],
 ): RouteNavigationItem[] {
   const organized = organizeNavigation(items, routes);
-  const hasGuide = organized.some(
-    (item) =>
-      item.route.name === SETTINGS_GROUP &&
-      item.children.some(
-        (child) =>
-          child.route.packageName === '@nocobase/app-plugin-foundation' &&
-          child.route.name === 'capabilityGuide',
-      ),
-  );
+  // 介绍页与挪进设置的 AI 页面都由「系统设置」这个入口代表，选中态要跟着走。
+  const collect = (
+    nodes: readonly AppClientRegisteredRoute[],
+  ): readonly AppClientRegisteredRoute[] =>
+    nodes.flatMap((route) => [route, ...collect(route.children ?? [])]);
+  const extraKeys = collect(routes)
+    .filter(
+      (route) =>
+        (route.packageName === '@nocobase/app-plugin-foundation' &&
+          ['capabilityGuide', 'capabilityGuideEntry'].includes(route.name)) ||
+        AI_ROUTE_NAMES.includes(route.name),
+    )
+    .map((route) => `${route.packageName}:${route.path}:${route.id}`);
   return collapseSettingsNavigation(organized).map((item) =>
-    hasGuide && item.route.name === SETTINGS_HOME
+    item.route.name === SETTINGS_HOME
       ? {
           ...item,
-          activeRouteKeys: [
-            ...(item.activeRouteKeys ?? []),
-            ...routes
-              .filter(
-                (route) =>
-                  route.packageName === '@nocobase/app-plugin-foundation' &&
-                  ['capabilityGuide', 'capabilityGuideEntry'].includes(
-                    route.name,
-                  ),
-              )
-              .map((route) => `${route.packageName}:${route.path}:${route.id}`),
-          ],
+          activeRouteKeys: [...(item.activeRouteKeys ?? []), ...extraKeys],
         }
       : item,
   );

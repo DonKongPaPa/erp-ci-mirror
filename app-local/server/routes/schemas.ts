@@ -1186,3 +1186,156 @@ export const ImportParseResponseSchema = z.object({
   headers: z.array(z.string()),
   issues: z.array(ImportIssueSchema),
 });
+
+/* -------------------------------------------------------------------------- */
+/* R-019 波 2：BOM（头、配件行、版本选取与展开）                                */
+/* -------------------------------------------------------------------------- */
+
+const bomDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u);
+const bomId = z.string().min(1).max(64);
+const bomNullableText = (max: number) =>
+  z.union([z.string().min(1).max(max), z.null()]).optional();
+
+export const BomLineSchema = z.object({
+  id: z.string(),
+  lineNo: z.number().int(),
+  itemId: z.string(),
+  qty: z.number(),
+  lossRate: z.number(),
+  childBomId: z.string().nullable(),
+  note: z.string().nullable(),
+  // 七个键，不含两个基准价：它们是 items 上另一把锁管的列。
+  item: z.object({
+    id: z.string(),
+    code: z.string(),
+    name: z.string(),
+    spec: z.string().nullable(),
+    unitCode: z.string(),
+    brand: z.string().nullable(),
+    manufacturerModel: z.string().nullable(),
+  }),
+});
+
+export const BomBriefSchema = z.object({
+  bomId: z.string(),
+  docNo: z.string(),
+  version: z.string(),
+  productId: z.string(),
+  isDefault: z.boolean(),
+  effectiveFrom: z.string(),
+  effectiveTo: z.string().nullable(),
+});
+
+export const BomSchema = z.object({
+  id: z.string(),
+  docNo: z.string(),
+  version: z.string(),
+  product: z.object({
+    id: z.string(), code: z.string(), name: z.string(),
+    spec: z.string().nullable(), unitCode: z.string(),
+  }),
+  isDefault: z.boolean(),
+  effectiveFrom: z.string(),
+  effectiveTo: z.string().nullable(),
+  dailyOutput: z.number().nullable(),
+  status: z.enum(['active', 'inactive']),
+  remark: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  lines: z.array(BomLineSchema),
+  files: z.array(z.object({
+    id: z.string(), name: z.string(), contentType: z.string(), size: z.number(),
+  })),
+});
+export const BomListSchema = z.object({
+  items: z.array(BomSchema),
+  total: z.number(),
+  page: z.number(),
+  pageSize: z.number(),
+});
+
+export const ExplodeResultSchema = z.object({
+  productId: z.string(),
+  asOf: z.string(),
+  levels: z.number(),
+  root: BomBriefSchema,
+  nodes: z.array(z.object({
+    nodeId: z.string(),
+    parentNodeId: z.string().nullable(),
+    bomId: z.string(),
+    docNo: z.string(),
+    version: z.string(),
+    itemId: z.string(),
+    item: z.object({
+      id: z.string(), code: z.string(), name: z.string(),
+      spec: z.string().nullable(), unitCode: z.string(),
+    }),
+    qtyPerUnit: z.number(),
+    lossRate: z.number(),
+    effectiveQty: z.number(),
+    depth: z.number(),
+  })),
+  totals: z.array(z.object({
+    itemId: z.string(), code: z.string(), name: z.string(),
+    unitCode: z.string(), qty: z.number(),
+    basePurchasePrice: z.number().nullable().optional(),
+    estimatedCost: z.number().nullable().optional(),
+  })),
+  cycles: z.array(z.array(z.string())),
+});
+
+export const BomListQuery = z.object({
+  ...listPaging,
+  productId: bomId.optional(),
+  status: z.enum(['active', 'inactive']).optional(),
+  effectiveOn: bomDate.optional(),
+});
+
+/** levels 先按字符串收，端点自己解析成 1 / n / all，非法值映射成 400 规则码。 */
+export const ExplodeQuery = z.object({
+  productId: bomId,
+  asOf: bomDate,
+  levels: z.string().optional(),
+  includeCost: z.enum(['0', '1']).optional(),
+});
+export type ExplodeQueryInput = z.infer<typeof ExplodeQuery>;
+
+export const EffectiveQuery = z.object({
+  productId: bomId,
+  asOf: bomDate,
+});
+
+const bomLineBody = z.object({
+  itemId: bomId,
+  qty: z.number(),
+  lossRate: z.number().optional(),
+  childBomId: bomId.optional(),
+  note: bomNullableText(500),
+});
+
+/** docNo 由发号器写，请求体里给了也剥掉；version 由请求体给。 */
+export const CreateBomBody = z.object({
+  version: z.string().min(1).max(16),
+  productId: bomId,
+  isDefault: z.boolean().optional(),
+  effectiveFrom: bomDate,
+  effectiveTo: bomDate.nullable().optional(),
+  dailyOutput: z.number().nullable().optional(),
+  remark: z.string().max(1000).optional(),
+  fileIds: z.array(z.string().min(1)).max(10).optional(),
+  lines: z.array(bomLineBody),
+});
+export type CreateBomBodyInput = z.infer<typeof CreateBomBody>;
+
+export const UpdateBomBody = z.object({
+  version: z.string().min(1).max(16).optional(),
+  isDefault: z.boolean().optional(),
+  effectiveFrom: bomDate.optional(),
+  effectiveTo: bomDate.nullable().optional(),
+  dailyOutput: z.number().nullable().optional(),
+  status: z.enum(['active', 'inactive']).optional(),
+  remark: z.string().max(1000).optional(),
+  fileIds: z.array(z.string().min(1)).max(10).optional(),
+  lines: z.array(bomLineBody).optional(),
+});
+export type UpdateBomBodyInput = z.infer<typeof UpdateBomBody>;

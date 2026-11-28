@@ -28,6 +28,8 @@ export interface LineFormValues {
   readonly warehouseId: string;
   readonly batchNo: string;
   readonly qty: string;
+  /** R-070：从检验单选行时记下检验明细 id，普通入库是空串。 */
+  readonly inspectionLineId: string;
   readonly taxIncludedPrice: string;
   readonly taxExcludedPrice: string;
   readonly taxRate: string;
@@ -56,6 +58,8 @@ export interface DocFormValues {
   /** 带来源的单：从订单选择时带入，与明细一起保存；端点据此校验行与数量。 */
   readonly sourceType: 'purchase_order' | 'sales_order' | null;
   readonly sourceId: string | null;
+  /** R-070：采购入库从检验单选单时记录检验单 id；空串不发送。 */
+  readonly inspectionId: string;
   /** 端点回过加片的键才在编辑时送 null 清空；老单据不夹带新键。 */
   readonly hasAddons: boolean;
 }
@@ -68,6 +72,7 @@ export const emptyLine = (): LineFormValues => ({
   warehouseId: '',
   batchNo: '',
   qty: '',
+  inspectionLineId: '',
   taxIncludedPrice: '',
   taxExcludedPrice: '',
   taxRate: '',
@@ -91,6 +96,7 @@ const blank = {
   fileIds: [],
   sourceType: null,
   sourceId: null,
+  inspectionId: '',
   hasAddons: false,
 } as const;
 
@@ -112,6 +118,7 @@ export const formOf = (doc: StockDoc): DocFormValues => ({
     warehouseId: line.warehouseId,
     batchNo: line.batchNo,
     qty: String(line.qty),
+    inspectionLineId: '',
     taxIncludedPrice:
       line.taxIncludedPrice === null || line.taxIncludedPrice === undefined
         ? ''
@@ -142,6 +149,7 @@ export const formOf = (doc: StockDoc): DocFormValues => ({
   fileIds: (doc.files ?? []).map((file) => file.id),
   sourceType: doc.sourceType ?? null,
   sourceId: doc.sourceId ?? null,
+  inspectionId: doc.inspectionId ?? '',
   hasAddons:
     doc.docDate !== undefined ||
     doc.partnerId !== undefined ||
@@ -174,6 +182,8 @@ export interface DocInput {
   readonly remark: string;
   readonly sourceType?: 'purchase_order' | 'sales_order' | null;
   readonly sourceId?: string | null;
+  /** R-070：只有从检验单选单时才有；空串不带。 */
+  readonly inspectionId?: string;
   readonly docDate?: string | null;
   readonly partnerId?: string | null;
   readonly contactName?: string | null;
@@ -221,6 +231,9 @@ export function inputOf(values: DocFormValues, selectable?: SelectableRefs): Doc
     remark: values.remark.trim(),
     sourceType: values.sourceType,
     sourceId: values.sourceId,
+    ...((values.inspectionId ?? '').trim()
+      ? { inspectionId: values.inspectionId.trim() }
+      : {}),
     docDate: text(values.docDate, clear),
     partnerId: text(values.partnerId, clear),
     contactName: text(values.contactName, clear),
@@ -243,6 +256,9 @@ export function inputOf(values: DocFormValues, selectable?: SelectableRefs): Doc
         warehouseId: line.warehouseId,
         batchNo: line.batchNo.trim(),
         qty: parseQty(line.qty) ?? 0,
+        ...((line.inspectionLineId ?? '').trim()
+          ? { inspectionLineId: line.inspectionLineId.trim() }
+          : {}),
         ...((line.taxIncludedPrice ?? '').trim()
           ? { taxIncludedPrice: Number(line.taxIncludedPrice) }
           : clear ? { taxIncludedPrice: null } : {}),

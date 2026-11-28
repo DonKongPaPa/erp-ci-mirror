@@ -245,43 +245,40 @@ describe('System settings navigation', () => {
           ['applicationApiKeysManagement', '/settings/api-keys'],
         ],
       ],
+    [
+      'settingsAi',
       [
-        'settingsSystem',
-        [
-          ['notificationManagement', '/settings/notifications/logs'],
-          ['imports', '/settings/imports'],
-          ['databaseExplorer', '/settings/database-explorer'],
-        ],
+        ['models', '/models'],
+        ['agents', '/agents'],
+        ['runtimes', '/runtimes'],
+        ['skills', '/skills'],
+        ['usage', '/usage'],
       ],
-    ]);
+    ],
+    [
+      'settingsSystem',
+      [
+        ['notificationManagement', '/settings/notifications/logs'],
+        ['imports', '/settings/imports'],
+        ['databaseExplorer', '/settings/database-explorer'],
+      ],
+    ],
+  ]);
     expect(
       buildRouteNavigation(routes, new Set()).map(({ route }) => route.name),
-      // 人事、客户与供应商、物料与库存、采购订单、销售订单排在质量工单前面（《基座ERP前端设计》1.1）。
+      // R-085 加片：顶层只留首页与业务组；AI 五页挪进系统设置。
     ).toEqual([
       'home',
       'hr',
-      'partners',
-      // 物料与库存排在客户与供应商后面、质量工单前面（《基座ERP前端设计》1.1）。
+      'businessMasterData',
+      'businessPurchase',
+      'businessSales',
+      'businessFinance',
+      'businessQuality',
       'inventory',
-      'purchaseOrders',
-      'purchaseRequests',
-      'salesOrders',
-      // R-022 波 2：报价单排在销售订单之后、业务字典之前。
-      'quotations',
-      // R-064：订单总台账排在销售订单后面，不动已有顺序。
-      'orderLedger',
-      // R-072：业务字典维护页，只给管理入口 root；排在系统设置前面，不动已有顺序。
-      'bizDict',
-      // R-066：请款单与报销单排在业务字典后、支出记录前，不动已有顺序。
-      'financeRequests',
-      // R-065：财务的两张记录页排在业务字典后、质量工单前。
-      'expenses',
-      'invoiceReceipts',
-      'quality',
-      'feedbacks',
-      // R-017 M5：审批的三个页面进主导航的「审批」分组，排在反馈单之后、AI 之前。
       'approvals',
-      'ai',
+      // 主会话决定（R-078）：报表中心是跨模块工具，保留在侧栏顶层，与 inventory、approvals 同级，不并入业务组。
+      'reports',
       'settingsHome',
     ]);
   });
@@ -314,6 +311,16 @@ it('hides the notification module and the application API keys card when their p
       ],
     ],
     [
+      'settingsAi',
+      [
+        ['models', '/models'],
+        ['agents', '/agents'],
+        ['runtimes', '/runtimes'],
+        ['skills', '/skills'],
+        ['usage', '/usage'],
+      ],
+    ],
+    [
       'settingsSystem',
       [
         ['notificationManagement', '/settings/notifications/templates'],
@@ -336,6 +343,16 @@ it('hides the notification module and the application API keys card when their p
         ['settingsEmployees', '/settings/employees'],
         ['permissionManagement', '/settings/roles'],
         ['applicationApiKeysManagement', '/settings/api-keys'],
+      ],
+    ],
+    [
+      'settingsAi',
+      [
+        ['models', '/models'],
+        ['agents', '/agents'],
+        ['runtimes', '/runtimes'],
+        ['skills', '/skills'],
+        ['usage', '/usage'],
       ],
     ],
     [
@@ -386,6 +403,16 @@ it('places database browsing in System and hides its card when access is denied'
       ],
     ],
     [
+      'settingsAi',
+      [
+        ['models', '/models'],
+        ['agents', '/agents'],
+        ['runtimes', '/runtimes'],
+        ['skills', '/skills'],
+        ['usage', '/usage'],
+      ],
+    ],
+    [
       'settingsSystem',
       [
         ['notificationManagement', '/settings/notifications/logs'],
@@ -403,6 +430,16 @@ it('places database browsing in System and hides its card when access is denied'
         ['settingsEmployees', '/settings/employees'],
         ['permissionManagement', '/settings/roles'],
         ['applicationApiKeysManagement', '/settings/api-keys'],
+      ],
+    ],
+    [
+      'settingsAi',
+      [
+        ['models', '/models'],
+        ['agents', '/agents'],
+        ['runtimes', '/runtimes'],
+        ['skills', '/skills'],
+        ['usage', '/usage'],
       ],
     ],
     [

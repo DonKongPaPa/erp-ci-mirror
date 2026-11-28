@@ -192,6 +192,7 @@ test('列表过滤与详情形状：列表不带明细与供应商，详情带',
   const detail = await jsonOf(await admin.fetch(`${PATH}/${String(order.id)}`, get()));
   expect(detail.lines).toHaveLength(1);
   expect(detail.supplier).toMatchObject({ id: supplier.id });
+  expect(detail, '没有来源的订单不多出单据号键').not.toHaveProperty('purchaseRequestDocNo');
 }, TIMEOUT);
 
 test('生成入库单：默认全量、指定行/部分行、超额与重复生成被拒，取消被单据挡住', async ({

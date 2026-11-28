@@ -262,12 +262,13 @@ describe('R-013: rule and subject file problems are found before any write', () 
             {
               key: 'wildcard-bad-composite-action',
               resource: { type: 'composite', id: '*' },
-              actions: [{ action: 'explode', selection: { type: 'all' } }],
+              // 本片给 boms 新增了 explode 动作；用一个仍未注册的动作钉住原用例的意图。
+              actions: [{ action: 'unknownCompositeAction', selection: { type: 'all' } }],
             },
           ],
         },
       },
-      expected: 'action "explode" is not registered for composite resources',
+      expected: 'action "unknownCompositeAction" is not registered for composite resources',
     },
     {
       name: 'a rule on a resource id that is not registered is a file problem',

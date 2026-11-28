@@ -81,6 +81,8 @@ const expectedAccounts = [
   { username: 'demo.warehouse', name: '演示 · 仓管', role: 'warehouse' },
   { username: 'demo.purchase', name: '演示 · 采购', role: 'purchase' },
   { username: 'demo.sales', name: '演示 · 销售', role: 'sales' },
+  { username: 'demo.finance', name: '演示 · 财务', role: 'finance' },
+  { username: 'demo.planning', name: '演示 · 计划', role: 'planning' },
 ] as const;
 
 interface AccountReader {

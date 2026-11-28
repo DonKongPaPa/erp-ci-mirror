@@ -12,6 +12,7 @@ import { assertActiveCodes, BizDictRuleError } from './biz-dict.js';
 import { CODE_PREFIXES, codeServiceToken, type CodeService } from './codes.js';
 import { docFilesToken, type DocFiles, type DocFileView } from './doc-files.js';
 import { roundAmount } from './doc-amounts.js';
+import { writeBackPayableRecon } from './reconciliation.js';
 
 /**
  * R-065 第一片：支出记录与到票记录的读写服务。
@@ -21,7 +22,7 @@ import { roundAmount } from './doc-amounts.js';
  */
 export type FinanceKind = 'expense' | 'invoiceReceipt';
 export type FinanceStatus = 'draft' | 'confirmed' | 'void';
-export type BindMode = 'purchase_order' | 'none';
+export type BindMode = 'purchase_order' | 'none' | 'payable_recon';
 
 export type FinanceRuleCode =
   | 'finance-not-found'
@@ -32,7 +33,8 @@ export type FinanceRuleCode =
   | 'supplier-mixed'
   | 'dict-code-invalid'
   | 'person-invalid'
-  | 'partner-invalid';
+  | 'partner-invalid'
+  | 'recon-not-open';
 
 export class FinanceRuleError extends Error {
   public constructor(
@@ -52,6 +54,8 @@ export interface FinanceLine {
   readonly id: string;
   readonly recordId: string;
   readonly purchaseOrderId: string;
+  /** R-065 复刻波 2：绑应付对账单时有值，绑采购订单时恒为 null；键始终出现。 */
+  readonly payableReconId: string | null;
   readonly orderNo: string;
   readonly orderPayableAmount: number;
   readonly paidBefore: number;
@@ -127,6 +131,7 @@ export interface FinancePageQuery {
 
 export interface FinanceLineInput {
   readonly purchaseOrderId: string;
+  readonly payableReconId?: string | null;
   readonly amount: number;
   readonly note?: string | null;
 }
@@ -244,7 +249,8 @@ interface HeaderRow {
 interface LineRow {
   id: string;
   record_id: string;
-  purchase_order_id: string;
+  purchase_order_id: string | null;
+  payable_recon_id: string | null;
   order_payable_amount: string | number;
   paid_before?: string | number;
   invoiced_before?: string | number;
@@ -351,8 +357,9 @@ function lineView(kind: FinanceKind, row: LineRow, orderNos: Map<string, string>
   return {
     id: row.id,
     recordId: row.record_id,
-    purchaseOrderId: row.purchase_order_id,
-    orderNo: orderNos.get(row.purchase_order_id) ?? '',
+    purchaseOrderId: row.purchase_order_id ?? '',
+    payableReconId: row.payable_recon_id ?? null,
+    orderNo: row.purchase_order_id === null ? '' : orderNos.get(row.purchase_order_id) ?? '',
     orderPayableAmount: num(row.order_payable_amount),
     paidBefore: kind === 'expense' ? num(row.paid_before ?? 0) : 0,
     invoicedBefore: kind === 'invoiceReceipt' ? num(row.invoiced_before ?? 0) : 0,
@@ -433,7 +440,7 @@ export class DatabaseFinanceReader implements FinanceReader {
     const config = CONFIG[kind];
     const orderIds = lines === undefined
       ? []
-      : [...new Set(lines.map((line) => line.purchase_order_id))];
+      : [...new Set(lines.map((line) => line.purchase_order_id).filter((id): id is string => id !== null))];
     const orderNos = new Map<string, string>();
     if (orderIds.length > 0) {
       const orders = await knex<{ id: string; order_no: string }>('purchase_orders')
@@ -614,11 +621,41 @@ export class DatabaseFinanceMutations implements FinanceMutations {
     _kind: FinanceKind,
     input: FinanceInputLike,
   ): Promise<{ lines: readonly FinanceLineInput[]; supplierId: string | null; total: number }> {
-    if (input.bindMode !== undefined && input.bindMode !== 'purchase_order' && input.bindMode !== 'none') {
+    if (input.bindMode !== undefined && !['purchase_order', 'none', 'payable_recon'].includes(input.bindMode)) {
       return fail('line-invalid', 'bindMode');
     }
     const bindMode = input.bindMode ?? 'purchase_order';
     const lines: readonly FinanceLineInput[] = input.lines ?? [];
+    // R-065 复刻波 2：绑应付对账单 —— 行只引用 payableReconId，供应商由对账单带出。
+    if (bindMode === 'payable_recon') {
+      if (lines.length === 0) return fail('line-invalid', 'empty');
+      const seen = new Set<string>();
+      const suppliers = new Set<string>();
+      for (const line of lines) {
+        if (
+          typeof line.amount !== 'number' || !Number.isFinite(line.amount) ||
+          line.amount <= 0 || roundAmount(line.amount, 2) !== line.amount ||
+          (line.note ?? '').length > 500 ||
+          (line.purchaseOrderId !== undefined && line.purchaseOrderId !== '')
+        ) {
+          return fail('line-invalid', 'amount');
+        }
+        const reconId = line.payableReconId;
+        if (reconId === null || reconId === undefined || reconId === '') return fail('line-invalid', 'recon');
+        if (seen.has(reconId)) return fail('line-invalid', 'duplicated');
+        seen.add(reconId);
+        const recon = await knex<{ id: string; status: string; supplier_id: string }>('payable_recons')
+          .select('id', 'status', 'supplier_id').where({ id: reconId }).first();
+        if (recon === undefined || recon.status !== 'confirmed') return fail('recon-not-open', reconId);
+        suppliers.add(recon.supplier_id);
+      }
+      if (suppliers.size > 1) return fail('supplier-mixed');
+      return {
+        lines,
+        supplierId: [...suppliers][0] || null,
+        total: roundAmount(lines.reduce((sum, line) => sum + line.amount, 0), 2),
+      };
+    }
     if (bindMode === 'purchase_order') {
       if (lines.length === 0) return fail('line-invalid', 'empty');
       const seen = new Set<string>();
@@ -662,28 +699,45 @@ export class DatabaseFinanceMutations implements FinanceMutations {
   ): Promise<void> {
     const config = CONFIG[kind];
     const ids = lines.map((line) => line.purchaseOrderId);
+    const reconIds = lines.map((line) => line.payableReconId)
+      .filter((id): id is string => id !== null && id !== undefined);
     const orders = ids.length === 0
       ? []
       : await knex<OrderRow>('purchase_orders')
         .select('id', 'payable_total', 'paid_amount', 'invoiced_amount')
         .whereIn('id', ids);
+    const recons = reconIds.length === 0
+      ? []
+      : await knex<{ id: string; period_amount: string | number; reconciled_paid_amount: string | number; reconciled_invoice_amount: string | number }>('payable_recons')
+        .select('id', 'period_amount', 'reconciled_paid_amount', 'reconciled_invoice_amount')
+        .whereIn('id', reconIds);
     const byId = new Map(orders.map((order) => [order.id, order]));
+    const reconById = new Map(recons.map((recon) => [recon.id, recon]));
     for (const line of lines) {
-      const order = byId.get(line.purchaseOrderId)!;
+      const order = byId.get(line.purchaseOrderId);
+      const recon = line.payableReconId === null || line.payableReconId === undefined
+        ? undefined : reconById.get(line.payableReconId);
+      const before = kind === 'expense'
+        ? (order === undefined ? num(recon?.reconciled_paid_amount ?? 0) : num(order.paid_amount))
+        : (order === undefined ? num(recon?.reconciled_invoice_amount ?? 0) : num(order.invoiced_amount));
       await knex(config.lineTable).insert({
         id: randomUUID(),
         record_id: recordId,
         purchase_order_id: line.purchaseOrderId,
-        order_payable_amount: nullableNum(order.payable_total) ?? 0,
-        [config.before]: num(kind === 'expense' ? order.paid_amount : order.invoiced_amount),
+        payable_recon_id: line.payableReconId ?? null,
+        order_payable_amount: order === undefined ? num(recon?.period_amount ?? 0) : nullableNum(order.payable_total) ?? 0,
+        [config.before]: before,
         amount: line.amount,
         note: line.note ?? null,
       });
     }
   }
 
-  /** 重算某张订单的已付/已到票：先锁订单头，再按 confirmed 行求和。 */
-  private async writeBack(knex: Knex, kind: FinanceKind, orderIds: readonly string[]): Promise<void> {
+  /** 重算已付/已到票：先锁订单头或对账单头，再按 confirmed 行求和。 */
+  private async writeBack(
+    knex: Knex, kind: FinanceKind, orderIds: readonly string[], reconIds: readonly string[],
+  ): Promise<void> {
+    await writeBackPayableRecon(knex, kind, reconIds);
     const config = CONFIG[kind];
     for (const orderId of [...new Set(orderIds)]) {
       await knex.raw('select id from purchase_orders where id = ? for update', [orderId]);
@@ -829,7 +883,8 @@ export class DatabaseFinanceMutations implements FinanceMutations {
   private async linesFrom(knex: Knex, kind: FinanceKind, id: string): Promise<readonly FinanceLineInput[]> {
     const rows = await knex<LineRow>(CONFIG[kind].lineTable).where({ record_id: id });
     return rows.map((row) => ({
-      purchaseOrderId: row.purchase_order_id,
+      purchaseOrderId: row.purchase_order_id ?? '',
+      payableReconId: row.payable_recon_id,
       amount: num(row.amount),
       note: row.note,
     }));
@@ -844,7 +899,11 @@ export class DatabaseFinanceMutations implements FinanceMutations {
     await knex(CONFIG[kind].headerTable).where({ id }).update({
       status: 'confirmed', confirmed_at: at, updated_at: at,
     });
-    await this.writeBack(knex, kind, lines.map((line) => line.purchaseOrderId));
+    await this.writeBack(
+      knex, kind,
+      lines.map((line) => line.purchaseOrderId),
+      lines.map((line) => line.payableReconId).filter((id): id is string => id !== null && id !== undefined),
+    );
   }
 
   public async confirm(
@@ -867,7 +926,11 @@ export class DatabaseFinanceMutations implements FinanceMutations {
       await knex(CONFIG[kind].headerTable).where({ id }).update({
         status: 'void', voided_at: at, updated_at: at,
       });
-      await this.writeBack(knex, kind, lines.map((line) => line.purchaseOrderId));
+      await this.writeBack(
+      knex, kind,
+      lines.map((line) => line.purchaseOrderId),
+      lines.map((line) => line.payableReconId).filter((id): id is string => id !== null && id !== undefined),
+    );
       return await this.detailIn(knex, kind, id);
     });
   }

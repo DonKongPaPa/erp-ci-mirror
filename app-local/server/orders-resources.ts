@@ -1,6 +1,10 @@
 import { defineCompositeResource } from '@nocobase/authorization/core';
 import { financeViewOrdersPermission } from './finance-resources.js';
 import {
+  financeViewSalesCustomerPermission,
+  financeViewSalesOrdersPermission,
+} from './reconciliation-resources.js';
+import {
   defineDatabasePermission,
   type DatabaseCollectionDefinition,
 } from '@nocobase/app-plugin-authorization/server';
@@ -288,6 +292,14 @@ const defineOrderResource = (kind: 'purchase' | 'sales') => {
           .grant('partners', ledgerPartnerRead)
           .grant('orderReviews', ledgerReviewRead)
           .grant('bizDictEntries', ledgerProjectRead),
+      );
+      // R-065 复刻波 2：恢复一个窄的 financeView —— 八列订单头与客户三列摘要，
+      // 不给明细、单价、备注、经办人，也不复用第一片采购订单的授权。
+      result = result.action('financeView', (action) =>
+        action
+          .title(title('authorization.salesOrders.actions.financeView'))
+          .grant('salesOrders', financeViewSalesOrdersPermission)
+          .grant('partners', financeViewSalesCustomerPermission),
       );
     }
     return result.action('submit', (action) =>

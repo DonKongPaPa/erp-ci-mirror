@@ -19,6 +19,7 @@ import {
   DocumentStatusBar,
   LinesTable,
 } from '#components/erp/document';
+import { ActionGlyph } from '#components/action-glyph';
 import { ConfirmDialog } from '#components/erp/confirm';
 import type { DetailField } from '#components/erp/detail';
 import { DocFilesPanel } from '#components/erp/doc-files-panel';
@@ -479,6 +480,7 @@ export function StockDocDetailPage({ def }: { readonly def: StockKind }): ReactE
           <Link to={`/main/doc-print/${printPath}/${encodeURIComponent(doc.docNo)}`} />
         }
       >
+        <ActionGlyph action='print' />
         {t('docPrint.print')}
       </Button>
     );

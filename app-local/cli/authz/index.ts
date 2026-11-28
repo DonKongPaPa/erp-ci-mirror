@@ -8,9 +8,13 @@ import AuthzUpgradeR014 from './upgrade-r014.js';
 import AuthzUpgradeR014Page from './upgrade-r014-page.js';
 import AuthzUpgradeR019Page from './upgrade-r019-page.js';
 import AuthzUpgradeR019Price from './upgrade-r019-price.js';
+import AuthzUpgradeR019Bom from './upgrade-r019-bom.js';
+import AuthzUpgradeR019BomPages from './upgrade-r019-bom-pages.js';
 import AuthzUpgradeR020 from './upgrade-r020.js';
 import AuthzUpgradeR020Receive from './upgrade-r020-receive.js';
 import AuthzUpgradeR020Stocktake from './upgrade-r020-stocktake.js';
+import AuthzUpgradeR020Returns from './upgrade-r020-returns.js';
+import AuthzUpgradeR020ReturnsPages from './upgrade-r020-returns-pages.js';
 import AuthzUpgradeR020Page from './upgrade-r020-page.js';
 import AuthzUpgradeR021 from './upgrade-r021.js';
 import AuthzUpgradeR021Price from './upgrade-r021-price.js';
@@ -19,12 +23,18 @@ import AuthzUpgradeR021PurchaseRequest from './upgrade-r021-purchase-request.js'
 import AuthzUpgradeR022Quotation from './upgrade-r022-quotation.js';
 import AuthzUpgradeR026 from './upgrade-r026.js';
 import AuthzUpgradeR065 from './upgrade-r065.js';
+import AuthzUpgradeR065Reconcile from './upgrade-r065-reconcile.js';
+import AuthzUpgradeR065Pages from './upgrade-r065-pages.js';
 import AuthzUpgradeR066 from './upgrade-r066.js';
 import AuthzUpgradeR064 from './upgrade-r064.js';
 import AuthzUpgradeR072 from './upgrade-r072.js';
 import AuthzUpgradeR025 from './upgrade-r025.js';
 import AuthzUpgradeR076 from './upgrade-r076.js';
 import AuthzUpgradeR070Iqc from './upgrade-r070-iqc.js';
+import AuthzUpgradeR078Reports from './upgrade-r078-reports.js';
+import AuthzUpgradeR078Pages from './upgrade-r078-pages.js';
+import AuthzUpgradeR070IqcPages from './upgrade-r070-iqc-pages.js';
+import AuthzUpgradeR023Mes from './upgrade-r023-mes.js';
 
 /**
  * `authz export` / `authz import`（R-013 验收第 8 条）。
@@ -52,6 +62,10 @@ const authzCli = defineCliPlugin({
     'upgrade-r019-page': AuthzUpgradeR019Page,
     // R-019 加片：给已有环境的 purchase / sales 各补一个价格只读动作。可单独跑、可重跑。
     'upgrade-r019-price': AuthzUpgradeR019Price,
+    // R-019 波 2：建 craft 并给 craft / planning 补 BOM 两个读动作，可重跑。
+    'upgrade-r019-bom': AuthzUpgradeR019Bom,
+    // R-019 波 2 页面片：给 craft / planning 补 BOM 页授权，可重跑。
+    'upgrade-r019-bom-pages': AuthzUpgradeR019BomPages,
     // R-026：给三个角色补反馈单页与两个新动作，给存量的人补 staff。可单独跑、可重跑。
     'upgrade-r026': AuthzUpgradeR026,
     // R-025：给已有环境的 staff 补班次只读授权。可单独跑、可重跑。
@@ -62,6 +76,10 @@ const authzCli = defineCliPlugin({
     'upgrade-r020-receive': AuthzUpgradeR020Receive,
     // R-020 波 1：给仓管补盘点与调拨授权，给财务补监盘与盘点只读。
     'upgrade-r020-stocktake': AuthzUpgradeR020Stocktake,
+    // R-020 波 2 加片二：给四个现成角色补退货动作，可单独跑、可重跑。
+    'upgrade-r020-returns': AuthzUpgradeR020Returns,
+    // R-020 波 2 加片二页面片：给采购/销售/仓管/财务补退货页的页面授权（业务动作由 upgrade-r020-returns 补）。可单独跑、可重跑。
+    'upgrade-r020-returns-pages': AuthzUpgradeR020ReturnsPages,
     // R-020 页面片：给已有环境的仓管补库存查询、入库单、出库单、仓库四页，给销售/采购补仓库页（先补业务授权）。可单独跑、可重跑。
     'upgrade-r020-page': AuthzUpgradeR020Page,
     // R-021/R-022：给已有环境的 purchase / sales 补订单授权与只读引用。可单独跑、可重跑。
@@ -71,6 +89,9 @@ const authzCli = defineCliPlugin({
     // R-072：给已有环境的 purchase / sales / warehouse 补字典与选项的读授权。可单独跑、可重跑。
     // R-065：给已有环境建财务角色并补三份业务授权。可单独跑、可重跑。
     'upgrade-r065': AuthzUpgradeR065,
+    // R-065 复刻波 2：给 finance 补四张财务单与销售窄读授权。可单独跑、可重跑。
+    'upgrade-r065-reconcile': AuthzUpgradeR065Reconcile,
+    'upgrade-r065-pages': AuthzUpgradeR065Pages,
     // R-066：给 staff（仅本人）与 finance 补请款单动作，可单独跑、可重跑。
     'upgrade-r066': AuthzUpgradeR066,
     // R-064：建 planning 角色并补评审写动作与台账只读；只加不改，可重跑。
@@ -86,6 +107,14 @@ const authzCli = defineCliPlugin({
     'upgrade-r076': AuthzUpgradeR076,
     // R-070：给四个现成角色补检验单动作，可单独跑、可重跑。
     'upgrade-r070-iqc': AuthzUpgradeR070Iqc,
+    // R-078：给五个岗位补报表入口动作并补齐第一批定义，可单独跑、可重跑。
+    'upgrade-r078-reports': AuthzUpgradeR078Reports,
+    // R-078 页面片：给五个岗位补报表中心页面授权，可单独跑、可重跑。
+    'upgrade-r078-pages': AuthzUpgradeR078Pages,
+    // R-070 页面片：给质量员、质量主管、采购补检验单页的页面授权（仓管不补）。可单独跑、可重跑。
+    'upgrade-r070-iqc-pages': AuthzUpgradeR070IqcPages,
+    // R-023 W3-1：建 production 权限集并补 mesSettings 的三个窄动作，可单独跑、可重跑。
+    'upgrade-r023-mes': AuthzUpgradeR023Mes,
   },
 });
 

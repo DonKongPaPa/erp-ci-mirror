@@ -1,5 +1,6 @@
+import { useClientApplication } from '@nocobase/app-client';
 import { useSyncServerLocale } from '@nocobase/app-plugin-i18n/client';
-import { useMemo, type ReactElement } from 'react';
+import { createElement, useMemo, type ReactElement } from 'react';
 import type { AppClientRegisteredRoute } from '@nocobase/app-client/plugins';
 import { Outlet, useLocation } from 'react-router';
 
@@ -24,6 +25,7 @@ import {
   useRouteNavigation,
   selectedNavigationId,
 } from '../routing/route-navigation.js';
+import { extensionOverlayToken } from './extension-overlay.js';
 
 export interface AppLayoutProps {
   readonly routes: readonly AppClientRegisteredRoute[];
@@ -33,6 +35,12 @@ export function AppLayout({ routes }: AppLayoutProps): ReactElement {
   // The browser decides what it renders; this tells the server the same language so its messages match.
   useSyncServerLocale();
 
+  const app = useClientApplication();
+  // 扩展追加的浮层只在开发构建里登记（见 `client/extensions/development-extensions.ts`）。
+  // 用 createElement 而不是在渲染里造组件标签：布局自己不认识这段 UI，也不静态引入它的代码。
+  const overlay = app.container.has(extensionOverlayToken)
+    ? createElement(app.container.resolve(extensionOverlayToken))
+    : null;
   const { t } = useTranslation();
   const { items: menuItems, denied, loading } = useRouteNavigation(routes);
   const access = useMemo(() => ({ denied, loading }), [denied, loading]);
@@ -79,6 +87,9 @@ export function AppLayout({ routes }: AppLayoutProps): ReactElement {
             </main>
           </div>
         </AppSidebarProvider>
+        {overlay ? (
+          <div className='fixed bottom-4 right-4 z-50 print:hidden'>{overlay}</div>
+        ) : null}
       </PageBreadcrumbProvider>
     </RouteTreeProvider>
   );

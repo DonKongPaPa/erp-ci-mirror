@@ -469,3 +469,89 @@ describe('R-020 波 1：盘点单与调拨单的迁移', () => {
     },
   });
 });
+
+
+/** R-020 波 2：两张退货表与 stock_docs 的回链列逐项钉住；down 还原到加片前。 */
+const RETURN_DOC_FIELDS = [
+  'id', 'docNo', 'docType', 'sourceType', 'sourceId', 'partnerId',
+  'handlerUserId', 'status', 'remark', 'createdById', 'postedAt', 'postedById',
+  'createdAt', 'updatedAt',
+].sort();
+const RETURN_LINE_FIELDS = [
+  'id', 'docId', 'sourceLineId', 'itemId', 'warehouseId', 'batchNo', 'qty',
+  'returnQty', 'note',
+].sort();
+const POST_023_DOC_FIELDS = [
+  ...ADDON_DOC_FIELDS, 'lastPrintedAt', 'lastPrintedBy', 'printCount',
+].sort();
+const RETURNS_DOC_FIELDS = [...POST_023_DOC_FIELDS, 'returnDocId'].sort();
+
+describe('R-020 波 2：采购退货与销售退货的迁移', () => {
+  describeMigration('202611260029_returns', {
+    sources,
+    up: async ({ connection, expectCollection }) => {
+      const docs = await expectCollection('returnDocs').toExist();
+      expect(Object.keys(docs.fields).sort()).toEqual(RETURN_DOC_FIELDS);
+      expect(docs.primaryKey).toEqual(['id']);
+      expect(docs.foreignKeys).toHaveLength(0);
+      await expectCollection('returnDocs').toHaveField('docNo', {
+        type: 'string', length: 32, nullable: false,
+      });
+      await expectCollection('returnDocs').toHaveIndex(['docType', 'status', 'createdAt']);
+      await expectCollection('returnDocs').toHaveIndex(['sourceType', 'sourceId']);
+
+      const lines = await expectCollection('returnDocLines').toExist();
+      expect(Object.keys(lines.fields).sort()).toEqual(RETURN_LINE_FIELDS);
+      expect(lines.primaryKey).toEqual(['id']);
+      expect(lines.foreignKeys).toHaveLength(0);
+      await expectDecimal(connection, 'return_doc_lines', 'qty');
+      await expectDecimal(connection, 'return_doc_lines', 'return_qty');
+      await expectCollection('returnDocLines').toHaveIndex(['docId']);
+
+      const stockDocs = await expectCollection('stockDocs').toExist();
+      expect(Object.keys(stockDocs.fields).sort()).toEqual(RETURNS_DOC_FIELDS);
+      await expectCollection('stockDocs').toHaveField('returnDocId', {
+        type: 'string', length: 64, nullable: true,
+      });
+      const physical = await connection.schemaInspector.getPhysicalCollection({
+        tableName: 'stock_docs',
+      });
+      expect([...(physical?.indexes.map((index) => index.name) ?? [])].sort()).toContain(
+        'uq_stock_docs_return',
+      );
+
+      const insert = async (id: string, returnDocId: string | null) =>
+        connection.query.insertInto('stock_docs').values({
+          id,
+          doc_no: `TH-${randomUUID().slice(0, 8)}`,
+          doc_type: 'out',
+          reason: 'purchase_return',
+          created_by_id: 'migration-test',
+          created_at: '2026-11-28T01:00:00.000Z',
+          updated_at: '2026-11-28T01:00:00.000Z',
+          returnDocId,
+        }).execute();
+      const linkId = `rd-${randomUUID()}`;
+      await insert(`sd-r1-${randomUUID()}`, linkId);
+      await expect(
+        insert(`sd-r2-${randomUUID()}`, linkId),
+        '同一退货单不能写出第二张出入库单',
+      ).rejects.toThrow();
+      await insert(`sd-r3-${randomUUID()}`, null);
+      await insert(`sd-r4-${randomUUID()}`, null);
+      expect(
+        await connection.repository<Record<string, unknown>>('stockDocs').count(),
+      ).toBeGreaterThanOrEqual(2);
+    },
+    down: async ({ connection, expectCollection }) => {
+      await expectCollection('returnDocLines').not.toExist();
+      await expectCollection('returnDocs').not.toExist();
+      expect(Object.keys((await expectCollection('stockDocs').toExist()).fields).sort())
+        .toEqual(POST_023_DOC_FIELDS);
+      const physical = await connection.schemaInspector.getPhysicalCollection({
+        tableName: 'stock_docs',
+      });
+      expect(physical?.indexes.map((index) => index.name)).not.toContain('uq_stock_docs_return');
+    },
+  });
+});

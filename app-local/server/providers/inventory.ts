@@ -164,6 +164,7 @@ export interface StockDocRecord {
   /** 回链列只在生成单据上出现；普通单据的响应与波 0 加片前一致。 */
   readonly stocktakingId?: string;
   readonly transferDocId?: string;
+  readonly returnDocId?: string;
   /** R-070：带检验单建的入库单才带这个键；普通单据的响应与加片前一致。 */
   readonly inspectionId?: string;
   readonly files?: readonly DocFileView[];
@@ -213,6 +214,7 @@ export interface DocListQuery extends PageQuery {
   readonly takerDepartmentId?: string;
   readonly stocktakingId?: string;
   readonly transferDocId?: string;
+  readonly returnDocId?: string;
 }
 export interface BalanceListQuery extends PageQuery {
   readonly itemId?: string;
@@ -270,6 +272,7 @@ interface DocExtraInput {
   readonly fileIds?: readonly string[];
   readonly stocktakingId?: string;
   readonly transferDocId?: string;
+  readonly returnDocId?: string;
   /** R-070：只在带该可选键建单时写入，普通入库没有这个键。 */
   readonly inspectionId?: string;
 }
@@ -390,6 +393,7 @@ interface DocRow {
   payable_total: string | number | null;
   stocktaking_id: string | null;
   transfer_doc_id: string | null;
+  return_doc_id: string | null;
   inspection_id: string | null;
 }
 interface LineRow {
@@ -544,6 +548,7 @@ function docView(
     totalQty: nullableNum(row.total_qty),
     ...(row.stocktaking_id === null ? {} : { stocktakingId: row.stocktaking_id }),
     ...(row.transfer_doc_id === null ? {} : { transferDocId: row.transfer_doc_id }),
+    ...(row.return_doc_id === null ? {} : { returnDocId: row.return_doc_id }),
     ...(row.inspection_id === null || row.inspection_id === undefined
       ? {}
       : { inspectionId: row.inspection_id }),
@@ -880,6 +885,7 @@ export class DatabaseStockReader implements StockReader {
       if (query.takerDepartmentId !== undefined) void builder.where('taker_department_id', query.takerDepartmentId);
       if (query.stocktakingId !== undefined) void builder.where('stocktaking_id', query.stocktakingId);
       if (query.transferDocId !== undefined) void builder.where('transfer_doc_id', query.transferDocId);
+      if (query.returnDocId !== undefined) void builder.where('return_doc_id', query.returnDocId);
     });
     const total = await countOf(base);
     const rows = (await base
@@ -1087,6 +1093,7 @@ export class DatabaseStockMutations implements StockMutations {
         payable_total: totals.payableTotal,
         stocktaking_id: input.stocktakingId ?? null,
         transfer_doc_id: input.transferDocId ?? null,
+        return_doc_id: input.returnDocId ?? null,
         inspection_id: input.inspectionId ?? null,
         created_at: now,
         updated_at: now,

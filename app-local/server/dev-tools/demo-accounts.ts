@@ -51,6 +51,16 @@ export const DEMO_ACCOUNTS: readonly DemoAccountDefinition[] = [
     name: '演示 · 销售',
     role: 'sales',
   },
+  {
+    username: 'demo.finance',
+    name: '演示 · 财务',
+    role: 'finance',
+  },
+  {
+    username: 'demo.planning',
+    name: '演示 · 计划',
+    role: 'planning',
+  },
 ];
 
 /** 接口出参：标识、姓名、用户名、角色名。不外带邮箱等人员信息（R-028）。 */

@@ -83,7 +83,10 @@ import {
   PURCHASE,
   SALES,
 } from '../orders/kinds.js';
+import type { ReceivableInspection } from '../inspections/client.js';
+import { INSPECTIONS_RESOURCE } from '../inspections/page-id.js';
 import { StockDocsClient, type StockDoc } from './client.js';
+import { InspectionPickerDialog } from './inspection-picker.js';
 import { OrderPickerDialog } from './order-picker.js';
 import type { StockKind } from './kind.js';
 import type { StockDocDetailContext } from './detail.js';
@@ -138,6 +141,11 @@ export function StockDocFormPage({
   const pickView = useCan({
     resource: def.kind === 'in' ? PURCHASE.resource : SALES.resource,
     action: def.kind === 'in' ? 'receive' : 'ship',
+  });
+  // R-070：仓管在采购入库单上从检验单选择，只读窄形状，不给检验页与写动作。
+  const inspectionView = useCan({
+    resource: INSPECTIONS_RESOURCE,
+    action: 'receiveView',
   });
   const projects = useDictEntries('project', dictView.can);
   const taxRates = useDictEntries('tax_rate', dictView.can);
@@ -213,6 +221,7 @@ export function StockDocFormPage({
       canPick={canPick}
       priceView={priceView.can}
       canPickOrder={pickView.can}
+      canPickInspection={inspectionView.can}
       projects={projects.items}
       people={people.items}
       departments={departments.items}
@@ -230,6 +239,7 @@ interface StockDocFormProps {
   readonly canPick: boolean;
   readonly priceView: boolean;
   readonly canPickOrder: boolean;
+  readonly canPickInspection: boolean;
   readonly projects: readonly DictEntry[] | undefined;
   readonly people: readonly PersonOption[] | undefined;
   readonly departments: readonly DepartmentOption[] | undefined;
@@ -244,6 +254,7 @@ function StockDocForm({
   canPick,
   priceView,
   canPickOrder,
+  canPickInspection,
   projects,
   people,
   departments,
@@ -317,6 +328,7 @@ function StockDocForm({
     }));
   };
   const [picking, setPicking] = useState(false);
+  const [pickingInspection, setPickingInspection] = useState(false);
   /** 从待收、待发的订单里选一张：带出仍有剩余的行、对方与联系方式，并记下来源。 */
   const applyOrder = (order: NarrowOrder): void => {
     setTouched(true);
@@ -327,6 +339,8 @@ function StockDocForm({
       contactPhone: order.contactPhone ?? old.contactPhone,
       sourceType: def.kind === 'in' ? 'purchase_order' : 'sales_order',
       sourceId: order.id,
+      // 换来源就丢掉检验单，普通订单入库的请求体没有检验键。
+      inspectionId: '',
       hasAddons: true,
       lines: order.lines
         .filter((line) => line.remainingQty > 0)
@@ -335,6 +349,31 @@ function StockDocForm({
           itemId: line.itemId,
           warehouseId: order.warehouseId ?? '',
           qty: String(line.remainingQty),
+          taxRate: defaultTaxRate,
+        })),
+    }));
+  };
+  /**
+   * R-070：从已通过/部分合格的检验单选可入库行。默认把尚可入库数量填进数量，
+   * 并记录检验单 id 与检验行 id；供应商与采购订单由检验单带出，数量允许改小。
+   */
+  const applyInspection = (inspection: ReceivableInspection): void => {
+    setTouched(true);
+    setValues((old) => ({
+      ...old,
+      sourceType: 'purchase_order',
+      sourceId: inspection.purchaseOrderId,
+      inspectionId: inspection.id,
+      hasAddons: true,
+      lines: inspection.lines
+        .filter((line) => line.remainQty > 0)
+        .map((line) => ({
+          ...emptyLine(),
+          itemId: line.itemId,
+          warehouseId: line.warehouseId,
+          batchNo: line.batchNo,
+          qty: String(line.remainQty),
+          inspectionLineId: line.inspectionLineId,
           taxRate: defaultTaxRate,
         })),
     }));
@@ -446,6 +485,7 @@ function StockDocForm({
             type='submit'
             form={formId}
             busy={busy}
+            action='save'
             disabled={!canPick}
           >
             {t('stockDocs.saveDraft')}
@@ -716,20 +756,34 @@ function StockDocForm({
             <p className='text-sm text-muted-foreground'>
               {t('stockDocs.lineCount', { lines: values.lines.length })}
             </p>
-            {canPickOrder ? (
-              <Button
-                type='button'
-                variant='outline'
-                size='sm'
-                onClick={() => setPicking(true)}
-              >
-                {t(
-                  def.kind === 'in'
-                    ? 'stockDocs.pickPurchaseOrder'
-                    : 'stockDocs.pickSalesOrder',
-                )}
-              </Button>
-            ) : null}
+            <div className='flex flex-wrap gap-2'>
+              {canPickOrder ? (
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  onClick={() => setPicking(true)}
+                >
+                  {t(
+                    def.kind === 'in'
+                      ? 'stockDocs.pickPurchaseOrder'
+                      : 'stockDocs.pickSalesOrder',
+                  )}
+                </Button>
+              ) : null}
+              {def.kind === 'in' &&
+              values.reason === 'purchase_receipt' &&
+              canPickInspection ? (
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  onClick={() => setPickingInspection(true)}
+                >
+                  {t('stockDocs.pickInspection')}
+                </Button>
+              ) : null}
+            </div>
           </div>
           {errors.lines ? (
             <p role='alert' className='text-sm text-destructive'>
@@ -997,6 +1051,13 @@ function StockDocForm({
           onOpenChange={setPicking}
           onPick={applyOrder}
         />
+        {def.kind === 'in' && canPickInspection ? (
+          <InspectionPickerDialog
+            open={pickingInspection}
+            onOpenChange={setPickingInspection}
+            onPick={applyInspection}
+          />
+        ) : null}
         {leave.dialog}
       </FeedbackForm>
     </DocumentPage>

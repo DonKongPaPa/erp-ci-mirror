@@ -958,13 +958,19 @@ describe('purchase order backlink to its purchase request', () => {
     handlers = {
       ...handlers,
       'GET purchase-orders/o1': () =>
-        rawOrder(KINDS[0]!, { purchaseRequestId: 'pr-20261128-0001' }),
+        rawOrder(KINDS[0]!, {
+          purchaseRequestId: 'pr-20261128-0001',
+          purchaseRequestDocNo: 'QG-20261128-0001',
+        }),
     };
     await renderAt('/purchase-orders/o1', writer(KINDS[0]!));
     expect(await screen.findByText(enUS.orderDocs.fields.sourcePurchaseRequest, {}, WAIT)).toBeVisible();
-    expect(
-      await screen.findByRole('link', { name: enUS.orderDocs.fields.sourcePurchaseRequest }, WAIT),
-    ).toHaveAttribute('href', '/purchase-requests/pr-20261128-0001');
+    const link = await screen.findByRole(
+      'link', { name: enUS.orderDocs.fields.sourcePurchaseRequest }, WAIT,
+    );
+    expect(link).toHaveAttribute('href', '/purchase-requests/pr-20261128-0001');
+    expect(link, '回链显示请购单单据号而不是内部编号').toHaveTextContent('QG-20261128-0001');
+    expect(link).not.toHaveTextContent('pr-20261128-0001');
   });
 
   it('shows no backlink on an order that did not come from a purchase request', async () => {

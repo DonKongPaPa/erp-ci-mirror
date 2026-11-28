@@ -22,6 +22,9 @@ class DevelopmentExtensionsProvider extends ServiceProvider<ClientApplication> {
     if (!import.meta.env.DEV) return;
     const extension = await import('./dev-account-switcher/index.js');
     extension.registerDevAccountSwitcher(this.app);
+    // R-087：每页的反馈悬浮入口也是动态引入，生产构建里连模块都不进图。
+    const panel = await import('./dev-feedback/register.js');
+    panel.registerFeedbackPanel(this.app);
   }
 }
 
@@ -41,6 +44,22 @@ const developmentExtensions = /* @__PURE__ */ defineClientPlugin({
         auth: 'required',
         authz: 'unrestricted',
         componentLoader: () => import('./dev-requirements-board/index.js'),
+      },
+      // R-083：待确认事项页，挂法与看板一致。
+      {
+        name: 'devConfirmations',
+        path: '/dev/confirmations',
+        auth: 'required',
+        authz: 'unrestricted',
+        componentLoader: () => import('./dev-confirmations/index.js'),
+      },
+      // R-087：测试反馈页，挂法同上。
+      {
+        name: 'devFeedback',
+        path: '/dev/feedback',
+        auth: 'required',
+        authz: 'unrestricted',
+        componentLoader: () => import('./dev-feedback/index.js'),
       },
     ]);
   },

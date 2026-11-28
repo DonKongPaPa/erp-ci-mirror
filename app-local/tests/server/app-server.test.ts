@@ -96,10 +96,13 @@ import { createServer as createEmbeddedServer } from '../../server/embedded.ts';
 import { createStandaloneRuntimeScope } from '@nocobase/app-server/node';
 import appRuntime from '../../server/runtime.ts';
 import { apiRoutes as approvalRoutes } from '../../server/routes/approvals.js';
+import { apiRoutes as bomRoutes } from '../../server/routes/boms.js';
 import { apiRoutes as docPrintRoutes } from '../../server/routes/doc-print.js';
 import { apiRoutes as importRoutes } from '../../server/routes/import-tool.js';
 import { apiRoutes as purchaseRequestRoutes } from '../../server/routes/purchase-requests.js';
 import { apiRoutes as orderReviewRoutes } from '../../server/routes/order-reviews.js';
+import BomsProvider from '../../server/providers/boms.js';
+import BomExplodeProvider from '../../server/providers/bom-explode.js';
 import { apiRoutes as iqcRoutes } from '../../server/routes/iqc.js';
 import ApprovalsProvider from '../../server/approvals-service.js';
 import ApprovalNotificationsProvider from '../../server/providers/approval-notifications.js';
@@ -330,6 +333,7 @@ describe('app server', () => {
     // 以 server/providers/index.ts 与 server/routes/index.ts 的实际登记为准。
     const expectedRoutes = [
       approvalRoutes,
+      bomRoutes,
       docPrintRoutes,
       importRoutes,
       purchaseRequestRoutes,
@@ -340,6 +344,8 @@ describe('app server', () => {
       expect(appRuntime.routes).toContain(route);
     }
     const expectedProviders = [
+      BomsProvider,
+      BomExplodeProvider,
       ApprovalsProvider,
       ApprovalNotificationsProvider,
       ApprovalTimeoutProvider,

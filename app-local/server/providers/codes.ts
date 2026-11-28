@@ -23,6 +23,8 @@ import type { Knex } from 'knex';
 export const CODE_PREFIXES = {
   item: 'M',
   product: 'P',
+  // R-019 波 2：BOM 编号的占位前缀（随 R-016 待裁一并定）。
+  bom: 'BOM',
   customer: 'CU',
   supplier: 'SU',
   purchaseOrder: 'CG',
@@ -37,8 +39,18 @@ export const CODE_PREFIXES = {
   // R-066：请款单与报销单的占位前缀（旧系统编号清单的原字，随 R-016 待裁一并定）。
   financePaymentRequest: 'QK',
   financeExpenseClaim: 'BX',
+  // R-065 复刻波 2：收入、开票、应收、应付四个编号前缀，仍是占位。
+  income: 'INCM',
+  saleInvoice: 'SI',
+  receivableRecon: 'YS',
+  payableRecon: 'YF',
+  // R-020 波 2 加片二：退货单号前缀（设计占位 TH，随 R-016 待裁一并定）。
+  returnDoc: 'TH',
   // R-070：采购检验单号的占位前缀（随 R-016 待裁一并定）。
   inspection: 'JY',
+  // R-023 W3-1：不良品项与工艺流程编号，服务端发号（与 CG/XS/JY 同一套机制）。
+  defectItem: 'BL',
+  processRoute: 'GY',
 } as const;
 
 /** 计数器行的周期：按日重置存 yyyymmdd（列宽 8 正好），不带日期存空串。 */

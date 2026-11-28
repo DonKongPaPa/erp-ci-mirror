@@ -3,6 +3,7 @@ import { ChevronRight } from 'lucide-react';
 import {
   createContext,
   useContext,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactElement,
@@ -35,10 +36,19 @@ import {
   useSidebar,
 } from '#components/ui/sidebar';
 
+import { Button } from '#components/ui/button';
+
 import {
   routeKey,
   type RouteNavigationItem,
 } from '../../routing/route-navigation.js';
+import {
+  isCompactNavigation,
+  needsDeeperCollapse,
+  readNavigationMeasurement,
+  useCompactNavigation,
+  type NavigationMeasurement,
+} from './navigation-compact.js';
 
 // The selected entry uses the theme's `--sidebar-primary` pair (`theme.md`), where shadcn's menu buttons use the
 // hover color; the class is passed in, the primitive stays unchanged.
@@ -83,6 +93,7 @@ export function NavigationMenu({
   selectedKey,
   sections = true,
   badges = {},
+  measurement,
 }: {
   readonly items: readonly RouteNavigationItem[];
   readonly label: string;
@@ -94,9 +105,61 @@ export function NavigationMenu({
    * section's. They change while the page is open, so the layout passes them rather than the route declaring them.
    */
   readonly badges?: NavigationBadges;
+  /** R-085：夹具高度；不传时从侧栏内容容器实测，测试才需要传。 */
+  readonly measurement?: NavigationMeasurement;
 }): ReactElement {
+  const { t } = useTranslation();
+  const { state, isMobile } = useSidebar();
+  const navRef = useRef<HTMLElement | null>(null);
+  const [measured, setMeasured] = useState<NavigationMeasurement | undefined>(
+    measurement,
+  );
+  const active = measured ?? readNavigationMeasurement(items);
+  // 图标态与手机抽屉保留原有行为；紧凑态只作用于展开的桌面菜单。
+  const compact =
+    !isMobile && state !== 'collapsed' && isCompactNavigation(active);
+  const deeper = compact && needsDeeperCollapse(active);
+  const { expandedKey, setExpanded, reset } = useCompactNavigation({
+    compact,
+    collapsedAll: deeper,
+    items,
+    selectedKey,
+  });
+
+  useLayoutEffect(() => {
+    if (measurement) return;
+    const container = navRef.current?.parentElement ?? null;
+    const read = () => {
+      const next = readNavigationMeasurement(items, container);
+      setMeasured((previous) =>
+        previous &&
+        previous.availableHeight === next.availableHeight &&
+        previous.expandedHeight === next.expandedHeight &&
+        previous.contentHeight === next.contentHeight
+          ? previous
+          : next,
+      );
+    };
+    // 侧栏尺寸与当前展开状态都会改变内容高度，两样都量一次。
+    read();
+    const observer =
+      container && typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(read)
+        : undefined;
+    if (container) observer?.observe(container);
+    window.addEventListener('resize', read);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', read);
+    };
+  }, [items, measurement, compact, expandedKey]);
+
   // A group already divided into `section`s by the navigation stays one collapsible entry over them.
+  // 紧凑态下顶层的组改成一次只开一个的可折叠项，页面由「组 → 页」两下到达。
   const isSection = (item: RouteNavigationItem): boolean =>
+    !compact &&
+    // 图标态的分组仍是一个入口：带组图标、悬停/点击弹出组内页面，不摊平成页面图标。
+    state !== 'collapsed' &&
     sections &&
     item.children.length > 0 &&
     !item.route.componentLoader &&
@@ -111,7 +174,21 @@ export function NavigationMenu({
   }
   return (
     <NavigationBadgesContext value={badges}>
-      <nav aria-label={label}>
+      <nav ref={navRef} aria-label={label}>
+        {compact ? (
+          <div className='px-2 pb-1'>
+            <Button
+              size='sm'
+              variant='ghost'
+              onClick={reset}
+              className='w-full justify-start text-xs text-sidebar-foreground/70'
+            >
+              {t('navigation.resetCompact', {
+                defaultValue: 'Reset navigation',
+              })}
+            </Button>
+          </div>
+        ) : null}
         {runs.map((run) =>
           Array.isArray(run) ? (
             <SidebarGroup key={routeKey(run[0].route)}>
@@ -122,6 +199,15 @@ export function NavigationMenu({
                       key={routeKey(item.route)}
                       item={item}
                       selectedKey={selectedKey}
+                      compactGroup={
+                        compact &&
+                        item.children.length > 0 &&
+                        !item.route.componentLoader
+                      }
+                      compactExpanded={expandedKey === routeKey(item.route)}
+                      onCompactChange={(open) =>
+                        setExpanded(routeKey(item.route), open)
+                      }
                     />
                   ))}
                 </SidebarMenu>
@@ -152,9 +238,13 @@ function NavigationGroup({
   readonly selectedKey: string | undefined;
 }): ReactElement {
   const label = useItemLabel(item);
+  const Icon = item.route.navigation?.icon;
   return (
     <SidebarGroup aria-label={label}>
-      <SidebarGroupLabel>{label}</SidebarGroupLabel>
+      <SidebarGroupLabel className={Icon ? 'gap-2' : undefined}>
+        {Icon ? <Icon aria-hidden='true' /> : null}
+        {label}
+      </SidebarGroupLabel>
       <SidebarGroupContent>
         <SidebarMenu>
           {item.children.map((child) => (
@@ -227,6 +317,10 @@ interface ItemProps {
   /** Rendered inside the icon mode's popover, where tooltips and the icon mode's popovers do not apply. */
   readonly inPopover?: boolean;
   readonly onNavigate?: () => void;
+  /** R-085 紧凑态的一级组：展开状态由全局的「当前只开一组」决定。 */
+  readonly compactGroup?: boolean;
+  readonly compactExpanded?: boolean;
+  readonly onCompactChange?: (open: boolean) => void;
 }
 
 /** One top-level entry of a menu: a link, a collapsible sub-menu, or in the icon mode a popover of its children. */
@@ -235,6 +329,9 @@ function NavigationItem({
   selectedKey,
   inPopover = false,
   onNavigate,
+  compactGroup = false,
+  compactExpanded = false,
+  onCompactChange,
 }: ItemProps): ReactElement | null {
   const { state, isMobile } = useSidebar();
   const closeSheet = useCloseOnNavigate();
@@ -243,7 +340,11 @@ function NavigationItem({
   const Icon = item.route.navigation?.icon;
   const isSelected = routeKey(item.route) === selectedKey;
   const children = item.children;
-  const disclosure = useDisclosure(item, selectedKey);
+  const plainDisclosure = useDisclosure(item, selectedKey);
+  const disclosure =
+    compactGroup && onCompactChange
+      ? { expanded: compactExpanded, setExpanded: onCompactChange }
+      : plainDisclosure;
   const badge = useNavigationBadge(item);
   const counted = badge.count > 0 ? `${label} · ${badge.text}` : null;
   const tooltip = inPopover

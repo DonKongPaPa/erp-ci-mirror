@@ -5,6 +5,8 @@ import devToolsConfig from '../config/dev-tools.js';
 import DevAccountSwitcherProvider from '../providers/dev-account-switcher.js';
 import { apiRoutes as devAccountSwitcherRoutes } from '../routes/dev-account-switcher.js';
 import { apiRoutes as devRequirementsBoardRoutes } from '../routes/dev-requirements-board.js';
+import { apiRoutes as devConfirmationsRoutes } from '../routes/dev-confirmations.js';
+import { apiRoutes as devFeedbackRoutes } from '../routes/dev-feedback.js';
 
 /**
  * 开发工具的登记入口（R-073）。
@@ -27,4 +29,6 @@ export function registerDevTools(
   app.addServiceProvider(DevAccountSwitcherProvider);
   app.addRoutes(devAccountSwitcherRoutes);
   app.addRoutes(devRequirementsBoardRoutes);
+  app.addRoutes(devConfirmationsRoutes);
+  app.addRoutes(devFeedbackRoutes);
 }

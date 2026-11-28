@@ -8,8 +8,11 @@ const id = z.string().min(1).max(64);
 const code = z.string().min(1).max(32);
 const money = z.number();
 const status = z.enum(['draft', 'confirmed', 'void']);
-const bindMode = z.enum(['purchase_order', 'none']);
-const line = z.object({ purchaseOrderId: id, amount: money, note: z.string().max(500).optional() });
+const bindMode = z.enum(['purchase_order', 'none', 'payable_recon']);
+const line = z.object({
+  purchaseOrderId: id.optional(), payableReconId: id.optional(),
+  amount: money, note: z.string().max(500).optional(),
+});
 const fileIds = z.array(z.string().min(1).max(64)).optional();
 
 const commonBody = {
@@ -104,7 +107,8 @@ const supplier = z.object({
 });
 const person = z.object({ userId: z.string(), name: z.string() });
 const financeLine = z.object({
-  id: z.string(), recordId: z.string(), purchaseOrderId: z.string(), orderNo: z.string(),
+  id: z.string(), recordId: z.string(), purchaseOrderId: z.string(),
+  payableReconId: z.string().nullable(), orderNo: z.string(),
   orderPayableAmount: z.number(), paidBefore: z.number().optional(),
   invoicedBefore: z.number().optional(), amount: z.number(), note: z.string().nullable(),
 });

@@ -1337,6 +1337,9 @@ test('R-013: booting the authorization resources provider twice registers once',
     'units',
     'itemCategories',
     'items',
+    // R-019 波 2：BOM 头与行两张表。
+    'boms',
+    'bomLines',
     // R-020：仓库与库存五张表。
     'warehouses',
     'stockDocs',
@@ -1358,6 +1361,14 @@ test('R-013: booting the authorization resources provider twice registers once',
     'expenseRecordLines',
     'invoiceReceiptRecords',
     'invoiceReceiptRecordLines',
+    // R-065 复刻波 2：收入、开票、两张对账单与只读快照表。
+    'incomeRecords',
+    'incomeRecordLines',
+    'saleInvoiceRecords',
+    'saleInvoiceRecordLines',
+    'receivableRecons',
+    'payableRecons',
+    'reconSnapshotLines',
     // R-072：业务字典一张表，两个只读资源各不分表。
     'bizDictEntries',
     // R-064：订单评审头表与五项明细表。
@@ -1366,11 +1377,18 @@ test('R-013: booting the authorization resources provider twice registers once',
     'financeRequestDocs',
     // R-020 波 1：盘点单与调拨单各两张表。
     'stocktakingDocs', 'stocktakingDocLines', 'transferDocs', 'transferDocLines',
+    // R-020 波 2：退货单头与明细各一张表（登记在请购单之前）。
+    'returnDocs', 'returnDocLines',
     // R-021 波 1 加片：请购单头表与明细表。
     'purchaseRequests',
     'purchaseRequestLines',
     // R-070：采购检验单头与明细。
     'inspectionOrders', 'inspectionLines',
+    // R-023 W3-1：七张基础设置表。
+    'workCenters', 'operations', 'processRoutes', 'processRouteSteps',
+    'defectItems', 'reportRules', 'operationPrices',
+    // R-078：报表定义表（四个入口动作各挂同一条窄读）。
+    'reportDefinitions',
   ]);
   expect(registered.composites.map((composite) => composite.name)).toContain(
     'fqc',
@@ -1404,7 +1422,7 @@ test('R-013: booting the authorization resources provider twice registers once',
   expect(registrationSnapshot(authz)).toEqual(registered);
 });
 
-test('R-065: financeView 只登记在采购订单资源上，销售订单的动作清单里没有', async ({
+test('R-065: 采购与销售各有自己的窄 financeView，不是借同一份授权', async ({
   app,
 }) => {
   const authz = app.container.resolve(authorizationToken);
@@ -1418,7 +1436,7 @@ test('R-065: financeView 只登记在采购订单资源上，销售订单的动�
     'submit', 'update', 'view', 'viewPrice',
   ]);
   expect(actionsOf('salesOrders')).toEqual([
-    'cancel', 'create', 'createIssue', 'ledgerView', 'ship', 'submit', 'update',
+    'cancel', 'create', 'createIssue', 'financeView', 'ledgerView', 'ship', 'submit', 'update',
     'view', 'viewPrice',
   ]);
   expect(actionsOf('orderReviews')).toEqual([
@@ -1434,8 +1452,13 @@ test('R-065: financeView 只登记在采购订单资源上，销售订单的动�
   expect(actionsOf('financeRequests')).toEqual([
     'convert', 'create', 'submit', 'update', 'view', 'void',
   ]);
+  expect(actionsOf('purchaseReturns')).toEqual(['create', 'post', 'postView', 'update', 'view', 'void']);
+  expect(actionsOf('salesReturns')).toEqual([
+    'create', 'financeView', 'post', 'postView', 'update', 'view', 'void',
+  ]);
   expect(actionsOf('purchaseOrders')).toContain('financeView');
-  expect(actionsOf('salesOrders'), '销售订单不该有借采购授权的 financeView').not.toContain('financeView');
+  // R-065 复刻波 2：销售侧的 financeView 是自己声明的窄动作，不是借采购授权。
+  expect(actionsOf('salesOrders')).toContain('financeView');
 });
 
 /** R-070 IQC：六个动作逐一登记，两张表不登记删除，不进角色编辑器目录。 */
@@ -1517,6 +1540,26 @@ test('R-020 波 1: registers stocktakings and transfers with no delete action', 
   }
   // 两个资源都不做页面目录：本片没有页面，等波 2 的页面片再放。
   for (const id of ['stocktakings', 'transfers']) {
+    expect(authz.ui.placementOf({ type: 'composite', id })).toBeUndefined();
+  }
+});
+
+test('R-020 波 2: registers return resources with separate initiate, post and finance actions', async ({ app }) => {
+  const authz = app.container.resolve(authorizationToken);
+  const actionsOf = (id: string): readonly string[] =>
+    authz.compositeResources.list()
+      .find((resource) => resource.name === id)
+      ?.actions.map((action) => action.name)
+      .sort() ?? [];
+  expect(actionsOf('purchaseReturns')).toEqual(['create', 'post', 'postView', 'update', 'view', 'void']);
+  expect(actionsOf('salesReturns')).toEqual([
+    'create', 'financeView', 'post', 'postView', 'update', 'view', 'void',
+  ]);
+  for (const table of ['returnDocs', 'returnDocLines']) {
+    const definition = authz.database.collections.list().find((entry) => entry.name === table);
+    expect(definition, `${table} 没有登记`).toBeDefined();
+  }
+  for (const id of ['purchaseReturns', 'salesReturns']) {
     expect(authz.ui.placementOf({ type: 'composite', id })).toBeUndefined();
   }
 });

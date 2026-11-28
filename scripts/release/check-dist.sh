@@ -141,14 +141,18 @@ printf '%s\n' "$PLATFORM_OUT"
 # 的守门对得上。只认这几个标记，不认笼统的 devTools：第三方库里也有同名的无害字串（recharts 的
 # devTools），写宽了只能靠排除来放行，那是给自己留口子。
 #
-#   路径   dist/ 下不许有：文件名含 dev-account-switcher 或 dev-requirements-board、路径含 /dev-tools/、
-#          名为 dev-tools.<扩展名>；
+#   路径   dist/ 下不许有：文件名含 dev-account-switcher、dev-requirements-board、dev-confirmations 或
+#          dev-feedback、路径含 /dev-tools/、名为 dev-tools.<扩展名>；
 #   服务端 dist/server 全文不许出现：switch-account、dev-account-switcher、dev/requirements-board、
-#          requirements-board、七个演示账户的用户名；
-#   客户端 dist/client 全文不许出现：dev-account-switcher、需求池看板、建议次序与切换器、看板的词条文案。
+#          requirements-board、dev/confirmations、dev-confirmations、dev/feedback、dev-feedback、
+#          九个演示账户的用户名；
+#   客户端 dist/client 全文不许出现：dev-account-switcher、需求池看板、待确认事项、测试反馈、功能登记表、
+#          建议次序与切换器、看板、待确认事项与测试反馈的词条文案。
 DEV_TOOLS_PATH_FIND=(
   -name '*dev-account-switcher*'
   -o -name '*dev-requirements-board*'
+  -o -name '*dev-confirmations*'
+  -o -name '*dev-feedback*'
   -o -path '*/dev-tools/*'
   -o -name 'dev-tools.*'
 )
@@ -157,6 +161,10 @@ DEV_TOOLS_SERVER_MARKERS=(
   dev-account-switcher
   dev/requirements-board
   requirements-board
+  dev/confirmations
+  dev-confirmations
+  dev/feedback
+  dev-feedback
   demo.quality_manager
   demo.quality_inspector
   demo.dept_manager
@@ -164,11 +172,19 @@ DEV_TOOLS_SERVER_MARKERS=(
   demo.warehouse
   demo.purchase
   demo.sales
+  demo.finance
+  demo.planning
 )
 DEV_TOOLS_CLIENT_MARKERS=(
   dev-account-switcher
   需求池看板
   建议次序
+  待确认事项
+  'Pending confirmations'
+  测试反馈
+  功能登记表
+  'Test feedback'
+  'Feature registry'
   切换账户
   仅开发环境
   'Switch account'

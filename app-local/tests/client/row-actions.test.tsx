@@ -88,6 +88,37 @@ describe('RowActions', () => {
     ).toEqual(['Manage']);
   });
 
+  it('adds the mapped action icon to menu items and exposed buttons', async () => {
+    const user = userEvent.setup();
+    render(
+      <RowActions
+        label='Actions for Alpha'
+        exposed={['create']}
+        actions={[
+          { key: 'create', label: 'Create' },
+          { key: 'void', label: 'Void' },
+          { key: 'edit', label: 'Edit' },
+        ]}
+      />,
+    );
+    const exposed = screen.getByRole('button', { name: 'Create' });
+    expect(exposed.querySelector('[data-icon="inline-start"]')).not.toBeNull();
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Actions for Alpha',
+        expanded: false,
+      }),
+    );
+    const voidItem = await screen.findByRole('menuitem', { name: 'Void' });
+    expect(voidItem.querySelector('svg')).not.toBeNull();
+    // 没有动作键的「编辑」按兜底映射也拿到图标。
+    expect(
+      (await screen.findByRole('menuitem', { name: 'Edit' })).querySelector(
+        'svg',
+      ),
+    ).not.toBeNull();
+  });
+
   it('does not run the row click handler when its menu is used', async () => {
     const user = userEvent.setup();
     const rowClick = vi.fn();

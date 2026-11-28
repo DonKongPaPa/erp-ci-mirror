@@ -85,6 +85,8 @@ async function setup(children: ReactNode) {
   const app = {
     config: createAppClientConfig({ rawConfig: {} }),
     runtime: {},
+    // AppLayout 会问容器里有没有扩展追加的悬浮面板（R-087）：真容器一定有 has，这里答没有。
+    container: { has: () => false },
   } as unknown as ClientApplication;
   render(
     <I18nProvider runtime={runtime}>

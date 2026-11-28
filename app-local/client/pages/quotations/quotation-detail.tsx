@@ -9,6 +9,7 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { useMemo, useState, type ReactElement } from 'react';
 import { Link, useLocation, useNavigate, useParams, useResolvedPath } from 'react-router';
 
+import { ActionGlyph } from '#components/action-glyph';
 import { ConfirmDialog } from '#components/erp/confirm';
 import {
   DocumentHeaderFields,
@@ -297,13 +298,14 @@ export default function QuotationDetailPage(): ReactElement {
                 </Button>
               ) : null}
               {quotation.status === 'draft' && confirm.can ? (
-                <PendingButton busy={busy} onClick={() => void act('confirm')}>
+                <PendingButton busy={busy} action='review' onClick={() => void act('confirm')}>
                   {t('quotations.actions.confirm')}
                 </PendingButton>
               ) : null}
               {(quotation.status === 'draft' || quotation.status === 'confirmed') &&
               voiding.can ? (
                 <Button variant='outline' disabled={busy} onClick={() => setConfirming(true)}>
+                  <ActionGlyph action='void' />
                   {t('quotations.actions.void')}
                 </Button>
               ) : null}

@@ -226,6 +226,13 @@ describe('app client routes', () => {
       { name: 'transferNew', authorizedAs: 'transfers' },
       { name: 'transfer', authorizedAs: 'transfers' },
       { name: 'transferEdit', authorizedAs: 'transfers' },
+      // R-020 波 2 加片二：退货单的新建、详情是盖在列表上的子页，继承各自列表页的授权。
+      { name: 'purchaseReturns', authorizedAs: 'purchaseReturns' },
+      { name: 'purchaseReturnNew', authorizedAs: 'purchaseReturns' },
+      { name: 'purchaseReturn', authorizedAs: 'purchaseReturns' },
+      { name: 'salesReturns', authorizedAs: 'salesReturns' },
+      { name: 'salesReturnNew', authorizedAs: 'salesReturns' },
+      { name: 'salesReturn', authorizedAs: 'salesReturns' },
       // 物料与库存的物料（R-019）：三个标签共用一条路由，页面授权 `items`，对话框与抽屉继承列表页的授权。
       { name: 'items', authorizedAs: 'items' },
       { name: 'itemNew', authorizedAs: 'items' },
@@ -235,6 +242,11 @@ describe('app client routes', () => {
       { name: 'unitEdit', authorizedAs: 'items' },
       { name: 'categoryNew', authorizedAs: 'items' },
       { name: 'categoryEdit', authorizedAs: 'items' },
+      // R-019 波 2：BOM 页，页面授权 `boms`；新建、详情、编辑的子页继承列表页的授权。
+      { name: 'boms', authorizedAs: 'boms' },
+      { name: 'bomNew', authorizedAs: 'boms' },
+      { name: 'bom', authorizedAs: 'boms' },
+      { name: 'bomEdit', authorizedAs: 'boms' },
       // 采购订单（R-021）与销售订单（R-022）：页面授权 id 见《基座ERP前端设计》1.3，
       // 新建、详情、编辑的子页与生成出入库单的对话框继承列表页的授权。
       { name: 'purchaseOrders', authorizedAs: 'purchaseOrders' },
@@ -246,6 +258,11 @@ describe('app client routes', () => {
       { name: 'purchaseRequestNew', authorizedAs: 'purchaseRequests' },
       { name: 'purchaseRequest', authorizedAs: 'purchaseRequests' },
       { name: 'purchaseRequestEdit', authorizedAs: 'purchaseRequests' },
+      // R-070 来料检验：新建、详情、编辑继承列表页的页面授权。
+      { name: 'inspections', authorizedAs: 'inspectionOrders' },
+      { name: 'inspectionNew', authorizedAs: 'inspectionOrders' },
+      { name: 'inspection', authorizedAs: 'inspectionOrders' },
+      { name: 'inspectionEdit', authorizedAs: 'inspectionOrders' },
       { name: 'salesOrders', authorizedAs: 'salesOrders' },
       { name: 'salesOrderNew', authorizedAs: 'salesOrders' },
       { name: 'salesOrder', authorizedAs: 'salesOrders' },
@@ -276,6 +293,23 @@ describe('app client routes', () => {
       { name: 'invoiceReceiptNew', authorizedAs: 'invoiceReceipts' },
       { name: 'invoiceReceipt', authorizedAs: 'invoiceReceipts' },
       { name: 'invoiceReceiptEdit', authorizedAs: 'invoiceReceipts' },
+      // R-065 第二片：收入、开票、应收应付对账四页，子路由继承各自的页面授权。
+      { name: 'incomeRecords', authorizedAs: 'incomeRecords' },
+      { name: 'incomeRecordNew', authorizedAs: 'incomeRecords' },
+      { name: 'incomeRecord', authorizedAs: 'incomeRecords' },
+      { name: 'incomeRecordEdit', authorizedAs: 'incomeRecords' },
+      { name: 'saleInvoiceRecords', authorizedAs: 'saleInvoiceRecords' },
+      { name: 'saleInvoiceRecordNew', authorizedAs: 'saleInvoiceRecords' },
+      { name: 'saleInvoiceRecord', authorizedAs: 'saleInvoiceRecords' },
+      { name: 'saleInvoiceRecordEdit', authorizedAs: 'saleInvoiceRecords' },
+      { name: 'receivableRecons', authorizedAs: 'receivableRecons' },
+      { name: 'receivableReconNew', authorizedAs: 'receivableRecons' },
+      { name: 'receivableRecon', authorizedAs: 'receivableRecons' },
+      { name: 'receivableReconEdit', authorizedAs: 'receivableRecons' },
+      { name: 'payableRecons', authorizedAs: 'payableRecons' },
+      { name: 'payableReconNew', authorizedAs: 'payableRecons' },
+      { name: 'payableRecon', authorizedAs: 'payableRecons' },
+      { name: 'payableReconEdit', authorizedAs: 'payableRecons' },
       { name: 'quality', authorizedAs: 'quality' },
       { name: 'feedbacks', authorizedAs: 'feedback' },
       { name: 'feedbackNew', authorizedAs: 'feedback' },
@@ -284,6 +318,8 @@ describe('app client routes', () => {
       { name: 'approvalMine', authorizedAs: null },
       { name: 'approvalTasks', authorizedAs: null },
       { name: 'approvalDetail', authorizedAs: null },
+      // R-078：报表中心按主会话决定留在侧栏顶层，审批之后、系统设置之前；页面授权 id 为 reports。
+      { name: 'reports', authorizedAs: 'reports' },
       { name: 'apiKeysManagement', authorizedAs: null },
       // R-076：打印视图不登记页面授权，进入时按 docType 检查 print 动作。
       { name: 'docPrintView', authorizedAs: null },
@@ -413,6 +449,13 @@ describe('app client routes', () => {
       { name: 'transferNew', authorizedAs: 'transfers' },
       { name: 'transfer', authorizedAs: 'transfers' },
       { name: 'transferEdit', authorizedAs: 'transfers' },
+      // R-020 波 2 加片二：退货单的新建、详情是盖在列表上的子页，继承各自列表页的授权。
+      { name: 'purchaseReturns', authorizedAs: 'purchaseReturns' },
+      { name: 'purchaseReturnNew', authorizedAs: 'purchaseReturns' },
+      { name: 'purchaseReturn', authorizedAs: 'purchaseReturns' },
+      { name: 'salesReturns', authorizedAs: 'salesReturns' },
+      { name: 'salesReturnNew', authorizedAs: 'salesReturns' },
+      { name: 'salesReturn', authorizedAs: 'salesReturns' },
       // 物料与库存的物料（R-019）：三个标签共用一条路由，页面授权 `items`，对话框与抽屉继承列表页的授权。
       { name: 'items', authorizedAs: 'items' },
       { name: 'itemNew', authorizedAs: 'items' },
@@ -422,6 +465,11 @@ describe('app client routes', () => {
       { name: 'unitEdit', authorizedAs: 'items' },
       { name: 'categoryNew', authorizedAs: 'items' },
       { name: 'categoryEdit', authorizedAs: 'items' },
+      // R-019 波 2：BOM 页，页面授权 `boms`；新建、详情、编辑的子页继承列表页的授权。
+      { name: 'boms', authorizedAs: 'boms' },
+      { name: 'bomNew', authorizedAs: 'boms' },
+      { name: 'bom', authorizedAs: 'boms' },
+      { name: 'bomEdit', authorizedAs: 'boms' },
       // 采购订单（R-021）与销售订单（R-022）：页面授权 id 见《基座ERP前端设计》1.3，
       // 新建、详情、编辑的子页与生成出入库单的对话框继承列表页的授权。
       { name: 'purchaseOrders', authorizedAs: 'purchaseOrders' },
@@ -433,6 +481,11 @@ describe('app client routes', () => {
       { name: 'purchaseRequestNew', authorizedAs: 'purchaseRequests' },
       { name: 'purchaseRequest', authorizedAs: 'purchaseRequests' },
       { name: 'purchaseRequestEdit', authorizedAs: 'purchaseRequests' },
+      // R-070 来料检验：新建、详情、编辑继承列表页的页面授权。
+      { name: 'inspections', authorizedAs: 'inspectionOrders' },
+      { name: 'inspectionNew', authorizedAs: 'inspectionOrders' },
+      { name: 'inspection', authorizedAs: 'inspectionOrders' },
+      { name: 'inspectionEdit', authorizedAs: 'inspectionOrders' },
       { name: 'salesOrders', authorizedAs: 'salesOrders' },
       { name: 'salesOrderNew', authorizedAs: 'salesOrders' },
       { name: 'salesOrder', authorizedAs: 'salesOrders' },
@@ -463,6 +516,23 @@ describe('app client routes', () => {
       { name: 'invoiceReceiptNew', authorizedAs: 'invoiceReceipts' },
       { name: 'invoiceReceipt', authorizedAs: 'invoiceReceipts' },
       { name: 'invoiceReceiptEdit', authorizedAs: 'invoiceReceipts' },
+      // R-065 第二片：收入、开票、应收应付对账四页，子路由继承各自的页面授权。
+      { name: 'incomeRecords', authorizedAs: 'incomeRecords' },
+      { name: 'incomeRecordNew', authorizedAs: 'incomeRecords' },
+      { name: 'incomeRecord', authorizedAs: 'incomeRecords' },
+      { name: 'incomeRecordEdit', authorizedAs: 'incomeRecords' },
+      { name: 'saleInvoiceRecords', authorizedAs: 'saleInvoiceRecords' },
+      { name: 'saleInvoiceRecordNew', authorizedAs: 'saleInvoiceRecords' },
+      { name: 'saleInvoiceRecord', authorizedAs: 'saleInvoiceRecords' },
+      { name: 'saleInvoiceRecordEdit', authorizedAs: 'saleInvoiceRecords' },
+      { name: 'receivableRecons', authorizedAs: 'receivableRecons' },
+      { name: 'receivableReconNew', authorizedAs: 'receivableRecons' },
+      { name: 'receivableRecon', authorizedAs: 'receivableRecons' },
+      { name: 'receivableReconEdit', authorizedAs: 'receivableRecons' },
+      { name: 'payableRecons', authorizedAs: 'payableRecons' },
+      { name: 'payableReconNew', authorizedAs: 'payableRecons' },
+      { name: 'payableRecon', authorizedAs: 'payableRecons' },
+      { name: 'payableReconEdit', authorizedAs: 'payableRecons' },
       { name: 'quality', authorizedAs: 'quality' },
       { name: 'feedbacks', authorizedAs: 'feedback' },
       { name: 'feedbackNew', authorizedAs: 'feedback' },
@@ -471,6 +541,8 @@ describe('app client routes', () => {
       { name: 'approvalMine', authorizedAs: null },
       { name: 'approvalTasks', authorizedAs: null },
       { name: 'approvalDetail', authorizedAs: null },
+      // R-078：报表中心按主会话决定留在侧栏顶层，审批之后、系统设置之前；页面授权 id 为 reports。
+      { name: 'reports', authorizedAs: 'reports' },
       { name: 'apiKeysManagement', authorizedAs: null },
       // R-076：打印视图不登记页面授权，进入时按 docType 检查 print 动作。
       { name: 'docPrintView', authorizedAs: null },

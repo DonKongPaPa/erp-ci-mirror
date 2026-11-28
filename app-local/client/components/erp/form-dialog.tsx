@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from 'react';
 
+import { ActionGlyph } from '#components/action-glyph';
 import { FeedbackForm } from '#components/feedback-form';
 import { PendingButton } from '#components/pending-button';
 import { RouteDialog } from '#components/route-dialog';
@@ -18,6 +19,7 @@ import { useRouteOverlay } from '#components/use-route-overlay';
 import { Alert, AlertDescription } from '#components/ui/alert';
 import { Button } from '#components/ui/button';
 import { Checkbox } from '#components/ui/checkbox';
+import type { ActionIconKey } from '#lib/action-icons';
 import { Label } from '#components/ui/label';
 import {
   Field,
@@ -52,6 +54,8 @@ export interface FormDialogProps<V, R> {
   readonly description?: ReactNode;
   /** 写明是「创建」还是「保存」。 */
   readonly submitLabel: ReactNode;
+  /** 提交按钮的图标键；默认 save，新建表单可传 create。 */
+  readonly action?: ActionIconKey;
   readonly initialValues: V;
   /** 提交时才跑：返回「字段名 → 提示」；有一项就不发请求，光标落到第一项。 */
   readonly validate?: (values: V) => FieldErrors;
@@ -87,6 +91,7 @@ export function FormDialog<V, R>({
   title,
   description,
   submitLabel,
+  action = 'save',
   initialValues,
   validate,
   save,
@@ -108,6 +113,7 @@ export function FormDialog<V, R>({
           <FormDialogFooter
             formId={formId}
             submitLabel={submitLabel}
+            action={action}
             busy={busy}
           />
         }
@@ -230,10 +236,12 @@ function FormDialogBody<V, R>({
 function FormDialogFooter({
   formId,
   submitLabel,
+  action,
   busy,
 }: {
   readonly formId: string;
   readonly submitLabel: ReactNode;
+  readonly action: ActionIconKey;
   readonly busy: boolean;
 }): ReactElement {
   const { t } = useTranslation();
@@ -241,9 +249,10 @@ function FormDialogFooter({
   return (
     <>
       <Button variant='outline' disabled={busy} onClick={() => void close()}>
+        <ActionGlyph action='cancel' />
         {t('actions.cancel')}
       </Button>
-      <PendingButton type='submit' form={formId} busy={busy}>
+      <PendingButton type='submit' form={formId} busy={busy} action={action}>
         {submitLabel}
       </PendingButton>
     </>

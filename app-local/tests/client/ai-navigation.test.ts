@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import applicationRoutes from '../../client/routes.js';
 import {
   buildRouteNavigation,
+  buildSettingsCatalog,
   routeKey,
 } from '../../client/routing/route-navigation.js';
 
@@ -81,7 +82,11 @@ describe('R-042: AI navigation follows authorization', () => {
     const menu = buildRouteNavigation(resolved, denied);
 
     // R-017 M5：审批入口对所有登录用户可见，和业务用户能不能开 AI 无关。
-    expect(menu.map(({ route }) => route.name)).toEqual(['home', 'quality', 'approvals']);
+    expect(menu.map(({ route }) => route.name)).toEqual([
+      'home',
+      'businessQuality',
+      'approvals',
+    ]);
     expect(menu.some(({ route }) => route.name === 'ai')).toBe(false);
 
     for (const name of ['models', 'agents']) {
@@ -100,15 +105,16 @@ describe('R-042: AI navigation follows authorization', () => {
     }
   });
 
-  it('shows root the AI group with the five pages in order', async () => {
+  it('puts root the five AI pages in System settings, not in the sidebar', async () => {
     const denied = await deniedFor({ unrestricted: true, permissions: [] });
     expect(denied.size).toBe(0);
     const menu = buildRouteNavigation(resolved, denied);
+    expect(menu.some(({ route }) => route.name === 'ai')).toBe(false);
 
-    const ai = menu.find(({ route }) => route.name === 'ai');
-    expect(ai, '主导航里没有 AI 分组').toBeDefined();
-    expect(ai?.route.navigation?.title).toBe('navigation.ai');
-    expect(ai?.children.map(({ route }) => route.name)).toEqual([
+    const ai = buildSettingsCatalog(resolved, denied).find(
+      (category) => category.route.name === 'settingsAi',
+    );
+    expect(ai?.modules.map(({ route }) => route.name)).toEqual([
       'models',
       'agents',
       'runtimes',

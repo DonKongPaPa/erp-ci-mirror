@@ -40,6 +40,12 @@ export const ReceivableQuery = z.object({
   page,
   pageSize,
 });
+/** 页面片新增：新建检验单时选采购订单行的窄读查询，授权仍走 inspectionOrders.view。 */
+export const OrderOptionsQuery = z.object({
+  q: z.string().min(1).max(128).optional(),
+  page,
+  pageSize,
+});
 export const CreateInspectionBody = z.object({
   inspectionDate: day.nullable().optional(),
   purchaseOrderId: id,

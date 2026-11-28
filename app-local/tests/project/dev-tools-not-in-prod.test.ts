@@ -49,17 +49,21 @@ const isDevToolServerSource = (file: string): boolean =>
   [
     'server/routes/dev-account-switcher.ts',
     'server/routes/dev-requirements-board.ts',
+    'server/routes/dev-confirmations.ts',
+    'server/routes/dev-feedback.ts',
     'server/providers/dev-account-switcher.ts',
     'server/config/dev-tools.ts',
   ].includes(file);
 
 const isDevToolClientSource = (file: string): boolean =>
   file.startsWith('client/extensions/dev-account-switcher/') ||
-  file.startsWith('client/extensions/dev-requirements-board/');
+  file.startsWith('client/extensions/dev-requirements-board/') ||
+  file.startsWith('client/extensions/dev-confirmations/') ||
+  file.startsWith('client/extensions/dev-feedback/');
 
 /** 服务端开发工具模块的引入路径（源码里写的是 `.js`）。 */
 const DEV_TOOL_SERVER_MODULE =
-  /\/dev-tools\/|\/dev-account-switcher\.js$|\/dev-requirements-board\.js$|\/config\/dev-tools\.js$/u;
+  /\/dev-tools\/|\/dev-account-switcher\.js$|\/dev-requirements-board\.js$|\/dev-confirmations\.js$|\/dev-feedback\.js$|\/config\/dev-tools\.js$/u;
 
 /** 切换器的代码模块；它的词条表不在此列，语言包那一条另有测试。 */
 const SWITCHER_CODE_MODULE =
@@ -67,6 +71,12 @@ const SWITCHER_CODE_MODULE =
 
 /** 看板的代码模块；词条表同样只由语言包在开发构建里并入。 */
 const BOARD_CODE_MODULE = /\/dev-requirements-board\/(?:index|model)\.js$/u;
+
+/** 待确认事项的代码模块；词条表同样只由语言包在开发构建里并入。 */
+const CONFIRMATIONS_CODE_MODULE = /\/dev-confirmations\/(?:index|model)\.js$/u;
+
+/** 测试反馈的代码模块；词条表同样只由语言包在开发构建里并入。 */
+const FEEDBACK_CODE_MODULE = /\/dev-feedback\/(?:index|model|panel|register)\.js$/u;
 
 /**
  * `check-dist.sh` 对 `dist/server` 全文断言零命中的标记。源码里带着它们的注释会被原样编进产物
@@ -77,6 +87,10 @@ const SERVER_ARTIFACT_MARKERS = [
   'dev-account-switcher',
   'dev/requirements-board',
   'requirements-board',
+  'dev/confirmations',
+  'dev-confirmations',
+  'dev/feedback',
+  'dev-feedback',
   'demo.quality_manager',
   'demo.quality_inspector',
   'demo.dept_manager',
@@ -84,6 +98,8 @@ const SERVER_ARTIFACT_MARKERS = [
   'demo.warehouse',
   'demo.purchase',
   'demo.sales',
+  'demo.finance',
+  'demo.planning',
 ];
 
 /**
@@ -192,6 +208,56 @@ describe('R-073 部署产物里没有开发与演示功能（源码守门）', (
     }
   });
 
+  it('the confirmations page is reached only by a dynamic import behind the development constant', () => {
+    const loader = 'client/extensions/development-extensions.ts';
+    const source = read(loader);
+    const gate = source.indexOf('if (!import.meta.env.DEV) return defineAppRoutes([]);');
+    const dynamicImport = source.search(
+      /componentLoader:\s*\(\)\s*=>\s*import\(\s*['"]\.\/dev-confirmations\/index\.js['"]/u,
+    );
+    expect(
+      gate,
+      '待确认事项的路由没有「非开发构建直接返回空」这道门。',
+    ).toBeGreaterThan(-1);
+    expect(dynamicImport, '待确认事项的页面不是动态引入的。').toBeGreaterThan(
+      gate,
+    );
+    for (const file of clientSources) {
+      expect(
+        staticImportSpecifiers(read(file)).filter((specifier) =>
+          CONFIRMATIONS_CODE_MODULE.test(specifier),
+        ),
+        `${file} 静态引入了待确认事项的代码模块：静态引入会把它带进生产构建的模块图。`,
+      ).toEqual([]);
+    }
+  });
+
+  it('the feedback page and its floating panel are reached only by dynamic imports behind the development constant', () => {
+    const loader = 'client/extensions/development-extensions.ts';
+    const source = read(loader);
+    const gate = source.indexOf('if (!import.meta.env.DEV) return defineAppRoutes([]);');
+    const pageImport = source.search(
+      /componentLoader:\s*\(\)\s*=>\s*import\(\s*['"]\.\/dev-feedback\/index\.js['"]/u,
+    );
+    const panelImport = source.search(
+      /await import\(\s*['"]\.\/dev-feedback\/register\.js['"]/u,
+    );
+    expect(
+      gate,
+      '测试反馈的路由没有「非开发构建直接返回空」这道门。',
+    ).toBeGreaterThan(-1);
+    expect(pageImport, '测试反馈的页面不是动态引入的。').toBeGreaterThan(gate);
+    expect(panelImport, '悬浮面板不是动态引入的。').toBeGreaterThan(-1);
+    for (const file of clientSources) {
+      expect(
+        staticImportSpecifiers(read(file)).filter((specifier) =>
+          FEEDBACK_CODE_MODULE.test(specifier),
+        ),
+        `${file} 静态引入了测试反馈的代码模块：静态引入会把它带进生产构建的模块图。`,
+      ).toEqual([]);
+    }
+  });
+
   it('the switcher locale entries are merged only by a development-guarded spread', () => {
     for (const locale of ['en-US', 'zh-CN']) {
       const source = read(`client/locales/${locale}.ts`);
@@ -209,9 +275,21 @@ describe('R-073 部署产物里没有开发与演示功能（源码守门）', (
       );
       expect(
         source,
-        `client/locales/${locale}.ts 并入 devTools 词条时没有用 import.meta.env.DEV 挡：生产构建的语言包会带上「切换账户」「需求池看板」这些文案。`,
+        `client/locales/${locale}.ts 没有引入待确认事项的词条表。`,
+      ).toContain(
+        `import confirmations from '../extensions/dev-confirmations/locales/${locale}.js';`,
+      );
+      expect(
+        source,
+        `client/locales/${locale}.ts 没有引入测试反馈的词条表。`,
+      ).toContain(
+        `import feedback from '../extensions/dev-feedback/locales/${locale}.js';`,
+      );
+      expect(
+        source,
+        `client/locales/${locale}.ts 并入 devTools 词条时没有用 import.meta.env.DEV 挡：生产构建的语言包会带上「切换账户」「需求池看板」「待确认事项」「测试反馈」这些文案。`,
       ).toMatch(
-        /\.\.\.\(\s*import\.meta\.env\.DEV\s*\?\s*\{\s*devTools:\s*\{\s*\.\.\.devTools,\s*\.\.\.requirementsBoard\s*\}\s*\}\s*:\s*\{\}\s*\),/u,
+        /\.\.\.\(\s*import\.meta\.env\.DEV\s*\?\s*\{\s*devTools:\s*\{\s*\.\.\.devTools,\s*\.\.\.requirementsBoard,\s*\.\.\.confirmations,\s*\.\.\.feedback\s*,?\s*\}\s*,?\s*\}\s*:\s*\{\}\s*\),/u,
       );
     }
     for (const file of clientSources.filter(
@@ -232,6 +310,22 @@ describe('R-073 部署产物里没有开发与演示功能（源码守门）', (
       ).toEqual(
         expect.not.arrayContaining([
           expect.stringMatching(/dev-requirements-board\/locales\//u),
+        ]),
+      );
+      expect(
+        specifiers,
+        `${file} 引入了待确认事项的词条表：词条只能由两份语言包并入。`,
+      ).toEqual(
+        expect.not.arrayContaining([
+          expect.stringMatching(/dev-confirmations\/locales\//u),
+        ]),
+      );
+      expect(
+        specifiers,
+        `${file} 引入了测试反馈的词条表：词条只能由两份语言包并入。`,
+      ).toEqual(
+        expect.not.arrayContaining([
+          expect.stringMatching(/dev-feedback\/locales\//u),
         ]),
       );
     }

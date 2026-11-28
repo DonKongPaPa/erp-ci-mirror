@@ -112,6 +112,7 @@ export const DocListQuery = z.object({
   takerDepartmentId: z.string().min(1).max(64).optional(),
   stocktakingId: z.string().min(1).max(64).optional(),
   transferDocId: z.string().min(1).max(64).optional(),
+  returnDocId: z.string().min(1).max(64).optional(),
   dateField: z.literal('docDate').optional(),
   q: z.string().min(1).max(128).optional(),
   from: isoDate.optional(),

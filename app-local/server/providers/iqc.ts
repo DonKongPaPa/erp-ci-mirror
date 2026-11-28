@@ -152,6 +152,24 @@ export interface ReceivableQuery extends PageQuery {
   readonly purchaseOrderId?: string;
   readonly q?: string;
 }
+/** 新建检验单时选采购订单行用的窄查询；只按单号找，授权仍走 inspectionOrders.view。 */
+export interface OrderOptionsQuery extends PageQuery {
+  readonly q?: string;
+}
+/** 只回建检验单需要的列：单号、日期、供应商摘要与可检明细，不回单价、经办人、联系方式。 */
+export interface InspectionOrderOption {
+  readonly id: string;
+  readonly orderNo: string;
+  readonly orderDate: string;
+  readonly supplier: SupplierRef | null;
+  readonly lines: readonly {
+    readonly itemId: string;
+    readonly item: ItemRef;
+    readonly purchaseQty: number;
+    /** 采购数量减去其它未作废检验单已占的收货数量，页面据此预填收货数量。 */
+    readonly receivedRemainQty: number;
+  }[];
+}
 export interface Page<T> {
   readonly items: readonly T[];
   readonly total: number;
@@ -189,6 +207,7 @@ export interface InspectionReader {
   list(query: InspectionListQuery): Promise<Page<InspectionSummary>>;
   detail(id: string): Promise<InspectionRecord | undefined>;
   receivable(query: ReceivableQuery): Promise<Page<ReceivableInspection>>;
+  orderOptions(query: OrderOptionsQuery): Promise<Page<InspectionOrderOption>>;
 }
 export interface InspectionMutations {
   create(input: CreateInspectionInput, byUserId: string): Promise<InspectionRecord>;
@@ -597,6 +616,82 @@ export class DatabaseInspectionReader implements InspectionReader {
       items: all.slice(offset, offset + query.pageSize),
       total: all.length,
     };
+  }
+
+  /**
+   * R-070 页面片：新建检验单的「从采购订单选行」数据源。只读，授权走 inspectionOrders.view，
+   * 不给质量岗额外开 purchaseOrders 的读；可检状态与 requireOrder 一致（非草稿、非取消）。
+   * 每行回采购数量与扣除其它未作废检验单后的余额，四个算列仍由服务端在写时算。
+   */
+  public async orderOptions(
+    query: OrderOptionsQuery,
+  ): Promise<Page<InspectionOrderOption>> {
+    const knex = await this.knex();
+    const base = knex<OrderRow & { status: string; supplier_id: string | null }>(
+      'purchase_orders',
+    )
+      .select('id', 'order_no', 'order_date', 'supplier_id')
+      .whereIn('status', ['ordered', 'partially_received'])
+      .modify((builder) => {
+        if (query.q !== undefined && query.q !== '') {
+          void builder.whereILike('order_no', `%${query.q}%`);
+        }
+      });
+    const total = await countOf(base);
+    const rows = (await base.clone()
+      .orderBy('created_at', 'desc')
+      .limit(query.pageSize)
+      .offset((query.page - 1) * query.pageSize)) as (OrderRow & {
+      status: string;
+      supplier_id: string | null;
+    })[];
+    const supplierIds = [...new Set(rows.map((row) => row.supplier_id).filter(
+      (id): id is string => id !== null && id !== '',
+    ))];
+    const supplierRows = supplierIds.length === 0 ? [] : await knex<RefRow>('partners')
+      .select('id', 'code', 'name').whereIn('id', supplierIds);
+    const suppliers = new Map(supplierRows.map((row) => [row.id, row]));
+    const items: InspectionOrderOption[] = [];
+    for (const row of rows) {
+      const lines = await knex<{
+        item_id: string; qty: string | number; order_id: string;
+      }>('purchase_order_lines')
+        .select('item_id', 'qty').where({ order_id: row.id }).orderBy('id', 'asc');
+      const itemIds = [...new Set(lines.map((line) => line.item_id))];
+      const itemRows = itemIds.length === 0 ? [] : await knex<ItemRow>('items')
+        .select('id', 'code', 'name', 'spec', 'unit_code').whereIn('id', itemIds);
+      const byItem = new Map(itemRows.map((item) => [item.id, item]));
+      const optionLines: InspectionOrderOption['lines'][number][] = [];
+      for (const line of lines) {
+        const item = byItem.get(line.item_id);
+        if (item === undefined) continue;
+        const occupied = await occupiedReceived(knex, row.id, line.item_id);
+        const remain = num(line.qty) - occupied;
+        optionLines.push({
+          itemId: line.item_id,
+          item: {
+            id: item.id, code: item.code, name: item.name,
+            spec: item.spec, unitCode: item.unit_code,
+          },
+          purchaseQty: num(line.qty),
+          receivedRemainQty: Math.max(0, remain),
+        });
+      }
+      const supplierRef = row.supplier_id === null ? undefined
+        : suppliers.get(row.supplier_id);
+      items.push({
+        id: row.id,
+        orderNo: row.order_no,
+        orderDate: dayString(row.order_date),
+        supplier: supplierRef === undefined ? null : {
+          id: supplierRef.id,
+          code: supplierRef.code ?? '',
+          name: supplierRef.name ?? '',
+        },
+        lines: optionLines,
+      });
+    }
+    return { items, total };
   }
 }
 

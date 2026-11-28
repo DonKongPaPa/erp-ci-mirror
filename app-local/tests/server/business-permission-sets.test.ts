@@ -42,11 +42,31 @@ import financeRequestGrantsSeed, {
   persistFinanceRequestGrants,
   staffFinanceRequestGrant,
 } from '../../database/main/seeds/202611280017_seed_finance_request_grants.js';
+import financeReconciliationGrantsSeed, {
+  financeReconciliationGrants as expectedReconciliationGrants,
+  financeReconciliationPermissionSets,
+  persistFinanceReconciliationGrants,
+} from '../../database/main/seeds/202611280019_seed_finance_reconciliation_grants.js';
 import financeRequestPageGrantsSeed, {
   financeRequestPageGrant,
   financeRequestPagePermissionSets,
   persistFinanceRequestPageGrants,
 } from '../../database/main/seeds/202611280018_seed_finance_request_page_grants.js';
+import {
+  financeReconciliationPageGrants as expectedReconciliationPageGrants,
+} from '../../database/main/seeds/202611280028_seed_finance_reconciliation_page_grants.js';
+import bomGrantsSeed, {
+  bomPermissionSets,
+  bomReadGrant as expectedBomReadGrant,
+  craftPermissionSet,
+  persistBomGrants,
+  planningBomPermissionSet,
+} from '../../database/main/seeds/202611280022_seed_bom_grants.js';
+import bomPageGrantsSeed, {
+  bomPageGrant as expectedBomPageGrant,
+  bomPagePermissionSets,
+  persistBomPageGrants,
+} from '../../database/main/seeds/202611280026_seed_bom_page_grants.js';
 import iqcGrantsSeed, {
   iqcPermissionSets,
   inspectorIqcGrant,
@@ -55,6 +75,23 @@ import iqcGrantsSeed, {
   purchaseIqcGrant,
   warehouseIqcGrant,
 } from '../../database/main/seeds/202611280021_seed_iqc_grants.js';
+import iqcPageGrantsSeed, {
+  IQC_PAGE_TARGETS,
+  inspectionsPageGrant,
+  iqcPagePermissionSets,
+  persistIqcPageGrants,
+} from '../../database/main/seeds/202611280025_seed_iqc_page_grants.js';
+import mesGrantsSeed, {
+  MES_ROLES,
+  mesGrant as expectedMesGrant,
+  mesPermissionSets,
+  persistMesGrants,
+  productionPermissionSet,
+} from '../../database/main/seeds/202611280031_seed_mes_grants.js';
+import reportRulesSeed, {
+  persistReportRules,
+  REPORT_RULE_DEFAULTS,
+} from '../../database/main/seeds/202611280032_seed_mes_report_rules.js';
 import purchaseRequestGrantsSeed, {
   planningPurchaseRequestGrant,
   purchasePurchaseRequestGrant,
@@ -88,6 +125,30 @@ import quotationPageGrantsSeed, {
   quotationPageGrant,
   quotationPagePermissionSet,
 } from '../../database/main/seeds/202611280016_seed_quotation_page_grants.js';
+import returnsSeed, {
+  financeSalesReturnGrant,
+  persistReturnGrants,
+  purchaseReturnsGrant,
+  returnPermissionSets,
+  salesReturnsGrant,
+  warehousePurchasePostGrant,
+  warehousePurchasePostViewGrant,
+  warehouseSalesPostGrant,
+  warehouseSalesPostViewGrant,
+} from '../../database/main/seeds/202611280020_seed_returns_grants.js';
+import returnsPageSeed, {
+  persistReturnsPageGrants,
+  purchaseReturnsPageGrant,
+  returnsPagePermissionSets,
+  salesReturnsPageGrant,
+} from '../../database/main/seeds/202611280027_seed_returns_page_grants.js';
+import { reportEntryGrant, REPORT_ROLES } from '../../database/main/seeds/202611280023_seed_reports_grants.js';
+import reportsPageGrantsSeed, {
+  hasReportsPageGrant,
+  persistReportsPageGrants,
+  reportsPageGrant,
+  reportsPagePermissionSets,
+} from '../../database/main/seeds/202611280029_seed_reports_page_grants.js';
 import { createStandaloneServer } from '../../server/standalone.js';
 
 /**
@@ -473,6 +534,28 @@ const expectedRoles = {
       purchaseOrderPriceGrant,
     ],
   },
+  // R-019 波 2：新角色 craft 只由 022 号新种子建，原种子一份都不带。
+  craft: {
+    title: { key: 'permissionSets.business.craft', ns: 'app-local' },
+    grants: [expectedBomReadGrant],
+  },
+} as const;
+
+/** R-020 波 2：退货授权只在补丁种子里声明，原种子一份都不带。 */
+const expectedReturnsGrantsByRole = {
+  purchase: [purchaseReturnsGrant],
+  sales: [salesReturnsGrant],
+  warehouse: [
+    {
+      resource: warehousePurchasePostGrant.resource,
+      actions: [...warehousePurchasePostGrant.actions, ...warehousePurchasePostViewGrant.actions],
+    },
+    {
+      resource: warehouseSalesPostGrant.resource,
+      actions: [...warehouseSalesPostGrant.actions, ...warehouseSalesPostViewGrant.actions],
+    },
+  ],
+  finance: [financeSalesReturnGrant],
 } as const;
 
 /** R-064：planning 与给 sales 的两条补丁授权从新种子取，断言照旧逐项钉住。 */
@@ -514,6 +597,24 @@ const expectedFinanceRequestPageGrants = {
   finance: [financeRequestPageGrant],
 } as const;
 /** R-070：021 排在 018 之后，四个现成角色各追加一条检验授权；别的角色一份没有。 */
+/** R-023 W3-1：031 种子给五个角色 view、给 finance priceView；maintain 只给 root。 */
+const mesViewGrant = {
+  resource: { type: 'composite', id: 'mesSettings' },
+  actions: [{ action: 'view' }],
+};
+const mesPriceViewGrant = {
+  resource: { type: 'composite', id: 'mesSettings' },
+  actions: [{ action: 'priceView' }],
+};
+const expectedMesAdditions = {
+  craft: [mesViewGrant],
+  planning: [mesViewGrant],
+  production: [mesViewGrant],
+  warehouse: [mesViewGrant],
+  quality_inspector: [mesViewGrant],
+  finance: [mesPriceViewGrant],
+} as const;
+
 const expectedIqcAdditions = {
   quality_inspector: [inspectorIqcGrant],
   quality_manager: [managerIqcGrant],
@@ -531,6 +632,13 @@ const expectedStocktakingPageGrants = {
   warehouse: [stocktakingPageGrant, transferPageGrant],
   finance: [stocktakingPageGrant],
 } as const;
+/** R-020 波 2 加片二页面片：采购/销售各一页，仓管两页，财务只销售退货页。 */
+const expectedReturnsPageGrants = {
+  purchase: [purchaseReturnsPageGrant],
+  sales: [salesReturnsPageGrant],
+  warehouse: [purchaseReturnsPageGrant, salesReturnsPageGrant],
+  finance: [salesReturnsPageGrant],
+} as const;
 /** R-022 复刻波 1：报价六个动作只追加给 sales，别的角色一份没有。 */
 const expectedQuotationGrants = [salesQuotationGrant] as const;
 /** R-022 波 2：报价单页面授权也只给 sales；root 天然全通，不写进权限集。 */
@@ -540,10 +648,26 @@ const expectedPageGrantsByRole = {
   planning: expectedPlanningPageGrants,
   sales: expectedSalesPageGrants,
 } as const;
+/** R-078 页面片：029 只给五个岗位各补一条报表中心页面授权；root 天然全通，不写权限集。 */
+const expectedReportsPageGrantByRole = Object.fromEntries(
+  REPORT_ROLES.map((role) => [role, [reportsPageGrant]]),
+) as Readonly<Record<string, readonly typeof reportsPageGrant[]>>;
 
-const roleKeys = Object.keys(expectedRoles);
+// craft 是新种子建的角色，不在原种子里：查旧种子时不能把它算进去。
+const roleKeys = Object.keys(expectedRoles).filter((key) => key !== 'craft');
 const newRoleKeys = Object.keys(expectedNewRoles);
-const allRoleKeys = [...roleKeys, ...newRoleKeys];
+const allRoleKeys = [...roleKeys, ...newRoleKeys, 'craft', 'production'];
+
+/** R-019 波 2：022 号种子只给 craft 与 planning 追加 BOM 的两个读动作。 */
+const expectedBomAdditions = {
+  craft: [expectedBomReadGrant],
+  planning: [expectedBomReadGrant],
+} as const;
+/** R-019 波 2 页面片：026 号种子只给 craft 与 planning 各补一条 BOM 页授权。 */
+const expectedBomPageGrants = {
+  craft: [expectedBomPageGrant],
+  planning: [expectedBomPageGrant],
+} as const;
 
 const test = createAppTest({
   createServer: createStandaloneServer,
@@ -585,6 +709,104 @@ test('R-064: the new seed declares planning and the sales additions', () => {
       );
     }
   }
+});
+
+/** R-019 波 2：新种子只建 craft，并只给 craft / planning 追加 BOM 两个读动作。 */
+test('R-019 波2: the BOM seed declares craft and two read grants only', () => {
+  expect(bomGrantsSeed.name).toBe('202611280022_seed_bom_grants');
+  expect(typeof bomGrantsSeed.run).toBe('function');
+  expect(bomPermissionSets.map((set) => set.key)).toEqual(['craft', 'planning']);
+  expect(craftPermissionSet.title).toEqual(expectedRoles.craft.title);
+  expect(craftPermissionSet.grants).toEqual([expectedBomReadGrant]);
+  expect(planningBomPermissionSet.grants).toEqual([expectedBomAdditions.planning[0]]);
+  expect(expectedBomReadGrant.actions.map((action) => action.action)).toEqual([
+    'view', 'explode',
+  ]);
+  // 原种子里不该有 BOM 授权：新角色与新动作都只能由 022 带进来。
+  for (const set of businessPermissionSets) {
+    for (const grant of set.grants) {
+      expect(grant.resource.id, `${set.key} 不该在原种子拿到 BOM 授权`).not.toBe('boms');
+    }
+  }
+});
+
+test('R-019 波2: fresh database has craft with two read grants; rerun writes nothing', async ({
+  app,
+  connection,
+}) => {
+  const stored = app.container.resolve(authorizationToken).permissionSets;
+  const craft = await stored.get('craft');
+  expect(craft?.title).toEqual(expectedRoles.craft.title);
+  const grants = JSON.parse(JSON.stringify(craft?.grants ?? [])) as {
+    resource: { type: string; id: string };
+    actions: { action: string }[];
+  }[];
+  const bomGrant = grants.find(
+    (grant) => grant.resource.type === 'composite' && grant.resource.id === 'boms',
+  );
+  expect(bomGrant, 'craft 缺 BOM 业务授权').toBeDefined();
+  expect(bomGrant?.actions.map((action) => action.action).sort()).toEqual([
+    'explode', 'view',
+  ]);
+  // 维护动作只给 root：两个角色的 BOM 业务授权里都不该出现写动作。
+  for (const key of ['craft', 'planning'] as const) {
+    const set = await stored.get(key);
+    const rows = JSON.parse(JSON.stringify(set?.grants ?? [])) as typeof grants;
+    const bom = rows.find(
+      (grant) => grant.resource.type === 'composite' && grant.resource.id === 'boms',
+    );
+    expect(bom?.actions.map((action) => action.action).sort()).toEqual(['explode', 'view']);
+  }
+  expect(await persistBomGrants(connection.query)).toEqual({
+    created: [],
+    granted: [],
+    skipped: ['craft', 'planning'],
+  });
+});
+
+/** R-019 波 2 页面片：026 只声明 craft / planning 的 BOM 页授权，维护入口不在页面授权里。 */
+test('R-019 波2 页面片: the BOM page seed declares only craft and planning access', () => {
+  expect(bomPageGrantsSeed.name).toBe('202611280026_seed_bom_page_grants');
+  expect(typeof bomPageGrantsSeed.run).toBe('function');
+  expect(bomPagePermissionSets.map((set) => set.key)).toEqual(['craft', 'planning']);
+  for (const set of bomPagePermissionSets) {
+    expect(set.grants).toEqual([expectedBomPageGrant]);
+  }
+  expect(expectedBomPageGrant.resource).toEqual({ type: 'page', id: 'boms' });
+  expect(expectedBomPageGrant.actions.map((action) => action.action)).toEqual(['access']);
+});
+
+test('R-019 波2 页面片: fresh database gives craft and planning the BOM page; rerun writes nothing', async ({
+  app,
+  connection,
+}) => {
+  const sets = app.container.resolve(authorizationToken).permissionSets;
+  const stored = new Map((await sets.list()).map((set) => [set.key, set]));
+  for (const key of ['craft', 'planning'] as const) {
+    const grants = JSON.parse(JSON.stringify(stored.get(key)?.grants ?? [])) as {
+      resource: { type: string; id: string };
+      actions: { action: string; policy?: unknown }[];
+    }[];
+    const page = grants.find(
+      (grant) => grant.resource.type === 'page' && grant.resource.id === 'boms',
+    );
+    expect(page, `${key} 缺 BOM 页授权`).toBeDefined();
+    expect(page?.actions).toEqual([{ action: 'access' }]);
+  }
+  // 别的角色一行不动；root 天然全通，不写进任何权限集。
+  for (const key of ['purchase', 'sales', 'warehouse', 'staff', 'quality_manager']) {
+    const grants = JSON.parse(JSON.stringify(stored.get(key)?.grants ?? [])) as {
+      resource: { type: string; id: string };
+    }[];
+    expect(
+      grants.some((grant) => grant.resource.type === 'page' && grant.resource.id === 'boms'),
+      `${key} 不该拿到 BOM 页授权`,
+    ).toBe(false);
+  }
+  expect(await persistBomPageGrants(connection.query)).toEqual({
+    granted: [],
+    skipped: ['craft', 'planning'],
+  });
 });
 
 /** R-066：新种子只声明两个现成角色的请款单授权，staff 按建单人收窄。 */
@@ -698,6 +920,91 @@ test('R-070: the IQC seed fills its own grants beside other grants and re-runs w
   expect(await persistIqcGrants(missing.query)).toEqual({
     granted: [],
     skipped: ['quality_inspector', 'quality_manager', 'purchase', 'warehouse'],
+  });
+  expect(missing.writes, '不建新角色').toHaveLength(0);
+});
+
+/** R-070 页面片：025 只给三个角色补检验单页面授权；仓管刻意不拿页面。 */
+test('R-070 pages: the new seed declares only the inspection page grant for three roles', () => {
+  expect(iqcPageGrantsSeed.name).toBe('202611280025_seed_iqc_page_grants');
+  expect(typeof iqcPageGrantsSeed.run).toBe('function');
+  expect(IQC_PAGE_TARGETS).toEqual([
+    'quality_inspector', 'quality_manager', 'purchase',
+  ]);
+  expect(iqcPagePermissionSets.map((set) => set.key)).toEqual([...IQC_PAGE_TARGETS]);
+  for (const set of iqcPagePermissionSets) {
+    expect(set.grants).toEqual([inspectionsPageGrant]);
+  }
+  expect(inspectionsPageGrant).toEqual({
+    resource: { type: 'page', id: 'inspectionOrders' },
+    actions: [{ action: 'access' }],
+  });
+  for (const set of businessPermissionSets) {
+    for (const grant of set.grants) {
+      expect(grant.resource.id, `${set.key} 不该在原种子拿到检验页`).not.toBe(
+        'inspectionOrders',
+      );
+    }
+  }
+});
+
+/** R-070 页面片：幂等只看本条授权，不比对整份；重跑不写、不建角色。 */
+test('R-070 pages: the page seed fills its grant beside other grants and re-runs write nothing', async () => {
+  const makeQuery = (rows: ReadonlyMap<string, string>) => {
+    const stored = new Map(rows);
+    const writes: { key: string; grants: string }[] = [];
+    const query = {
+      selectFrom: () => ({
+        select: () => ({
+          where: (_column: string, _op: string, key: string) => ({
+            executeTakeFirst: async () => {
+              const value = stored.get(key);
+              return value === undefined ? undefined : { key, grants: value };
+            },
+          }),
+        }),
+      }),
+      updateTable: () => ({
+        set: (value: { grants: string }) => ({
+          where: (_column: string, _op: string, key: string) => ({
+            execute: async () => {
+              writes.push({ key, grants: value.grants });
+              stored.set(key, value.grants);
+            },
+          }),
+        }),
+      }),
+    } as unknown as QueryAdapter;
+    return { query, writes, stored };
+  };
+  const otherGrant: PermissionGrant = {
+    resource: { type: 'composite', id: 'inspectionOrders' },
+    actions: [{ action: 'view' }],
+  };
+  const state = makeQuery(new Map([
+    ['quality_inspector', JSON.stringify([otherGrant])],
+    ['quality_manager', JSON.stringify([otherGrant])],
+    ['purchase', JSON.stringify([])],
+    ['warehouse', JSON.stringify([])],
+  ]));
+  expect(await persistIqcPageGrants(state.query)).toEqual({
+    granted: ['quality_inspector', 'quality_manager', 'purchase'],
+    skipped: [],
+  });
+  expect(state.writes).toHaveLength(3);
+  const inspector = JSON.parse(state.stored.get('quality_inspector') ?? '[]') as PermissionGrant[];
+  expect(inspector).toEqual([otherGrant, inspectionsPageGrant]);
+  expect(await persistIqcPageGrants(state.query)).toEqual({
+    granted: [],
+    skipped: [...IQC_PAGE_TARGETS],
+  });
+  expect(state.writes, '重跑不写').toHaveLength(3);
+  expect(state.stored.has('warehouse'), '仓管不建授权').toBe(true);
+  expect(state.stored.get('warehouse')).toBe('[]');
+  const missing = makeQuery(new Map());
+  expect(await persistIqcPageGrants(missing.query)).toEqual({
+    granted: [],
+    skipped: [...IQC_PAGE_TARGETS],
   });
   expect(missing.writes, '不建新角色').toHaveLength(0);
 });
@@ -1052,7 +1359,17 @@ test('R-013: the seed creates the designed roles', async ({ app }) => {
       ...(key === 'sales' ? expectedQuotationPageGrants : []),
       ...(expectedFinanceRequestAdditions[key as keyof typeof expectedFinanceRequestAdditions] ?? []),
       ...(expectedFinanceRequestPageGrants[key as keyof typeof expectedFinanceRequestPageGrants] ?? []),
+      ...(key === 'finance' ? expectedReconciliationGrants : []),
+      ...(expectedReturnsGrantsByRole[key as keyof typeof expectedReturnsGrantsByRole] ?? []),
       ...(expectedIqcAdditions[key as keyof typeof expectedIqcAdditions] ?? []),
+      ...((REPORT_ROLES as readonly string[]).includes(key) ? [reportEntryGrant] : []),
+      // R-070 页面片：025 紧跟 021 跑，给这三个角色各补一条检验单页面授权。
+      ...((IQC_PAGE_TARGETS as readonly string[]).includes(key) ? [inspectionsPageGrant] : []),
+      ...(expectedBomPageGrants[key as keyof typeof expectedBomPageGrants] ?? []),
+      ...(expectedReturnsPageGrants[key as keyof typeof expectedReturnsPageGrants] ?? []),
+      ...(key === 'finance' ? expectedReconciliationPageGrants : []),
+      ...(expectedReportsPageGrantByRole[key] ?? []),
+      ...(expectedMesAdditions[key as keyof typeof expectedMesAdditions] ?? []),
     ]);
   }
 });
@@ -1072,6 +1389,11 @@ test('R-064: the new seed creates planning and adds the two sales grants on a fr
     ...expectedPurchaseRequestAdditions.planning,
     ...expectedPurchaseRequestPageGrants.planning,
     ...expectedPlanningPageGrants,
+    ...expectedBomAdditions.planning,
+    reportEntryGrant,
+    ...expectedBomPageGrants.planning,
+    ...expectedReportsPageGrantByRole.planning,
+    ...expectedMesAdditions.planning,
   ]);
 
   const sales = stored.find((entry) => entry.key === 'sales');
@@ -1082,6 +1404,10 @@ test('R-064: the new seed creates planning and adds the two sales grants on a fr
     ...expectedQuotationGrants,
     ...expectedSalesPageGrants,
     ...expectedQuotationPageGrants,
+    ...expectedReturnsGrantsByRole.sales,
+    reportEntryGrant,
+    ...expectedReturnsPageGrants.sales,
+    ...expectedReportsPageGrantByRole.sales,
   ]);
 
   // 重跑什么都不写：角色与授权都已经存在。
@@ -1108,6 +1434,11 @@ test('R-064 页面片 / R-021 波 2 / R-022 波 2: 015 先于 016 执行，sales
     ...expectedPurchaseRequestAdditions.planning,
     ...expectedPurchaseRequestPageGrants.planning,
     ...expectedPlanningPageGrants,
+    ...expectedBomAdditions.planning,
+    reportEntryGrant,
+    ...expectedBomPageGrants.planning,
+    ...expectedReportsPageGrantByRole.planning,
+    ...expectedMesAdditions.planning,
   ]);
 
   expect(stored.get('sales')?.grants, 'sales 同时拿到 015 的总台账页与 016 的报价单页').toEqual([
@@ -1117,6 +1448,10 @@ test('R-064 页面片 / R-021 波 2 / R-022 波 2: 015 先于 016 执行，sales
     ...expectedQuotationGrants,
     ...expectedSalesPageGrants,
     ...expectedQuotationPageGrants,
+    ...expectedReturnsGrantsByRole.sales,
+    reportEntryGrant,
+    ...expectedReturnsPageGrants.sales,
+    ...expectedReportsPageGrantByRole.sales,
   ]);
 
   for (const key of [
@@ -1139,7 +1474,16 @@ test('R-064 页面片 / R-021 波 2 / R-022 波 2: 015 先于 016 执行，sales
       ...(expectedStocktakingPageGrants[key as keyof typeof expectedStocktakingPageGrants] ?? []),
       ...(expectedFinanceRequestAdditions[key as keyof typeof expectedFinanceRequestAdditions] ?? []),
       ...(expectedFinanceRequestPageGrants[key as keyof typeof expectedFinanceRequestPageGrants] ?? []),
+      ...(key === 'finance' ? expectedReconciliationGrants : []),
+      ...(expectedReturnsGrantsByRole[key as keyof typeof expectedReturnsGrantsByRole] ?? []),
       ...(expectedIqcAdditions[key as keyof typeof expectedIqcAdditions] ?? []),
+      ...((REPORT_ROLES as readonly string[]).includes(key) ? [reportEntryGrant] : []),
+      // R-070 页面片：025 紧跟 021 跑，给这三个角色各补一条检验单页面授权。
+      ...((IQC_PAGE_TARGETS as readonly string[]).includes(key) ? [inspectionsPageGrant] : []),
+      ...(expectedReturnsPageGrants[key as keyof typeof expectedReturnsPageGrants] ?? []),
+      ...(key === 'finance' ? expectedReconciliationPageGrants : []),
+      ...(expectedReportsPageGrantByRole[key] ?? []),
+      ...(expectedMesAdditions[key as keyof typeof expectedMesAdditions] ?? []),
     ]);
   }
 });
@@ -1153,6 +1497,69 @@ test('R-064 pages: the page-grant seed is idempotent on a fresh database', async
     granted: [],
     skipped: ['planning', 'sales'],
   });
+});
+
+/** R-078 页面片：029 只声明五个岗位的页面授权，重跑不写，别的角色一份没有。 */
+test('R-078 pages: the new seed declares only the reports page grant for five roles', () => {
+  expect(reportsPageGrantsSeed.name).toBe('202611280029_seed_reports_page_grants');
+  expect(typeof reportsPageGrantsSeed.run).toBe('function');
+  expect(reportsPagePermissionSets.map((set) => set.key)).toEqual([...REPORT_ROLES]);
+  expect(reportsPagePermissionSets.map((set) => set.grants)).toEqual(
+    REPORT_ROLES.map(() => [reportsPageGrant]),
+  );
+  expect(reportsPageGrant).toEqual({
+    resource: { type: 'page', id: 'reports' },
+    actions: [{ action: 'access' }],
+  });
+  for (const set of businessPermissionSets) {
+    for (const grant of set.grants) {
+      expect(
+        grant.resource.id,
+        `${set.key} 不该在原种子拿到报表中心页面授权`,
+      ).not.toBe('reports');
+    }
+  }
+});
+
+/** R-078 页面片：幂等只看本条授权在不在；已有别的授权不覆盖，重跑不写。 */
+test('R-078 pages: the seed fills its own grant beside other grants and re-runs write nothing', async () => {
+  const stored = new Map<string, string>();
+  const writes: { key: string; grants: string }[] = [];
+  const query = {
+    selectFrom: () => ({
+      select: () => ({
+        where: (_column: string, _op: string, key: string) => ({
+          executeTakeFirst: async () => {
+            const value = stored.get(key);
+            return value === undefined ? undefined : { key, grants: value };
+          },
+        }),
+      }),
+    }),
+    updateTable: () => ({
+      set: (value: { grants: string }) => ({
+        where: (_column: string, _op: string, key: string) => ({
+          execute: async () => {
+            writes.push({ key, grants: value.grants });
+            stored.set(key, value.grants);
+          },
+        }),
+      }),
+    }),
+  };
+  const other = { resource: { type: 'composite', id: 'salesOrders' }, actions: [{ action: 'view' }] };
+  stored.set('sales', JSON.stringify([other]));
+  stored.set('purchase', JSON.stringify([reportsPageGrant]));
+  expect(
+    await persistReportsPageGrants(query as never),
+  ).toEqual({ granted: ['sales'], skipped: [...REPORT_ROLES.filter((role) => role !== 'sales')] });
+  expect(writes).toHaveLength(1);
+  expect(JSON.parse(writes[0]!.grants)).toEqual([other, reportsPageGrant]);
+  expect(hasReportsPageGrant(JSON.parse(stored.get('sales')!))).toBe(true);
+  expect(await persistReportsPageGrants(query as never)).toEqual({
+    granted: [], skipped: [...REPORT_ROLES],
+  });
+  expect(writes).toHaveLength(1);
 });
 
 /** R-076：打印授权只在补丁种子里声明，原种子一份都不带。 */
@@ -2005,4 +2412,450 @@ test('R-020 波 2: 013 grants pages beside other grants and re-runs write nothin
     skipped: ['warehouse', 'finance'],
   });
   expect(missing.writes, '不建新角色').toHaveLength(0);
+});
+
+
+/**
+ * R-065 复刻波 2：019 排在 018 之后，只给 finance 补本片的五份授权。
+ * 只逐条断言本片的条目、明确禁止的宽授权与别的角色不含本片资源；
+ * 整份角色的授权清单由本文件前面的按片声明测试钉住，这里不对整份数组做 toEqual。
+ */
+test('R-065 复刻波 2: the new seed declares only reconciliation grants for finance', async ({
+  app, connection,
+}) => {
+  expect(financeReconciliationGrantsSeed.name).toBe(
+    '202611280019_seed_finance_reconciliation_grants',
+  );
+  expect(financeReconciliationPermissionSets.map((set) => set.key)).toEqual(['finance']);
+  const declared = financeReconciliationPermissionSets[0]!.grants as PermissionGrant[];
+  expect(declared.map((grant) => grant.resource.id)).toEqual([
+    'incomeRecords', 'saleInvoiceRecords', 'receivableRecons', 'payableRecons', 'salesOrders',
+  ]);
+  for (const id of ['incomeRecords', 'saleInvoiceRecords', 'receivableRecons', 'payableRecons']) {
+    expect(
+      declared.find((grant) => grant.resource.id === id)?.actions.map((action) => action.action),
+      `${id} 的五个动作`,
+    ).toEqual(['view', 'create', 'update', 'confirm', 'void']);
+  }
+  expect(declared.find((grant) => grant.resource.id === 'salesOrders')?.actions.map((action) => action.action))
+    .toEqual(['financeView']);
+  // 原种子不该带本片的任何资源，也不该给财务更宽的订单 view。
+  const sliceIds = new Set(expectedReconciliationGrants.map((grant) => grant.resource.id));
+  sliceIds.delete('salesOrders'); // 这是既有资源，本片只新增一个动作。
+  for (const set of businessPermissionSets) {
+    for (const grant of set.grants) {
+      expect(sliceIds.has(grant.resource.id), `${set.key} 不该在原种子拿到 ${grant.resource.id}`).toBe(false);
+      expect(
+        grant.resource.id === 'salesOrders' && grant.actions.some((action) => action.action === 'financeView'),
+        `${set.key} 不该在原种子拿到 salesOrders.financeView`,
+      ).toBe(false);
+    }
+  }
+  expect(expectedRoles.finance.grants).not.toContainEqual(
+    expect.objectContaining({ resource: { type: 'composite', id: 'salesOrders' } }),
+  );
+
+  // 同文件前面的用例删过/改过 finance，这里先按种子把本片授权补齐再断言。
+  await persistFinanceReconciliationGrants(connection.query);
+  const sets = app.container.resolve(authorizationToken).permissionSets;
+  const stored = (await sets.get('finance'))?.grants ?? [];
+  const actionsIn = (id: string): readonly string[] => stored
+    .filter((grant) => grant.resource.type === 'composite' && grant.resource.id === id)
+    .flatMap((grant) => grant.actions.map((action: { action: string }) => action.action));
+  for (const grant of expectedReconciliationGrants) {
+    const actions = actionsIn(grant.resource.id);
+    for (const action of grant.actions) {
+      expect(actions, `finance 缺 ${grant.resource.id}.${action.action}`).toContain(action.action);
+    }
+  }
+  // 明确禁止：别的角色没有本片任何资源，财务也没有采购订单的 view（只 financeView）。
+  for (const key of allRoleKeys) {
+    if (key === 'finance') continue;
+    const grants = (await sets.get(key))?.grants ?? [];
+    for (const grant of grants) {
+      expect(sliceIds.has(grant.resource.id), `${key} 不该有 ${grant.resource.id}`).toBe(false);
+      expect(
+        grant.resource.id === 'salesOrders' && grant.actions.some((action) => action.action === 'financeView'),
+        `${key} 不该有 salesOrders.financeView`,
+      ).toBe(false);
+    }
+  }
+  expect(stored).not.toContainEqual(
+    expect.objectContaining({ resource: { type: 'composite', id: 'purchaseOrders' }, actions: [{ action: 'view' }] }),
+  );
+  expect(await persistFinanceReconciliationGrants(connection.query)).toEqual({
+    granted: [], skipped: ['finance'],
+  });
+});
+
+/** 019 的幂等只看本条授权在不在：带着别的种子加的授权照常补，已有动作不重复、不重排。 */
+test('R-065 复刻波 2: 019 fills its grants beside other grants and re-runs write nothing', async () => {
+  const makeQuery = (rows: ReadonlyMap<string, string>) => {
+    const stored = new Map(rows);
+    const writes: { key: string; grants: string }[] = [];
+    const query = {
+      selectFrom: () => ({
+        select: () => ({
+          where: (_column: string, _op: string, key: string) => ({
+            executeTakeFirst: async () => {
+              const value = stored.get(key);
+              return value === undefined ? undefined : { key, grants: value };
+            },
+          }),
+        }),
+      }),
+      updateTable: () => ({
+        set: (value: { grants: string }) => ({
+          where: (_column: string, _op: string, key: string) => ({
+            execute: async () => {
+              writes.push({ key, grants: value.grants });
+              stored.set(key, value.grants);
+            },
+          }),
+        }),
+      }),
+    } as unknown as QueryAdapter;
+    return { query, writes, stored };
+  };
+
+  const otherGrant: PermissionGrant = {
+    resource: { type: 'composite', id: 'expenses' },
+    actions: [{ action: 'view' }],
+  };
+  const partial: PermissionGrant = {
+    resource: { type: 'composite', id: 'incomeRecords' },
+    actions: [{ action: 'view' }],
+  };
+  const state = makeQuery(new Map([['finance', JSON.stringify([otherGrant, partial])]]));
+  expect(await persistFinanceReconciliationGrants(state.query)).toEqual({
+    granted: ['finance'], skipped: [],
+  });
+  expect(state.writes).toHaveLength(1);
+  const stored = JSON.parse(state.stored.get('finance') ?? '[]') as PermissionGrant[];
+  expect(stored.slice(0, 2)).toEqual([otherGrant, partial]);
+  const of = (id: string) => stored
+    .filter((grant) => grant.resource.id === id)
+    .flatMap((grant) => grant.actions.map((action) => action.action));
+  expect(of('incomeRecords')).toEqual(['view', 'create', 'update', 'confirm', 'void']);
+  expect(of('salesOrders')).toEqual(['financeView']);
+  expect(await persistFinanceReconciliationGrants(state.query)).toEqual({
+    granted: [], skipped: ['finance'],
+  });
+  expect(state.writes, '重跑不写').toHaveLength(1);
+
+  const absent = makeQuery(new Map());
+  expect(await persistFinanceReconciliationGrants(absent.query)).toEqual({
+    granted: [], skipped: ['finance'],
+  });
+  expect(absent.writes, '不建新角色').toHaveLength(0);
+});
+
+
+test('R-020 退货: the new seed declares only the four roles return actions', () => {
+  expect(returnsSeed.name).toBe('202611280020_seed_returns_grants');
+  expect(returnPermissionSets.map((set) => set.key)).toEqual(['purchase', 'sales', 'warehouse', 'finance']);
+  for (const set of returnPermissionSets) {
+    expect(set.grants).toEqual(expectedReturnsGrantsByRole[set.key as keyof typeof expectedReturnsGrantsByRole]);
+  }
+  expect(purchaseReturnsGrant.actions.map((entry) => entry.action)).toEqual([
+    'view', 'create', 'update', 'void',
+  ]);
+  expect(salesReturnsGrant.actions.map((entry) => entry.action)).toEqual([
+    'view', 'create', 'update', 'void',
+  ]);
+  expect(warehousePurchasePostGrant.actions.map((entry) => entry.action)).toEqual(['post']);
+  expect(warehouseSalesPostGrant.actions.map((entry) => entry.action)).toEqual(['post']);
+  expect(financeSalesReturnGrant.actions.map((entry) => entry.action)).toEqual(['financeView']);
+  for (const set of businessPermissionSets) {
+    for (const grant of set.grants) {
+      expect(grant.resource.id, `${set.key} 不该在原种子拿到退货授权`).not.toBe('purchaseReturns');
+      expect(grant.resource.id, `${set.key} 不该在原种子拿到退货授权`).not.toBe('salesReturns');
+    }
+  }
+});
+
+/** 幂等只看本条授权：别的种子加的授权不影响判断；缺哪条补哪条，不重排已有授权。 */
+test('R-020 退货: the seed fills missing actions beside grants added by other seeds', async () => {
+  const makeQuery = (rows: ReadonlyMap<string, string>) => {
+    const stored = new Map(rows);
+    const writes: { key: string; grants: string }[] = [];
+    const query = {
+      selectFrom: () => ({
+        select: () => ({
+          where: (_column: string, _op: string, key: string) => ({
+            executeTakeFirst: async () => {
+              const value = stored.get(key);
+              return value === undefined ? undefined : { key, grants: value };
+            },
+          }),
+        }),
+      }),
+      updateTable: () => ({
+        set: (value: { grants: string }) => ({
+          where: (_column: string, _op: string, key: string) => ({
+            execute: async () => {
+              writes.push({ key, grants: value.grants });
+              stored.set(key, value.grants);
+            },
+          }),
+        }),
+      }),
+    } as unknown as QueryAdapter;
+    return { query, writes, stored };
+  };
+  const otherGrant: PermissionGrant = {
+    resource: { type: 'page', id: 'quotations' },
+    actions: [{ action: 'access' }],
+  };
+  const partialSalesGrant: PermissionGrant = {
+    resource: { type: 'composite', id: 'salesReturns' },
+    actions: [{ action: 'view' }],
+  };
+  const state = makeQuery(new Map([
+    ['purchase', JSON.stringify([otherGrant])],
+    ['sales', JSON.stringify([otherGrant, partialSalesGrant])],
+    ['warehouse', JSON.stringify([otherGrant])],
+    ['finance', JSON.stringify([otherGrant])],
+  ]));
+  expect(await persistReturnGrants(state.query)).toEqual({
+    granted: ['purchase', 'sales', 'warehouse', 'finance'], skipped: [],
+  });
+  const storedSales = JSON.parse(state.stored.get('sales') ?? '[]') as PermissionGrant[];
+  expect(storedSales.slice(0, 2)).toEqual([otherGrant, partialSalesGrant]);
+  const salesActions = storedSales.filter((grant) => grant.resource.id === 'salesReturns')
+    .flatMap((grant) => grant.actions).map((entry) => entry.action);
+  expect(salesActions).toEqual(['view', 'create', 'update', 'void']);
+  expect(await persistReturnGrants(state.query)).toEqual({
+    granted: [], skipped: ['purchase', 'sales', 'warehouse', 'finance'],
+  });
+  expect(state.writes, '重跑不写').toHaveLength(4);
+  const absent = makeQuery(new Map());
+  expect((await persistReturnGrants(absent.query)).granted).toEqual([]);
+  expect(absent.writes, '不建新角色').toHaveLength(0);
+});
+
+/** R-023 W3-1：031 只声明 production 与六个角色的本片授权，动作按角色收窄。 */
+test('R-023 W3-1: the new seed declares production and only the designed MES grants', () => {
+  expect(mesGrantsSeed.name).toBe('202611280031_seed_mes_grants');
+  expect(typeof mesGrantsSeed.run).toBe('function');
+  expect(MES_ROLES).toEqual([
+    'craft', 'planning', 'production', 'warehouse', 'quality_inspector', 'finance',
+  ]);
+  expect(mesPermissionSets.map((set) => set.key)).toEqual([...MES_ROLES]);
+  expect(productionPermissionSet.title).toEqual({
+    key: 'permissionSets.business.production', ns: 'app-local',
+  });
+  expect(productionPermissionSet.grants).toEqual([expectedMesGrant('production')]);
+  expect(expectedMesGrant('finance').actions.map((entry) => entry.action)).toEqual(['priceView']);
+  for (const role of MES_ROLES) {
+    const actions = expectedMesGrant(role).actions.map((entry) => entry.action);
+    expect(actions).toEqual(expectedMesAdditions[role].map((grant) => grant.actions[0]!.action));
+    expect(actions, 'maintain 只给 root，不写进任何权限集').not.toContain('maintain');
+  }
+  for (const set of businessPermissionSets) {
+    for (const grant of set.grants) {
+      expect(grant.resource.id, `${set.key} 不该在原种子拿到 MES 授权`).not.toBe('mesSettings');
+    }
+  }
+});
+
+/** R-023 W3-1：幂等只看本条授权在不在；production 不存在时建，重跑不写。 */
+test('R-023 W3-1: the MES seed fills its own grants beside other grants and re-runs write nothing', async () => {
+  const makeQuery = (rows: ReadonlyMap<string, string>) => {
+    const stored = new Map(rows);
+    const writes: { key: string; grants: string }[] = [];
+    const query = {
+      selectFrom: () => ({
+        select: () => ({
+          where: (_column: string, _op: string, key: string) => ({
+            executeTakeFirst: async () => {
+              const value = stored.get(key);
+              return value === undefined ? undefined : { key, grants: value };
+            },
+          }),
+        }),
+      }),
+      insertInto: () => ({
+        values: (value: { key: string; grants: string }) => ({
+          execute: async () => {
+            writes.push({ key: value.key, grants: value.grants });
+            stored.set(value.key, value.grants);
+          },
+        }),
+      }),
+      updateTable: () => ({
+        set: (value: { grants: string }) => ({
+          where: (_column: string, _op: string, key: string) => ({
+            execute: async () => {
+              writes.push({ key, grants: value.grants });
+              stored.set(key, value.grants);
+            },
+          }),
+        }),
+      }),
+    } as unknown as QueryAdapter;
+    return { query, writes, stored };
+  };
+  const otherGrant: PermissionGrant = {
+    resource: { type: 'page', id: 'quotations' },
+    actions: [{ action: 'access' }],
+  };
+  const partial: PermissionGrant = {
+    resource: { type: 'composite', id: 'mesSettings' },
+    actions: [{ action: 'priceView' }],
+  };
+  const state = makeQuery(new Map([
+    ['craft', JSON.stringify([otherGrant])],
+    ['planning', JSON.stringify([otherGrant, partial])],
+    ['warehouse', JSON.stringify([otherGrant])],
+    ['quality_inspector', JSON.stringify([otherGrant])],
+    ['finance', JSON.stringify([otherGrant])],
+  ]));
+  expect(await persistMesGrants(state.query)).toEqual({
+    created: ['production'],
+    granted: ['craft', 'planning', 'warehouse', 'quality_inspector', 'finance'],
+    skipped: [],
+  });
+  expect(state.writes.map((write) => write.key).sort()).toEqual([...MES_ROLES].sort());
+  const planning = JSON.parse(state.stored.get('planning') ?? '[]') as PermissionGrant[];
+  expect(planning.slice(0, 2)).toEqual([otherGrant, partial]);
+  expect(planning.filter((grant) => grant.resource.id === 'mesSettings'))
+    .toHaveLength(2);
+  expect(await persistMesGrants(state.query)).toEqual({
+    created: [], granted: [], skipped: [...MES_ROLES],
+  });
+  expect(state.writes, '重跑不写').toHaveLength(MES_ROLES.length);
+});
+
+
+/** R-023 W3-1：032 只声明四行报工规则默认值，值逐项钉住。 */
+test('R-023 W3-1: the report-rule seed declares exactly the four designed defaults', () => {
+  expect(reportRulesSeed.name).toBe('202611280032_seed_mes_report_rules');
+  expect(typeof reportRulesSeed.run).toBe('function');
+  expect(REPORT_RULE_DEFAULTS).toEqual([
+    { code: 'scanReportLimit', value: 'unrestricted' },
+    { code: 'reportOrderLimit', value: 'none' },
+    { code: 'miniProgramPriceDisplay', value: 'hidden' },
+    { code: 'autoReport', value: 'no' },
+  ]);
+});
+
+/** R-023 W3-1：按 code 判幂等，缺哪行补哪行；已有的值不改；重跑不写。 */
+test('R-023 W3-1: the report-rule seed inserts only missing codes and re-runs write nothing', async () => {
+  const stored = new Map<string, string>([
+    ['autoReport', 'custom-by-admin'],
+  ]);
+  const writes: string[] = [];
+  const query = {
+    selectFrom: () => ({
+      select: () => ({
+        where: (_column: string, _op: string, code: string) => ({
+          executeTakeFirst: async () => {
+            const value = stored.get(code);
+            return value === undefined ? undefined : { code, value };
+          },
+        }),
+      }),
+    }),
+    insertInto: () => ({
+      values: (value: { code: string; value: string }) => ({
+        execute: async () => {
+          writes.push(value.code);
+          stored.set(value.code, value.value);
+        },
+      }),
+    }),
+  } as unknown as QueryAdapter;
+
+  const report = await persistReportRules(query);
+  expect(report.inserted).toEqual([
+    'scanReportLimit', 'reportOrderLimit', 'miniProgramPriceDisplay',
+  ]);
+  expect(report.skipped).toEqual(['autoReport']);
+  expect(stored.get('autoReport'), '管理员改过的行不被覆盖').toBe('custom-by-admin');
+  expect(stored.get('reportOrderLimit')).toBe('none');
+
+  expect(await persistReportRules(query)).toEqual({
+    inserted: [], skipped: REPORT_RULE_DEFAULTS.map((rule) => rule.code),
+  });
+  expect(writes, '重跑不写').toHaveLength(3);
+});
+
+test('R-020 退货页面片: the new seed declares only the four roles page grants', () => {
+  expect(returnsPageSeed.name).toBe('202611280027_seed_returns_page_grants');
+  expect(returnsPagePermissionSets.map((set) => set.key)).toEqual([
+    'purchase', 'sales', 'warehouse', 'finance',
+  ]);
+  for (const set of returnsPagePermissionSets) {
+    expect(set.grants).toEqual(expectedReturnsPageGrants[set.key as keyof typeof expectedReturnsPageGrants]);
+  }
+  expect(purchaseReturnsPageGrant).toEqual({
+    resource: { type: 'page', id: 'purchaseReturns' },
+    actions: [{ action: 'access' }],
+  });
+  expect(salesReturnsPageGrant).toEqual({
+    resource: { type: 'page', id: 'salesReturns' },
+    actions: [{ action: 'access' }],
+  });
+  for (const set of businessPermissionSets) {
+    for (const grant of set.grants) {
+      expect(grant.resource.id, `${set.key} 不该在原种子拿到退货页面`).not.toBe('purchaseReturns');
+      expect(grant.resource.id, `${set.key} 不该在原种子拿到退货页面`).not.toBe('salesReturns');
+    }
+  }
+});
+
+test('R-020 退货页面片: idempotent per page grant, no rewrite of existing grants', async () => {
+  const makeQuery = (rows: ReadonlyMap<string, string>) => {
+    const stored = new Map(rows);
+    const writes: { key: string; grants: string }[] = [];
+    const query = {
+      selectFrom: () => ({
+        select: () => ({
+          where: (_column: string, _op: string, key: string) => ({
+            executeTakeFirst: async () => {
+              const value = stored.get(key);
+              return value === undefined ? undefined : { key, grants: value };
+            },
+          }),
+        }),
+      }),
+      updateTable: () => ({
+        set: (value: { grants: string; updatedAt: Date }) => ({
+          where: (_column: string, _op: string, key: string) => ({
+            execute: async () => {
+              writes.push({ key, grants: value.grants });
+              stored.set(key, value.grants);
+            },
+          }),
+        }),
+      }),
+    } as unknown as QueryAdapter;
+    return { query, writes, stored };
+  };
+  const otherGrant: PermissionGrant = {
+    resource: { type: 'collection', id: 'expenseClaims' },
+    actions: [{ action: 'create' }],
+  };
+  // 每个角色只缺自己的页；已有的别的种子授权原样保留在最前面。
+  const state = makeQuery(new Map([
+    ['purchase', JSON.stringify([otherGrant])],
+    ['sales', JSON.stringify([otherGrant])],
+    ['warehouse', JSON.stringify([otherGrant, purchaseReturnsPageGrant])],
+    ['finance', JSON.stringify([otherGrant])],
+  ]));
+  expect(await persistReturnsPageGrants(state.query)).toEqual({
+    granted: ['purchase', 'sales', 'warehouse', 'finance'], skipped: [],
+  });
+  expect(JSON.parse(state.stored.get('warehouse') ?? '[]')).toEqual([
+    otherGrant, purchaseReturnsPageGrant, salesReturnsPageGrant,
+  ]);
+  expect(state.writes, '每个角色只写一次').toHaveLength(4);
+  expect(await persistReturnsPageGrants(state.query)).toEqual({
+    granted: [], skipped: ['purchase', 'sales', 'warehouse', 'finance'],
+  });
+  expect(state.writes, '重跑不写').toHaveLength(4);
+  const absent = makeQuery(new Map());
+  expect((await persistReturnsPageGrants(absent.query)).granted).toEqual([]);
+  expect(absent.writes, '不建新角色').toHaveLength(0);
 });

@@ -9,6 +9,7 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { useMemo, useState, type ReactElement, type ReactNode } from 'react';
 import { Link, Outlet, useLocation, useNavigate, useParams, useResolvedPath } from 'react-router';
 
+import { ActionGlyph } from '#components/action-glyph';
 import { ConfirmDialog } from '#components/erp/confirm';
 import {
   DocumentHeaderFields,
@@ -281,11 +282,12 @@ export default function PurchaseRequestDetailPage(): ReactElement {
                   disabled={busy}
                   onClick={() => setConfirming(true)}
                 >
+                  <ActionGlyph action='void' />
                   {t('purchaseRequests.actions.void')}
                 </Button>
               ) : null}
               {editable && submit.can ? (
-                <PendingButton busy={busy} onClick={() => void act('submit')}>
+                <PendingButton busy={busy} action='submit' onClick={() => void act('submit')}>
                   {t('purchaseRequests.actions.submit')}
                 </PendingButton>
               ) : null}

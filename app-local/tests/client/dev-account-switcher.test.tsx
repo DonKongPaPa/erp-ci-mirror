@@ -28,7 +28,7 @@ import { renderAuthenticatedClient } from '../helpers/authenticated-client.js';
 /**
  * R-037 开发环境专用的多用户快捷切换，头像菜单部分。
  *
- * 验收标准第 2 条的前半（关着时菜单里没有这一段）与第 1 条里「列出七个演示账户与各自的角色」。
+ * 验收标准第 2 条的前半（关着时菜单里没有这一段）与第 1 条里「列出九个演示账户与各自的角色」。
  * 测试应用按开发环境启动并打开开关，演示账户由服务端在启动时建出来；客户端配置用一个只覆盖
  * `config.public` 的包装传进去 —— `renderWithApp()` 不读页面里的公开配置，它总是给空对象。
  */
@@ -192,9 +192,9 @@ describe('account switcher in the avatar menu', () => {
 });
 
 // 客户端 DEV 门的行为：vitest 里 import.meta.env.DEV 为真（开发态），入口登记的提供者会把切换器那一段
-// 登记给头像菜单 —— 上面「列出全部七个演示账户」那条用例走的就是这条路（R-073）。生产构建把 DEV 换成常量假，
+// 登记给头像菜单 —— 上面「列出全部九个演示账户」那条用例走的就是这条路（R-073）。生产构建把 DEV 换成常量假，
 // 提供者的 start() 直接返回、不引入切换器；那一半单测里跑不出来，由产物自检断言。
-// R-082 起这个入口还声明路由（需求池看板）：只允许开发区的、只许管理员的，条数钉死 ——
+// R-082 起这个入口还声明路由（需求池看板、R-083 待确认事项、R-087 测试反馈）：只允许开发区的、只许管理员的，条数钉死 ——
 // 再加一条要同步改这里；「生产构建里整段被摇掉」由 dev-tools-not-in-prod 与产物自检断言。
 it('the development extensions entry contributes exactly one provider and only dev-only admin routes', () => {
   const registration = developmentExtensions();
@@ -206,7 +206,12 @@ it('the development extensions entry contributes exactly one provider and only d
     expect(contribution.parent).toBe('app');
   }
   const routes = contributions.flatMap((contribution) => contribution.routes ?? []);
-  expect(routes).toHaveLength(1);
+  expect(routes).toHaveLength(3);
+  expect(routes.map((route) => route.path)).toEqual([
+    '/dev/requirements-board',
+    '/dev/confirmations',
+    '/dev/feedback',
+  ]);
   for (const route of routes) {
     expect(route.path).toMatch(/^\/dev\//u);
     expect(route.authz).toBe('unrestricted');

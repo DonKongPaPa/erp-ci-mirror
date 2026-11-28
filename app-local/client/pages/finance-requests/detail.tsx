@@ -8,6 +8,7 @@ import { useLocale, useTranslation } from '@nocobase/i18n/client';
 import { useMemo, useState, type ReactElement, type ReactNode } from 'react';
 import { Link, Outlet, useLocation, useNavigate, useParams, useResolvedPath } from 'react-router';
 
+import { ActionGlyph } from '#components/action-glyph';
 import { ConfirmDialog } from '#components/erp/confirm';
 import {
   DocumentHeaderFields,
@@ -218,11 +219,12 @@ export default function FinanceRequestDetailPage(): ReactElement {
                   disabled={busy}
                   onClick={() => setConfirming(true)}
                 >
+                  <ActionGlyph action='void' />
                   {t('financeRequestDocs.actions.void')}
                 </Button>
               ) : null}
               {editable && submit.can ? (
-                <PendingButton busy={busy} onClick={() => void act('submit')}>
+                <PendingButton busy={busy} action='submit' onClick={() => void act('submit')}>
                   {t('financeRequestDocs.actions.submit')}
                 </PendingButton>
               ) : null}

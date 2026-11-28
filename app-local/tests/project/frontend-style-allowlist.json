@@ -240,14 +240,6 @@
     "reason": "品牌面板小标题的字距；字距没有令牌档位，属于 F7 的固定值。"
   },
   {
-    "file": "client/pages/home/index.tsx",
-    "rule": "arbitrary-value",
-    "tokens": {
-      "tracking-[-0.035em]": 1
-    },
-    "reason": "首页大标题的字距；字距没有令牌档位，属于 F7 的固定值。"
-  },
-  {
     "file": "client/pages/quality/index.tsx",
     "rule": "arbitrary-value",
     "tokens": {

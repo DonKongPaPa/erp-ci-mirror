@@ -3,7 +3,7 @@ import {
   SidebarPreferenceProvider,
 } from '../../client/layouts/use-sidebar-preference.js';
 import type { AppClientRegisteredRoute } from '@nocobase/app-client/plugins';
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { apiClientToken } from '@nocobase/app-client';
 import {
   AuthorizationClient,
@@ -120,7 +120,11 @@ describe.each(['expanded', 'collapsed', 'mobile'])(
         pending = false;
         response.resolve({ data: permissions });
       });
-      // Group is a section: its entries show in every mode, as icons in the collapsed sidebar.
+      // 展开态与手机里分组条目直接可见；图标态的分组是一个入口，悬停后弹出组内页面。
+      if (mode === 'collapsed') {
+        const trigger = await screen.findByRole('button', { name: 'Group' });
+        fireEvent.mouseEnter(trigger);
+      }
       expect(
         await screen.findByRole('link', { name: 'Allowed' }),
       ).toHaveAttribute('href', '/Allowed');
@@ -149,6 +153,10 @@ describe.each(['expanded', 'collapsed', 'mobile'])(
         authorization.invalidate();
         await authorization.snapshot();
       });
+      if (mode === 'collapsed') {
+        const trigger = await screen.findByRole('button', { name: 'Group' });
+        fireEvent.mouseEnter(trigger);
+      }
       expect(
         await screen.findByRole('link', { name: 'Allowed' }),
       ).toBeVisible();

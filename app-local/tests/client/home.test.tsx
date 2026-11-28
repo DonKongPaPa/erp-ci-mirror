@@ -1,190 +1,200 @@
-import { answerApi, renderWithApp } from '@nocobase/app-testing/client';
 import { apiClientToken } from '@nocobase/app-client';
 import {
   AuthorizationClient,
   authorizationClientToken,
   type AuthorizationSnapshot,
 } from '@nocobase/app-plugin-authorization/client';
-import { act, screen } from '@testing-library/react';
+import {
+  answerApi,
+  renderWithApp,
+  type ApiCall,
+} from '@nocobase/app-testing/client';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import packageMetadata from '../../package.json' with { type: 'json' };
 import enUS from '../../client/locales/en-US.js';
+import { Dashboard } from '../../client/pages/home/dashboard.js';
 import HomePage from '../../client/pages/home/index.js';
-import {
-  CAPABILITY_GUIDE_PATH,
-  capabilityPath,
-  createCapabilityCatalog,
-  entryContent,
-  format,
-  guideContent,
-} from '@nocobase/app-plugin-foundation/capability-guide';
+import packageMetadata from '../../package.json' with { type: 'json' };
 
-const catalog = createCapabilityCatalog(packageMetadata);
-const escape = (text: string): string =>
-  text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
+const T = 15_000;
+const WAIT = { timeout: T };
 const granted: AuthorizationSnapshot = {
   unrestricted: false,
   permissions: [
-    { resource: { type: 'page', id: 'capability-guide' }, actions: ['access'] },
+    { resource: { type: 'page', id: 'purchaseOrders' }, actions: ['access'] },
+    { resource: { type: 'page', id: 'purchaseRequests' }, actions: ['access'] },
+    {
+      resource: { type: 'composite', id: 'salesOrders' },
+      actions: ['ledgerView'],
+    },
   ],
 };
+const restricted: AuthorizationSnapshot = {
+  unrestricted: false,
+  permissions: [
+    { resource: { type: 'page', id: 'purchaseOrders' }, actions: ['access'] },
+  ],
+};
+const root: AuthorizationSnapshot = { unrestricted: true, permissions: [] };
 
-function renderHome(
-  permissions: () =>
-    AuthorizationSnapshot | Promise<AuthorizationSnapshot> = () => granted,
-) {
+const calls: ApiCall[] = [];
+let permissions: AuthorizationSnapshot;
+
+function fetchAnswers(call: ApiCall) {
+  calls.push(call);
+  if (call.path === 'authorization/permissions') return { data: permissions };
+  if (call.path.startsWith('approvals/')) return { items: [], total: 0 };
+  return new Response(null, { status: 404 });
+}
+
+function registerAuthorization(app: { container: { singleton: (...args: unknown[]) => unknown } }) {
+  // The test application provides the API client; this test supplies the real authorization client with a fixture snapshot.
+  app.container.singleton(
+    authorizationClientToken,
+    (resolver: { resolve: (token: unknown) => unknown }) =>
+      new AuthorizationClient(resolver.resolve(apiClientToken) as never),
+  );
+}
+
+async function renderDashboard(snapshot: AuthorizationSnapshot) {
+  permissions = snapshot;
+  calls.length = 0;
+  return renderWithApp(<Dashboard roleKey='purchase' />, {
+    namespace: packageMetadata.name,
+    namespaces: { [packageMetadata.name]: enUS },
+    fetch: answerApi(fetchAnswers),
+    services: registerAuthorization,
+  });
+}
+
+async function renderHome(snapshot: AuthorizationSnapshot) {
+  permissions = snapshot;
+  calls.length = 0;
   return renderWithApp(<HomePage />, {
     namespace: packageMetadata.name,
     namespaces: { [packageMetadata.name]: enUS },
-    fetch: answerApi(async ({ path }) =>
-      path === 'authorization/permissions'
-        ? { data: await permissions() }
-        : new Response(null, { status: 404 }),
-    ),
-    services: (app) => {
-      app.container.singleton(
-        authorizationClientToken,
-        (resolver) => new AuthorizationClient(resolver.resolve(apiClientToken)),
-      );
-    },
+    fetch: answerApi(fetchAnswers),
+    services: registerAuthorization,
   });
 }
 
-const writeText = vi.fn<(text: string) => Promise<void>>();
-const clipboard = { fail: false };
+function renderControlledDashboard(snapshot: AuthorizationSnapshot, ui: ReactNode) {
+  permissions = snapshot;
+  calls.length = 0;
+  return renderWithApp(ui, {
+    namespace: packageMetadata.name,
+    namespaces: { [packageMetadata.name]: enUS },
+    fetch: answerApi(fetchAnswers),
+    services: registerAuthorization,
+  });
+}
 
-/** `userEvent.setup()` installs a clipboard stub of its own, so the mock goes in after it. */
-function setup(): ReturnType<typeof userEvent.setup> {
-  const user = userEvent.setup();
-  writeText
-    .mockReset()
-    .mockImplementation(() =>
-      clipboard.fail ? Promise.reject(new Error('denied')) : Promise.resolve(),
+beforeEach(() => {
+  localStorage.clear();
+  calls.length = 0;
+});
+
+describe('home workbench (R-086)', () => {
+  it('opens on a workbench, not the framework introduction', async () => {
+    await renderHome(root);
+    expect(
+      await screen.findByRole('button', { name: enUS.dashboard.adjust }, WAIT),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('heading', { name: enUS.dashboard.widgets.quickActions }),
+    ).toBeVisible();
+    expect(screen.queryByText(enUS.home.title)).not.toBeInTheDocument();
+  });
+
+  it('renders only quick actions the viewer is authorized to use', async () => {
+    await renderDashboard(granted);
+    expect(
+      await screen.findByRole(
+        'link',
+        { name: enUS.dashboard.quick.newPurchaseOrder },
+        WAIT,
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('link', { name: enUS.dashboard.quick.newPurchaseRequest }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('link', { name: enUS.dashboard.quick.orderReview }),
+    ).not.toBeInTheDocument();
+    expect(calls.some((call) => call.path.includes('order-ledger'))).toBe(false);
+  });
+
+  it('drops preference entries the role does not allow and widgets whose condition is denied', async () => {
+    await renderControlledDashboard(
+      restricted,
+      <Dashboard
+        roleKey='purchase'
+        preference={{
+          widgets: [
+            { id: 'inventoryShortcuts', collapsed: false },
+            { id: 'deliveryReminders', collapsed: false },
+            { id: 'quickActions', collapsed: false },
+          ],
+        }}
+      />,
     );
-  Object.defineProperty(navigator, 'clipboard', {
-    configurable: true,
-    value: { writeText },
-  });
-  return user;
-}
-
-describe('home page', () => {
-  beforeEach(() => {
-    clipboard.fail = false;
-  });
-
-  it('tells people to build by asking their coding agent', async () => {
-    await renderHome();
-
     expect(
-      screen.getByRole('heading', { level: 1, name: enUS.home.title }),
-    ).toBeInTheDocument();
-    expect(screen.getByText(enUS.home.steps.describe.title)).toBeVisible();
-  });
-
-  it('features capabilities from the shared guide catalog, each linking to its entry', async () => {
-    await renderHome();
-    const content = guideContent('en-US');
-
-    expect(catalog.featured.length).toBeGreaterThan(0);
-    for (const entry of catalog.featured) {
-      const title = entryContent(content, entry).title;
-      expect(
-        await screen.findByRole('link', { name: new RegExp(escape(title)) }),
-      ).toHaveAttribute('href', capabilityPath(entry.id));
-    }
-  });
-
-  it('leads to the full catalog, counted from the dependencies this application declares', async () => {
-    await renderHome();
-    const content = guideContent('en-US');
-
+      await screen.findByText(enUS.dashboard.widgets.quickActions, {}, WAIT),
+    ).toBeVisible();
     expect(
-      await screen.findByRole('link', {
-        name: format(content.home.viewAll, { count: catalog.entries.length }),
-      }),
-    ).toHaveAttribute('href', CAPABILITY_GUIDE_PATH);
+      screen.queryByText(enUS.dashboard.widgets.inventoryShortcuts),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('home-delivery-reminders')).not.toBeInTheDocument();
+    await waitFor(
+      () => {
+        expect(calls.some((call) => call.path === 'home/delivery-reminders')).toBe(
+          false,
+        );
+      },
+      WAIT,
+    );
   });
 
-  it.each<AuthorizationSnapshot>([
-    { unrestricted: true, permissions: [] },
-    {
-      unrestricted: false,
-      permissions: [
-        { resource: { type: 'page', id: '*' }, actions: ['access'] },
-      ],
-    },
-  ])(
-    'keeps catalog links for unrestricted and wildcard grants: %j',
-    async (snapshot) => {
-      await renderHome(() => snapshot);
-      expect(
-        await screen.findByRole('link', {
-          name: format(guideContent('en-US').home.viewAll, {
-            count: catalog.entries.length,
-          }),
-        }),
-      ).toHaveAttribute('href', CAPABILITY_GUIDE_PATH);
-    },
-  );
-
-  it('keeps descriptions without links while permissions load, after denial and after revocation', async () => {
-    const pending = Promise.withResolvers<AuthorizationSnapshot>();
-    let permissions: AuthorizationSnapshot | Promise<AuthorizationSnapshot> =
-      pending.promise;
-    const { app } = await renderHome(() => permissions);
-    const authorization = app.container.resolve(authorizationClientToken);
-    const content = guideContent('en-US');
-    const expectDescriptionsOnly = () => {
-      expect(screen.queryAllByRole('link')).toHaveLength(0);
-      expect(screen.queryByText(content.home.open)).not.toBeInTheDocument();
-      for (const entry of catalog.featured) {
-        const text = entryContent(content, entry);
-        expect(screen.getByText(text.title)).toBeVisible();
-        expect(screen.getByText(text.summary)).toBeVisible();
-      }
-    };
-    expectDescriptionsOnly();
-    await act(async () => {
-      pending.resolve({ unrestricted: false, permissions: [] });
-      await authorization.snapshot();
-    });
-    expectDescriptionsOnly();
-    await act(async () => {
-      permissions = granted;
-      authorization.invalidate();
-      await authorization.snapshot();
-    });
-    expect(
-      await screen.findByRole('link', {
-        name: format(content.home.viewAll, { count: catalog.entries.length }),
-      }),
-    ).toHaveAttribute('href', CAPABILITY_GUIDE_PATH);
-    await act(async () => {
-      permissions = { unrestricted: false, permissions: [] };
-      authorization.invalidate();
-      await authorization.snapshot();
-    });
-    expectDescriptionsOnly();
-  });
-
-  it('reports a copy the browser refuses', async () => {
-    clipboard.fail = true;
-    const user = setup();
-    const view = await renderHome();
+  it('adjusts the widget list and restores the role default', async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    await renderControlledDashboard(
+      root,
+      <Dashboard roleKey='root' onChange={onChange} />,
+    );
+    await user.click(
+      await screen.findByRole('button', { name: enUS.dashboard.adjust }, WAIT),
+    );
+    const panel = await screen.findByRole(
+      'dialog',
+      { name: enUS.dashboard.adjustTitle },
+      WAIT,
+    );
+    expect(panel.querySelectorAll('input[type="checkbox"]')).toHaveLength(5);
 
     await user.click(
-      screen.getAllByRole('button', { name: enUS.home.prompt.copy })[0],
+      screen.getByRole('checkbox', { name: enUS.dashboard.widgets.myTasks }),
     );
+    expect(onChange).toHaveBeenCalledWith({
+      widgets: [
+        { id: 'quickActions', collapsed: false },
+        { id: 'deliveryReminders', collapsed: false },
+        { id: 'favoriteReports', collapsed: false },
+        { id: 'inventoryShortcuts', collapsed: false },
+      ],
+    });
 
-    expect(view.toasts()).toEqual([
-      expect.objectContaining({
-        type: 'error',
-        title: enUS.home.prompt.copyFailed,
-      }),
-    ]);
+    onChange.mockClear();
+    await user.click(
+      screen.getAllByRole('button', { name: enUS.dashboard.moveUp })[1],
+    );
+    expect(onChange).toHaveBeenCalled();
+
+    onChange.mockClear();
+    await user.click(screen.getByRole('button', { name: enUS.dashboard.reset }));
+    expect(onChange).toHaveBeenCalledWith(undefined);
   });
 });

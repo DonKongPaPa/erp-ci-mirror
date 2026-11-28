@@ -60,6 +60,7 @@ const RULE_STATUS: Readonly<Record<FinanceRuleCode, { status: ApiErrorStatus; ht
   'dict-code-invalid': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
   'person-invalid': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
   'partner-invalid': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
+  'recon-not-open': { status: 'FAILED_PRECONDITION', httpStatus: 422 },
 };
 const RULE_REASON: Readonly<Record<FinanceRuleCode, string>> = {
   'finance-not-found': 'FINANCE_NOT_FOUND',
@@ -71,6 +72,7 @@ const RULE_REASON: Readonly<Record<FinanceRuleCode, string>> = {
   'dict-code-invalid': 'FINANCE_DICT_CODE_INVALID',
   'person-invalid': 'FINANCE_PERSON_INVALID',
   'partner-invalid': 'FINANCE_PARTNER_INVALID',
+  'recon-not-open': 'FINANCE_RECON_NOT_OPEN',
 };
 
 const camelOf = (code: FinanceRuleCode): string =>
@@ -168,17 +170,25 @@ interface Body {
   invoiceTypeCode?: string | null; issuerName?: string | null; invoiceNo?: string | null;
   payeeName?: string | null; payeeAccountNo?: string | null;
   payeeBankName?: string | null; payeeBankCode?: string | null;
-  supplierId?: string | null; bindMode?: 'purchase_order' | 'none';
+  supplierId?: string | null; bindMode?: 'purchase_order' | 'none' | 'payable_recon';
   handlerUserId?: string | null; projectCode?: string | null; remark?: string;
   fileIds?: string[]; amount?: number;
   confirm?: boolean;
-  lines?: { purchaseOrderId: string; amount: number; note?: string }[];
+  lines?: { purchaseOrderId?: string; payableReconId?: string; amount: number; note?: string }[];
 }
 interface Query {
   status?: 'draft' | 'confirmed' | 'void'; supplierId?: string; expenseTypeCode?: string; fundAccountCode?: string;
   invoiceTypeCode?: string; invoiceNo?: string; projectCode?: string;
   from?: string; to?: string; q?: string; page: number; pageSize: number;
 }
+
+const mapLines = (lines: Body['lines']): CreateFinanceInput['lines'] =>
+  lines === undefined ? undefined : lines.map((line) => ({
+    purchaseOrderId: line.purchaseOrderId ?? '',
+    payableReconId: line.payableReconId,
+    amount: line.amount,
+    note: line.note,
+  }));
 
 function createInput(kind: FinanceKind, body: Body): CreateFinanceInput {
   return {
@@ -193,7 +203,7 @@ function createInput(kind: FinanceKind, body: Body): CreateFinanceInput {
     payeeBankCode: body.payeeBankCode,
     supplierId: body.supplierId, handlerUserId: body.handlerUserId,
     projectCode: body.projectCode, remark: body.remark, fileIds: body.fileIds,
-    amount: body.amount, lines: body.lines, confirm: body.confirm,
+    amount: body.amount, confirm: body.confirm, lines: mapLines(body.lines),
   };
 }
 
@@ -209,7 +219,7 @@ function updateInput(kind: FinanceKind, body: Body): UpdateFinanceInput {
     payeeBankCode: body.payeeBankCode,
     supplierId: body.supplierId, handlerUserId: body.handlerUserId,
     projectCode: body.projectCode, remark: body.remark, fileIds: body.fileIds,
-    amount: body.amount, lines: body.lines,
+    amount: body.amount, lines: mapLines(body.lines),
   };
 }
 

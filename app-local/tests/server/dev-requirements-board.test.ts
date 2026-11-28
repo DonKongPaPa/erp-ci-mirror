@@ -24,9 +24,10 @@ import { createStandaloneServer } from '../../server/standalone.js';
 vi.mock(
   '../../server/dev-tools/requirements-board-files.js',
   async (importOriginal) => {
-    const actual = await importOriginal<
-      typeof import('../../server/dev-tools/requirements-board-files.js')
-    >();
+    const actual =
+      await importOriginal<
+        typeof import('../../server/dev-tools/requirements-board-files.js')
+      >();
     return {
       ...actual,
       readRequirementsSources: async () => ({
@@ -66,15 +67,30 @@ describe('requirements board endpoint enabled in development', () => {
       data: {
         generatedAt: string;
         totals: { pool: number; parsed: number; skipped: number };
-        requirements: readonly { id: string; blocking: string }[];
+        requirements: readonly {
+          id: string;
+          blocking: string;
+          entries: readonly { at: string; text: string }[];
+        }[];
       };
     };
     expect(body.data.totals.pool).toBe(FIXTURE_POOL_ROWS);
     expect(body.data.totals.parsed).toBe(FIXTURE_POOL_ROWS - 1);
     expect(body.data.totals.skipped).toBe(1);
     expect(body.data.requirements.map((item) => item.id)).toContain('R-001');
-    expect(body.data.requirements.filter((item) => item.name === '缺列的行')).toEqual([]);
+    expect(
+      body.data.requirements.filter((item) => item.name === '缺列的行'),
+    ).toEqual([]);
     expect(body.data.generatedAt).toBeTruthy();
+    // 接口多给的 entries：按时间升序；没有跟进的是空数组而不是缺字段。
+    const second = body.data.requirements.find((item) => item.id === 'R-002');
+    expect(second?.entries.map((entry) => entry.at)).toEqual([
+      '2026-11-24T03:21:13+08:00',
+      '2026-11-27T03:15:44+08:00',
+    ]);
+    expect(
+      body.data.requirements.find((item) => item.id === 'R-004')?.entries,
+    ).toEqual([]);
   });
 
   test('a non-administrator gets 403 with no requirement data in the body', async ({
@@ -83,9 +99,11 @@ describe('requirements board endpoint enabled in development', () => {
     const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
     const listed = await admin.fetch('/dev-tools/accounts');
     expect(listed.status).toBe(200);
-    const accounts = ((await listed.json()) as {
-      data: readonly { id: string; username: string }[];
-    }).data;
+    const accounts = (
+      (await listed.json()) as {
+        data: readonly { id: string; username: string }[];
+      }
+    ).data;
     const staff = accounts.find((account) => account.username === 'demo.staff');
     expect(staff).toBeDefined();
 

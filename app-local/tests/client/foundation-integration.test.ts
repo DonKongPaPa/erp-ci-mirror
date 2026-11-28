@@ -77,6 +77,16 @@ describe('default Foundation integration', () => {
         ],
       ],
       [
+        'settingsAi',
+        [
+          ['models', '/models'],
+          ['agents', '/agents'],
+          ['runtimes', '/runtimes'],
+          ['skills', '/skills'],
+          ['usage', '/usage'],
+        ],
+      ],
+      [
         'settingsSystem',
         [
           ['notificationManagement', '/settings/notifications/logs'],

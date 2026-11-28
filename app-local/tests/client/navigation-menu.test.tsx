@@ -211,14 +211,22 @@ describe('sections', () => {
     expect(screen.getByRole('group', { name: 'Business' })).toBeVisible();
   });
 
-  it('shows a section entries as icons, not a popup, in the collapsed sidebar', () => {
+  it('keeps a section as one group entry with a popup in the collapsed sidebar', () => {
     setCollapsed(true);
     render(shell([group], routeKey(child)), { wrapper: I18n });
-    const link = screen.getByRole('link', { name: 'child' });
-    expect(link).toHaveAttribute('aria-current', 'page');
+    // 图标态不必把组内页面摊平：分组本身是一个带可访问名的入口。
     expect(
-      screen.queryByRole('button', { name: 'Group' }),
+      screen.queryByRole('link', { name: 'child' }),
     ).not.toBeInTheDocument();
+    const trigger = screen.getByRole('button', { name: 'Group' });
+    fireEvent.mouseEnter(trigger);
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
+    const popup = screen.getByRole('dialog', { name: 'Group' });
+    // eslint-disable-next-line app-local/no-sync-query-after-action -- 查的是组件本地 state，交互后同步重渲染，不依赖异步请求
+    expect(within(popup).getByRole('link', { name: 'child' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
   });
 });
 

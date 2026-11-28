@@ -4,10 +4,13 @@ import { readAppClientRuntimeConfig } from '@nocobase/app-client/runtime';
 import { includeNotificationTemplateRoutes } from './pages/settings/notification-routes.js';
 import notificationLogRoutes from './pages/settings/notification-log-routes.js';
 import { ITEMS_PAGE_ID } from './pages/items/page-id.js';
+import { BOMS_PAGE_ID } from './pages/boms/page-id.js';
 import { BIZ_DICT_PAGE_ID } from './pages/biz-dict/page-id.js';
 import { PURCHASE_ORDERS_PAGE_ID } from './pages/purchase-orders/page-id.js';
 import { PURCHASE_REQUESTS_PAGE_ID } from './pages/purchase-requests/page-id.js';
+import { INSPECTIONS_PAGE_ID } from './pages/inspections/page-id.js';
 import { FINANCE_REQUESTS_PAGE_ID } from './pages/finance-requests/page-id.js';
+import { REPORTS_PAGE_ID } from './pages/reports/page-id.js';
 import { SALES_ORDERS_PAGE_ID } from './pages/sales-orders/page-id.js';
 import { QUOTATIONS_PAGE_ID } from './pages/quotations/page-id.js';
 import { ORDER_LEDGER_PAGE_ID } from './pages/order-ledger/page-id.js';
@@ -21,33 +24,50 @@ import {
 import { WAREHOUSES_PAGE_ID } from './pages/warehouses/page-id.js';
 import { STOCKTAKINGS_PAGE_ID } from './pages/stocktaking/page-id.js';
 import { TRANSFERS_PAGE_ID } from './pages/transfer/page-id.js';
+import { PURCHASE_RETURNS, SALES_RETURNS } from './pages/returns/page-id.js';
 import {
   EXPENSES_PAGE_ID,
   INVOICE_RECEIPTS_PAGE_ID,
 } from './pages/finance/page-id.js';
 import {
+  INCOME_RECORDS_PAGE_ID, SALE_INVOICE_RECORDS_PAGE_ID,
+  RECEIVABLE_RECONS_PAGE_ID, PAYABLE_RECONS_PAGE_ID,
+} from './pages/reconciliation/page-id.js';
+import {
   ArrowDownToLine,
   ArrowLeftRight,
   ArrowUpFromLine,
   BookOpen,
+  Banknote,
+  BadgePercent,
   Boxes,
+  Building2,
+  Coins,
+  FileCheck2,
   Bot,
   ChartColumn,
   ClipboardCheck,
   ClipboardList,
   Clock,
   Cpu,
-  FileText,
-  Handshake,
+  FilePlus2,
+  HandCoins,
   Home,
   IdCard,
+  Inbox,
+  ListChecks,
   MessageSquareWarning,
   MonitorSmartphone,
+  Network,
   Package,
   ReceiptText,
+  RotateCcw,
   ShieldAlert,
+  ShieldCheck,
   ShoppingCart,
+  Undo2,
   Users,
+  WalletCards,
   Warehouse,
   Wrench,
   Wallet,
@@ -147,7 +167,7 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
     breadcrumb: { title: 'navigation.partners' },
     componentLoader: () => import('./pages/partners/index.js'),
     name: 'partners',
-    navigation: { title: 'navigation.partners', icon: Handshake },
+    navigation: { title: 'navigation.partners', icon: Building2 },
     path: '/partners',
     children: [
       {
@@ -424,6 +444,64 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
         ],
       },
       {
+        // R-020 波 2 加片二：采购退货。采购发起，仓管只在「待我过账」里读与过账；页面授权与业务动作分开。
+        auth: 'required',
+        authz: {
+          resource: { type: 'page', id: PURCHASE_RETURNS.pageId },
+          action: 'access',
+        },
+        breadcrumb: { title: 'navigation.purchaseReturns' },
+        componentLoader: () => import('./pages/purchase-returns/index.js'),
+        name: 'purchaseReturns',
+        navigation: { title: 'navigation.purchaseReturns', icon: Undo2 },
+        path: '/purchase-returns',
+        children: [
+          {
+            componentLoader: () => import('./pages/purchase-returns/new.js'),
+            name: 'purchaseReturnNew',
+            path: 'new',
+            breadcrumb: { title: 'returns.newTitle' },
+            presentation: { kind: 'child-page' },
+          },
+          {
+            componentLoader: () => import('./pages/purchase-returns/detail.js'),
+            name: 'purchaseReturn',
+            path: ':returnId',
+            breadcrumb: { title: 'returns.detailTitle' },
+            presentation: { kind: 'child-page' },
+          },
+        ],
+      },
+      {
+        // R-020 波 2 加片二：销售退货。同形；财务只有 financeView 的窄读，不进写动作。
+        auth: 'required',
+        authz: {
+          resource: { type: 'page', id: SALES_RETURNS.pageId },
+          action: 'access',
+        },
+        breadcrumb: { title: 'navigation.salesReturns' },
+        componentLoader: () => import('./pages/sales-returns/index.js'),
+        name: 'salesReturns',
+        navigation: { title: 'navigation.salesReturns', icon: RotateCcw },
+        path: '/sales-returns',
+        children: [
+          {
+            componentLoader: () => import('./pages/sales-returns/new.js'),
+            name: 'salesReturnNew',
+            path: 'new',
+            breadcrumb: { title: 'returns.newTitle' },
+            presentation: { kind: 'child-page' },
+          },
+          {
+            componentLoader: () => import('./pages/sales-returns/detail.js'),
+            name: 'salesReturn',
+            path: ':returnId',
+            breadcrumb: { title: 'returns.detailTitle' },
+            presentation: { kind: 'child-page' },
+          },
+        ],
+      },
+      {
         // R-019 物料：物料清单、计量单位、物料分类三个标签共用这一条路由（标签记在地址栏的 view 上）。
         // 页面授权 `items` 给销售、采购与 root；打开之后读、写再分 items 的 view / manage。
         auth: 'required',
@@ -494,6 +572,45 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
           },
         ],
       },
+      {
+        // R-019 波 2 BOM：页面授权 `boms` 给工艺与计划经理；打开之后读、展开、建、改、作废
+        // 分别按 `boms` 业务资源的动作决定 —— 维护动作只有管理员有，没有动作就不画入口。
+        auth: 'required',
+        authz: {
+          resource: { type: 'page', id: BOMS_PAGE_ID },
+          action: 'access',
+        },
+        breadcrumb: { title: 'navigation.boms' },
+        componentLoader: () => import('./pages/boms/index.js'),
+        name: 'boms',
+        navigation: { title: 'navigation.boms', icon: Network },
+        path: '/boms',
+        children: [
+          {
+            componentLoader: () => import('./pages/boms/new.js'),
+            name: 'bomNew',
+            path: 'new',
+            breadcrumb: { title: 'boms.newTitle' },
+            presentation: { kind: 'child-page' },
+          },
+          {
+            componentLoader: () => import('./pages/boms/detail.js'),
+            name: 'bom',
+            path: ':bomId',
+            breadcrumb: { title: 'boms.detailTitle' },
+            presentation: { kind: 'child-page' },
+            children: [
+              {
+                componentLoader: () => import('./pages/boms/edit.js'),
+                name: 'bomEdit',
+                path: 'edit',
+                breadcrumb: { title: 'boms.editTitle' },
+                presentation: { kind: 'child-page' },
+              },
+            ],
+          },
+        ],
+      },
     ],
   },
   {
@@ -558,7 +675,7 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
     breadcrumb: { title: 'navigation.purchaseRequests' },
     componentLoader: () => import('./pages/purchase-requests/index.js'),
     name: 'purchaseRequests',
-    navigation: { title: 'navigation.purchaseRequests', icon: FileText },
+    navigation: { title: 'navigation.purchaseRequests', icon: FilePlus2 },
     path: '/purchase-requests',
     children: [
       {
@@ -581,6 +698,45 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
             breadcrumb: { title: 'purchaseRequests.editTitle' },
             presentation: { kind: 'child-page' },
             componentLoader: () => import('./pages/purchase-requests/edit.js'),
+          },
+        ],
+      },
+    ],
+  },
+  {
+    // R-070 来料检验：列表一页，新建、详情、编辑是盖在列表上的子页。页面授权 `inspectionOrders`
+    // 给质量员、质量主管与采购；打开之后建、改、完成、作废按业务动作分别显隐，仓管不拿这一页。
+    auth: 'required',
+    authz: {
+      resource: { type: 'page', id: INSPECTIONS_PAGE_ID },
+      action: 'access',
+    },
+    breadcrumb: { title: 'navigation.inspections' },
+    componentLoader: () => import('./pages/inspections/index.js'),
+    name: 'inspections',
+    navigation: { title: 'navigation.inspections', icon: ShieldCheck },
+    path: '/inspections',
+    children: [
+      {
+        name: 'inspectionNew',
+        path: 'new',
+        breadcrumb: { title: 'inspections.newTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/inspections/new.js'),
+      },
+      {
+        name: 'inspection',
+        path: ':inspectionId',
+        breadcrumb: { title: 'inspections.detailTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/inspections/detail.js'),
+        children: [
+          {
+            name: 'inspectionEdit',
+            path: 'edit',
+            breadcrumb: { title: 'inspections.editTitle' },
+            presentation: { kind: 'child-page' },
+            componentLoader: () => import('./pages/inspections/edit.js'),
           },
         ],
       },
@@ -644,7 +800,7 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
     breadcrumb: { title: 'navigation.quotations' },
     componentLoader: () => import('./pages/quotations/index.js'),
     name: 'quotations',
-    navigation: { title: 'navigation.quotations', icon: FileText },
+    navigation: { title: 'navigation.quotations', icon: BadgePercent },
     path: '/quotations',
     children: [
       {
@@ -725,7 +881,7 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
     breadcrumb: { title: 'navigation.financeRequests' },
     componentLoader: () => import('./pages/finance-requests/index.js'),
     name: 'financeRequests',
-    navigation: { title: 'navigation.financeRequests', icon: FileText },
+    navigation: { title: 'navigation.financeRequests', icon: WalletCards },
     path: '/finance-requests',
     children: [
       {
@@ -830,6 +986,146 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
     ],
   },
   {
+    // R-065 第二片：incomeRecords，页面授权只给财务与 root；子路由继承列表页授权。
+    auth: 'required',
+    authz: { resource: { type: 'page', id: INCOME_RECORDS_PAGE_ID }, action: 'access' },
+    breadcrumb: { title: 'navigation.incomeRecords' },
+    componentLoader: () => import('./pages/income-records/index.js'),
+    name: 'incomeRecords',
+    navigation: { title: 'navigation.incomeRecords', icon: Banknote },
+    path: '/income-records',
+    children: [
+      {
+        name: 'incomeRecordNew',
+        path: 'new',
+        breadcrumb: { title: 'incomeRecords.newTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/income-records/new.js'),
+      },
+      {
+        name: 'incomeRecord',
+        path: ':incomeRecordId',
+        breadcrumb: { title: 'incomeRecords.detailTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/income-records/detail/index.js'),
+        children: [
+          {
+            name: 'incomeRecordEdit',
+            path: 'edit',
+            breadcrumb: { title: 'incomeRecords.editTitle' },
+            presentation: { kind: 'child-page' },
+            componentLoader: () => import('./pages/income-records/edit.js'),
+          },
+        ],
+      },
+    ],
+  },
+  {
+    // R-065 第二片：saleInvoiceRecords，页面授权只给财务与 root；子路由继承列表页授权。
+    auth: 'required',
+    authz: { resource: { type: 'page', id: SALE_INVOICE_RECORDS_PAGE_ID }, action: 'access' },
+    breadcrumb: { title: 'navigation.saleInvoiceRecords' },
+    componentLoader: () => import('./pages/sale-invoice-records/index.js'),
+    name: 'saleInvoiceRecords',
+    navigation: { title: 'navigation.saleInvoiceRecords', icon: FileCheck2 },
+    path: '/sale-invoice-records',
+    children: [
+      {
+        name: 'saleInvoiceRecordNew',
+        path: 'new',
+        breadcrumb: { title: 'saleInvoiceRecords.newTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/sale-invoice-records/new.js'),
+      },
+      {
+        name: 'saleInvoiceRecord',
+        path: ':saleInvoiceRecordId',
+        breadcrumb: { title: 'saleInvoiceRecords.detailTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/sale-invoice-records/detail/index.js'),
+        children: [
+          {
+            name: 'saleInvoiceRecordEdit',
+            path: 'edit',
+            breadcrumb: { title: 'saleInvoiceRecords.editTitle' },
+            presentation: { kind: 'child-page' },
+            componentLoader: () => import('./pages/sale-invoice-records/edit.js'),
+          },
+        ],
+      },
+    ],
+  },
+  {
+    // R-065 第二片：receivableRecons，页面授权只给财务与 root；子路由继承列表页授权。
+    auth: 'required',
+    authz: { resource: { type: 'page', id: RECEIVABLE_RECONS_PAGE_ID }, action: 'access' },
+    breadcrumb: { title: 'navigation.receivableRecons' },
+    componentLoader: () => import('./pages/receivable-recons/index.js'),
+    name: 'receivableRecons',
+    navigation: { title: 'navigation.receivableRecons', icon: HandCoins },
+    path: '/receivable-recons',
+    children: [
+      {
+        name: 'receivableReconNew',
+        path: 'new',
+        breadcrumb: { title: 'receivableRecons.newTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/receivable-recons/new.js'),
+      },
+      {
+        name: 'receivableRecon',
+        path: ':receivableReconId',
+        breadcrumb: { title: 'receivableRecons.detailTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/receivable-recons/detail/index.js'),
+        children: [
+          {
+            name: 'receivableReconEdit',
+            path: 'edit',
+            breadcrumb: { title: 'receivableRecons.editTitle' },
+            presentation: { kind: 'child-page' },
+            componentLoader: () => import('./pages/receivable-recons/edit.js'),
+          },
+        ],
+      },
+    ],
+  },
+  {
+    // R-065 第二片：payableRecons，页面授权只给财务与 root；子路由继承列表页授权。
+    auth: 'required',
+    authz: { resource: { type: 'page', id: PAYABLE_RECONS_PAGE_ID }, action: 'access' },
+    breadcrumb: { title: 'navigation.payableRecons' },
+    componentLoader: () => import('./pages/payable-recons/index.js'),
+    name: 'payableRecons',
+    navigation: { title: 'navigation.payableRecons', icon: Coins },
+    path: '/payable-recons',
+    children: [
+      {
+        name: 'payableReconNew',
+        path: 'new',
+        breadcrumb: { title: 'payableRecons.newTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/payable-recons/new.js'),
+      },
+      {
+        name: 'payableRecon',
+        path: ':payableReconId',
+        breadcrumb: { title: 'payableRecons.detailTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/payable-recons/detail/index.js'),
+        children: [
+          {
+            name: 'payableReconEdit',
+            path: 'edit',
+            breadcrumb: { title: 'payableRecons.editTitle' },
+            presentation: { kind: 'child-page' },
+            componentLoader: () => import('./pages/payable-recons/edit.js'),
+          },
+        ],
+      },
+    ],
+  },
+  {
     // 质量工单看板：客户反馈初筛与分流。
     // authz 声明在路径首个页面上，page id 用于存储页面授权，改名需要迁移引用它的授权。
     auth: 'required',
@@ -879,7 +1175,7 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
         breadcrumb: { title: 'navigation.approvalMine' },
         componentLoader: () => import('./pages/approvals/mine.js'),
         name: 'approvalMine',
-        navigation: { title: 'navigation.approvalMine' },
+        navigation: { title: 'navigation.approvalMine', icon: Inbox },
         path: '/approvals/mine',
       },
       {
@@ -888,7 +1184,7 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
         breadcrumb: { title: 'navigation.approvalTasks' },
         componentLoader: () => import('./pages/approvals/tasks.js'),
         name: 'approvalTasks',
-        navigation: { title: 'navigation.approvalTasks' },
+        navigation: { title: 'navigation.approvalTasks', icon: ListChecks },
         path: '/approvals/tasks',
       },
       {
@@ -900,6 +1196,20 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
         path: '/approvals/:id',
       },
     ],
+  },
+  {
+    // R-078 报表中心：跨模块工具，按主会话决定保留在侧栏顶层，与 inventory、approvals 同级。
+    // 页面授权只管能不能进来；列表、出数与导出再按每张报表的 baseActions 与列动作逐次判定。
+    auth: 'required',
+    authz: {
+      resource: { type: 'page', id: REPORTS_PAGE_ID },
+      action: 'access',
+    },
+    breadcrumb: { title: 'navigation.reports' },
+    componentLoader: () => import('./pages/reports/index.js'),
+    name: 'reports',
+    navigation: { title: 'navigation.reports', icon: ChartColumn },
+    path: '/reports',
   },
   {
     // R-032「我的 API 密钥」：每个登录用户只管自己的密钥，接口只作用于本人。

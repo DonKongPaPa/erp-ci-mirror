@@ -136,6 +136,8 @@ export interface OrderHeaderView {
   readonly customerOrderNo?: string | null;
   /** R-021 波 1 加片：请购单回链，只对生成出来的采购订单有值。 */
   readonly purchaseRequestId?: string | null;
+  /** D-077：来源请购单的单据号；没有来源的订单响应里没有这个键。 */
+  readonly purchaseRequestDocNo?: string;
   readonly handlerUserId: string | null;
   readonly handler: PersonRef | null;
   /** R-022 复刻波 1：报价转出的订单才有值；老订单是 null。 */
@@ -150,6 +152,8 @@ export interface OrderHeaderView {
   readonly payableTotal?: number | null;
   readonly paidAmount: number;
   readonly invoicedAmount: number;
+  /** R-065 复刻波 2：销售订单详情多一个已收金额；采购订单响应不变。 */
+  readonly receivedAmount?: number;
 }
 
 export interface PurchaseOrderRecord extends OrderHeaderView {
@@ -376,6 +380,7 @@ interface HeaderRow {
   updated_at: string | Date;
   paid_amount: string | number;
   invoiced_amount: string | number;
+  received_amount?: string | number;
   warehouse_id: string | null;
   contact_name: string | null;
   contact_phone: string | null;
@@ -473,6 +478,7 @@ function headerView(
       ...common,
       customerId: row.customer_id ?? '',
       customerOrderNo: row.customer_order_no ?? null,
+      receivedAmount: num(row.received_amount ?? 0),
       // R-022 复刻波 1：没有来源的空值保持 null，老客户端形状不变（多一个空键）。
       quotationId: row.quotation_id ?? null,
     };
@@ -843,6 +849,13 @@ async function readDetail(
   const config = CONFIG[kind];
   const row = await knex<HeaderRow>(config.headerTable).where({ id }).first();
   if (row === undefined) return undefined;
+  // D-077：回链要显示请购单的单据号，不是内部编号；只在有来源时多查这一列。
+  let purchaseRequestDocNo: string | null = null;
+  if (kind === 'purchase' && row.purchase_request_id !== null && row.purchase_request_id !== undefined) {
+    const request = await knex<{ id: string; doc_no: string }>('purchase_requests')
+      .select('doc_no').where({ id: row.purchase_request_id }).first();
+    purchaseRequestDocNo = request?.doc_no ?? null;
+  }
   const partnerId = kind === 'purchase' ? row.supplier_id : row.customer_id;
   const partner = partnerId === null
     ? undefined
@@ -873,6 +886,7 @@ async function readDetail(
       ...summary,
       supplierId: row.supplier_id ?? '',
       supplier: partnerView(partner),
+      ...(purchaseRequestDocNo !== null ? { purchaseRequestDocNo } : {}),
       lines: views,
       files: fileViews,
     }

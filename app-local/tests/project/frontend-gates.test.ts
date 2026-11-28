@@ -80,7 +80,7 @@ describe('frontend gates in gate.sh', () => {
     );
     expect(
       fastBlock.includes('tests/project/frontend-style-guard.test.ts'),
-      'fast 档必须显式跑样式守门 —— 它查的是 client/，--changed 关联不到它。',
+      'fast 档必须显式跑样式守门 —— 它查的是 client/，按路径映射关联不到它。',
     ).toBe(true);
   });
 

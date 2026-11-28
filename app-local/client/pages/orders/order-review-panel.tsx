@@ -2,6 +2,7 @@ import { useApiClient, useToaster } from '@nocobase/app-client';
 import { useLocale, useTranslation } from '@nocobase/i18n/client';
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
 
+import { ActionGlyph } from '#components/action-glyph';
 import { FeedbackForm } from '#components/feedback-form';
 import { errorText } from '#components/erp/messages';
 import { useListData } from '#hooks/use-list-data';
@@ -185,7 +186,10 @@ export function OrderReviewPanel({
       ) : null}
       {access.create ? (
         <div className='flex flex-wrap items-center gap-2'>
-          <Button onClick={openCreate}>{t('orderReviews.new')}</Button>
+          <Button onClick={openCreate}>
+            <ActionGlyph action='create' />
+            {t('orderReviews.new')}
+          </Button>
           {confirmed !== undefined ? (
             <Button variant='outline' onClick={openCreate}>
               {t('orderReviews.reReview')}
@@ -263,6 +267,7 @@ export function OrderReviewPanel({
                 {access.submit && selected.status === 'draft' ? (
                   <PendingButton
                     busy={busy}
+                    action='submit'
                     onClick={() => void submit(selected)}
                   >
                     {t('orderReviews.submit')}
@@ -276,6 +281,7 @@ export function OrderReviewPanel({
                       setConfirming(selected);
                     }}
                   >
+                    <ActionGlyph action='review' />
                     {t('orderReviews.confirm')}
                   </Button>
                 ) : null}
@@ -351,7 +357,7 @@ export function OrderReviewPanel({
               <Button type='button' variant='outline' onClick={() => setCreating(false)}>
                 {t('orderReviews.cancel')}
               </Button>
-              <PendingButton type='submit' busy={busy}>
+              <PendingButton type='submit' busy={busy} action='create'>
                 {t('orderReviews.create')}
               </PendingButton>
             </DialogFooter>
@@ -387,7 +393,7 @@ export function OrderReviewPanel({
               <Button type='button' variant='outline' onClick={() => setConfirming(undefined)}>
                 {t('orderReviews.cancel')}
               </Button>
-              <PendingButton type='submit' busy={busy}>
+              <PendingButton type='submit' busy={busy} action='review'>
                 {t('orderReviews.confirmAction')}
               </PendingButton>
             </DialogFooter>

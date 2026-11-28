@@ -365,11 +365,11 @@ function FinanceForm({
                 {t('actions.cancel')}
               </Button>
               {canConfirm ? (
-                <PendingButton type='button' busy={busy} onClick={() => void doSubmit(true)}>
+                <PendingButton type='button' busy={busy} action='post' onClick={() => void doSubmit(true)}>
                   {t('finance.saveAndRegister')}
                 </PendingButton>
               ) : null}
-              <PendingButton type='submit' form={formId} busy={busy}>
+              <PendingButton type='submit' form={formId} busy={busy} action='save'>
                 {t('finance.saveDraft')}
               </PendingButton>
             </>

@@ -1,4 +1,4 @@
-import { ChevronDownIcon, PlusIcon } from 'lucide-react';
+import { ChevronDownIcon } from 'lucide-react';
 import { useTranslation } from '@nocobase/i18n/client';
 import type { ReactElement, ReactNode } from 'react';
 import { Link } from 'react-router';
@@ -18,6 +18,9 @@ import {
   SelectValue,
 } from '#components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '#components/ui/tabs';
+import { ACTION_ICONS } from '#lib/action-icons';
+
+const CreateIcon = ACTION_ICONS.create;
 
 /**
  * 基座 ERP 的页面构件（《基座ERP前端设计》第二节）。各模块的列表页、详情与表单直接拼这些；
@@ -88,7 +91,7 @@ export function NewButton({
 }): ReactElement {
   return (
     <Button size='sm' nativeButton={false} render={<Link to={to} />}>
-      <PlusIcon aria-hidden='true' />
+      <CreateIcon data-icon='inline-start' aria-hidden='true' />
       {label}
     </Button>
   );

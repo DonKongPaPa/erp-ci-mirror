@@ -435,6 +435,7 @@ function UserEditor(): ReactElement {
       {allowed && (
         <PendingButton
           busy={busy}
+          action='save'
           pendingLabel={t('settings.saving')}
           form={formId}
           type='submit'

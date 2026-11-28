@@ -23,6 +23,13 @@ import {
   FINANCE_COLLECTIONS,
   invoiceReceipts as invoiceReceiptsResource,
 } from '../finance-resources.js';
+import {
+  incomeRecords as incomeRecordsResource,
+  payableRecons as payableReconsResource,
+  RECONCILIATION_COLLECTIONS,
+  receivableRecons as receivableReconsResource,
+  saleInvoiceRecords as saleInvoiceRecordsResource,
+} from '../reconciliation-resources.js';
 import { defineDepartmentRecordAccess } from '../department-record-access.js';
 import {
   EMPLOYEE_COLLECTIONS,
@@ -40,6 +47,8 @@ import {
 } from '../partner-resources.js';
 import { IQC_COLLECTIONS, inspectionOrders as inspectionOrdersResource } from '../iqc-resources.js';
 import { ITEM_COLLECTIONS, items as itemsResource } from '../items-resources.js';
+import { BOM_COLLECTIONS, boms as bomsResource } from '../bom-resources.js';
+import { REPORT_COLLECTIONS, reports as reportsResource } from '../reports-resources.js';
 import {
   ORDER_COLLECTIONS,
   purchaseOrders as purchaseOrdersResource,
@@ -54,6 +63,7 @@ import {
   orderReviews as orderReviewsResource,
 } from '../order-review-resources.js';
 import { SHIFT_COLLECTIONS, shifts as shiftsResource } from '../shift-resources.js';
+import { MES_COLLECTIONS, mesSettings as mesSettingsResource } from '../mes-resources.js';
 import {
   STOCKTAKING_COLLECTIONS,
   stocktakings as stocktakingsResource,
@@ -62,6 +72,11 @@ import {
   TRANSFER_COLLECTIONS,
   transfers as transfersResource,
 } from '../transfer-resources.js';
+import {
+  RETURN_COLLECTIONS,
+  purchaseReturns as purchaseReturnsResource,
+  salesReturns as salesReturnsResource,
+} from '../returns-resources.js';
 import {
   PURCHASE_REQUEST_COLLECTIONS,
   purchaseRequests as purchaseRequestsResource,
@@ -109,20 +124,27 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
       ...SHIFT_COLLECTIONS,
       ...PARTNER_COLLECTIONS,
       ...ITEM_COLLECTIONS,
+      ...BOM_COLLECTIONS,
       ...INVENTORY_COLLECTIONS,
       ...ORDER_COLLECTIONS,
       // R-022 复刻波 1：报价单头与明细两张表。
       ...QUOTATION_COLLECTIONS,
       ...DOC_FILE_COLLECTIONS,
       ...FINANCE_COLLECTIONS,
+      ...RECONCILIATION_COLLECTIONS,
       ...BIZ_DICT_COLLECTIONS,
       ...ORDER_REVIEW_COLLECTIONS,
       ...FINANCE_REQUEST_COLLECTIONS,
       ...STOCKTAKING_COLLECTIONS,
       ...TRANSFER_COLLECTIONS,
+      ...RETURN_COLLECTIONS,
       ...PURCHASE_REQUEST_COLLECTIONS,
       // R-070：采购检验单头与明细。
       ...IQC_COLLECTIONS,
+      // R-023 W3-1：七张基础设置表。
+      ...MES_COLLECTIONS,
+      // R-078：报表定义表只读（四个入口动作各挂同一条窄读）。
+      ...REPORT_COLLECTIONS,
     ]) {
       authz.database.collections.add(collection);
     }
@@ -137,6 +159,8 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
     const customersReference = authz.compositeResources.define(customersResource);
     const suppliersReference = authz.compositeResources.define(suppliersResource);
     const itemsReference = authz.compositeResources.define(itemsResource);
+    // R-019 波 2：BOM 资源只声明，不 ui.place —— 本片没有页面。
+    authz.compositeResources.define(bomsResource);
     // R-020：库存资源只声明，不 ui.place —— 本片没有页面，也不改角色编辑器目录。
     authz.compositeResources.define(inventoryResource);
     // R-021/R-022：采购与销售订单各一份资源，同样不做页面目录。
@@ -149,6 +173,11 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
     authz.compositeResources.define(bizOptionsResource);
     authz.compositeResources.define(expenseRecordsResource);
     authz.compositeResources.define(invoiceReceiptsResource);
+    // R-065 复刻波 2：四份财务单据资源只声明、不 ui.place，授权只给 finance 与 root。
+    authz.compositeResources.define(incomeRecordsResource);
+    authz.compositeResources.define(saleInvoiceRecordsResource);
+    authz.compositeResources.define(receivableReconsResource);
+    authz.compositeResources.define(payableReconsResource);
     // R-017 M3：审批的业务动作与两把「仅本人」范围键。资源 id 用单数 approval，
     // 与 S1 守门测试里「不注册 approvals composite」不冲突；三张表仍是裸数据库资源。
     authz.compositeResources.define(APPROVAL_RESOURCE);
@@ -158,15 +187,22 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
     // R-020 波 1：盘点与调拨只声明资源与动作，不做页面目录（页面随波 2）。
     authz.compositeResources.define(stocktakingsResource);
     authz.compositeResources.define(transfersResource);
+    // R-020 波 2：退货单资源只声明动作，不做页面目录。
+    authz.compositeResources.define(purchaseReturnsResource);
+    authz.compositeResources.define(salesReturnsResource);
     // R-021 波 1 加片：请购单资源只声明、不 ui.place；staff 通过「仅本人」范围键收窄。
     authz.compositeResources.define(purchaseRequestsResource);
     // R-066：请款单资源只声明、不 ui.place；staff 通过「仅本人」范围键收窄。
     authz.compositeResources.define(financeRequestsResource);
     // R-070 IQC：只声明资源与六个动作，不做 ui.place（本片没有页面）。
     authz.compositeResources.define(inspectionOrdersResource);
+    // R-023 W3-1：mesSettings 只有 view / maintain / priceView 三个动作，不做 ui.place。
+    authz.compositeResources.define(mesSettingsResource);
     // R-076：三类打印单据各两个动作（print / printPrice）；表沿用 inventory 已登记的
     // stockDocs / stockDocLines，不重复登记，也不做页面目录（打印视图按 docType 自检动作）。
     for (const resource of DOC_PRINT_RESOURCES) authz.compositeResources.define(resource);
+    // R-078：报表只声明四个入口动作，不做 ui.place；每张报表再按自己的 baseActions 二次判定。
+    authz.compositeResources.define(reportsResource);
     const departmentService = this.app.container.resolve(
       departmentServiceToken,
     );

@@ -34,6 +34,7 @@ const DOC_READ = [
   'sourceId', 'createdById', 'postedAt', 'postedById', 'createdAt', 'updatedAt',
   'docDate', 'partnerId', 'contactName', 'contactPhone', 'deliveryAddress',
   'customerOrderNo', 'projectCode', 'handlerUserId', 'takerDepartmentId',
+  'takerUserId', 'totalQty', 'stocktakingId', 'transferDocId', 'returnDocId',
   'takerUserId', 'totalQty', 'stocktakingId', 'transferDocId', 'inspectionId',
 ] as const;
 const DOC_PRICE_READ = [
@@ -44,6 +45,7 @@ const DOC_WRITE = [
   'contactName', 'contactPhone', 'deliveryAddress', 'customerOrderNo', 'projectCode',
   'handlerUserId', 'takerDepartmentId', 'takerUserId', 'discountAmount',
   'totalQty', 'taxIncludedTotal', 'taxExcludedTotal', 'taxTotal', 'payableTotal',
+  'stocktakingId', 'transferDocId', 'returnDocId',
   'stocktakingId', 'transferDocId', 'inspectionId',
 ] as const;
 const LINE_READ = [

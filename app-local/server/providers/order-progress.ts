@@ -61,11 +61,16 @@ export async function syncOrderProgress(
   const header = locked.rows?.[0];
   if (header === undefined || header.status === 'cancelled') return;
 
+  // R-020 波 2：退货生成的单据带 returnDocId，按物料求和时取负号冲减；作废的退货不算。
+  // 仍是重算而不是拿退货数量去减当前值，重复回写不会漂。
   const totals = await knex.raw<{ rows?: readonly TotalRow[] }>(
-    `select l.item_id, sum(l.qty) as qty
+    `select l.item_id,
+            sum(case when d.return_doc_id is null then l.qty else -l.qty end) as qty
        from stock_doc_lines l
        join stock_docs d on d.id = l.doc_id
+       left join return_docs r on r.id = d.return_doc_id
       where d.source_type = ? and d.source_id = ? and d.status = 'posted'
+        and (d.return_doc_id is null or r.status <> 'void')
       group by l.item_id`,
     [sourceType, sourceId],
   );

@@ -5,7 +5,7 @@ import {
 } from '@nocobase/app-client';
 import { useAuthentication } from '@nocobase/app-plugin-authentication/client';
 import { useTranslation } from '@nocobase/i18n/client';
-import { Check, ClipboardList } from 'lucide-react';
+import { Check, ClipboardList, MessageSquareWarning } from 'lucide-react';
 import { useEffect, useState, type ReactElement } from 'react';
 import { Link } from 'react-router';
 
@@ -114,6 +114,22 @@ function EnabledDevAccountSwitcher(): ReactElement {
       >
         <ClipboardList className='size-4' />
         {t('devTools.requirementsBoard.menuEntry')}
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        className='gap-2'
+        closeOnClick
+        render={<Link to='/dev/confirmations' />}
+      >
+        <ClipboardList className='size-4' />
+        {t('devTools.confirmations.menuEntry')}
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        className='gap-2'
+        closeOnClick
+        render={<Link to='/dev/feedback' />}
+      >
+        <MessageSquareWarning className='size-4' />
+        {t('devTools.feedback.menuEntry')}
       </DropdownMenuItem>
       {accounts.map((account) => (
         <DropdownMenuItem

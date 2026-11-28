@@ -379,7 +379,7 @@ export function OrderDetailPage({
                     aria-label={t('orderDocs.fields.sourcePurchaseRequest')}
                     to={`/purchase-requests/${encodeURIComponent(order.purchaseRequestId)}`}
                   >
-                    {order.purchaseRequestId}
+                    {order.purchaseRequestDocNo ?? order.purchaseRequestId}
                   </Link>
                 ),
               },
@@ -423,8 +423,10 @@ export function OrderDetailPage({
                 value: money(order.payableTotal, locale, t),
               },
               {
+                // R-065 第二片：销售侧回写的是 receivedAmount，采购侧仍是原来的 paidAmount。
+                // 这里的回链（purchaseRequestId）只属于采购详情，一点不改。
                 label: t(`${def.l}.paidLabel`),
-                value: money(order.paidAmount, locale, t),
+                value: money(def.id === 'sales' ? order.receivedAmount ?? 0 : order.paidAmount, locale, t),
               },
               {
                 label: t(`${def.l}.invoicedLabel`),
@@ -454,7 +456,7 @@ export function OrderDetailPage({
                 </Button>
               ) : null}
               {order.status === 'draft' && submit.can ? (
-                <PendingButton busy={busy} onClick={() => void act('submit')}>
+                <PendingButton busy={busy} action='submit' onClick={() => void act('submit')}>
                   {t(`${def.l}.actions.submit`)}
                 </PendingButton>
               ) : null}

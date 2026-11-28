@@ -7,6 +7,8 @@ import { apiRoutes as bizDictRoutes } from './biz-dict.js';
 import { apiRoutes as docFileRoutes } from './doc-files.js';
 import { apiRoutes as docPrintRoutes } from './doc-print.js';
 import { apiRoutes as financeRoutes } from './finance.js';
+import { apiRoutes as reconciliationRoutes } from './reconciliation.js';
+import { apiRoutes as reportRoutes } from './reports.js';
 import { apiRoutes as qualityRoutes } from './quality.js';
 import { apiRoutes as departmentRoutes } from './departments.js';
 import { apiRoutes as employeeRoutes } from './employees.js';
@@ -20,9 +22,12 @@ import { apiRoutes as orderReviewRoutes } from './order-reviews.js';
 import { apiRoutes as salesOrderRoutes } from './sales-orders.js';
 import { apiRoutes as quotationRoutes } from './quotations.js';
 import { apiRoutes as itemRoutes } from './items.js';
+import { apiRoutes as bomRoutes } from './boms.js';
 import { apiRoutes as iqcRoutes } from './iqc.js';
+import { apiRoutes as mesSettingsRoutes } from './mes-settings.js';
 import { apiRoutes as stocktakingRoutes } from './stocktaking.js';
 import { apiRoutes as transferRoutes } from './transfer.js';
+import { apiRoutes as returnsRoutes } from './returns.js';
 import { apiRoutes as unitRoutes } from './units.js';
 import { apiRoutes as itemCategoryRoutes } from './item-categories.js';
 import { apiRoutes as importRoutes } from './import-tool.js';
@@ -34,6 +39,10 @@ const routes: readonly AppRouteContribution<Application>[] = [
   docFileRoutes,
   // R-065：先于订单路由注册，避免 /purchase-orders/payable 被 /:id 抢先匹配。
   financeRoutes,
+  // R-065 复刻波 2：同样先于订单路由，避免 /sales-orders/receivable 被 /:id 抢先匹配。
+  reconciliationRoutes,
+  // R-078：报表端点；/reports/favorites 与 /reports/export-traces 是静态段，先登记。
+  reportRoutes,
   qualityRoutes,
   departmentRoutes,
   employeeRoutes,
@@ -42,6 +51,8 @@ const routes: readonly AppRouteContribution<Application>[] = [
   inventoryRoutes,
   stocktakingRoutes,
   transferRoutes,
+  // R-020 波 2：退货单的静态段（source-options / finance-options）由 Hono 区分。
+  returnsRoutes,
   docPrintRoutes,
   purchaseOrderRoutes,
   // R-021 波 1 加片：请购单自己的路由，静态段在 /purchase-requests/:id 之前由 Hono 区分。
@@ -54,8 +65,11 @@ const routes: readonly AppRouteContribution<Application>[] = [
   // R-022 复刻波 1：报价单七条端点；路径不与订单冲突。
   quotationRoutes,
   itemRoutes,
+  bomRoutes,
   // R-070：/inspections/receivable-options 是静态段，Hono 会先于 /inspections/:id 匹配。
   iqcRoutes,
+  // R-023 W3-1：五组设置端点 + 工价，路径不与现有模块冲突。
+  mesSettingsRoutes,
   unitRoutes,
   itemCategoryRoutes,
   // R-068：/imports/:kind/* 是工程工具，放在业务路由之后；没有删除端点。
