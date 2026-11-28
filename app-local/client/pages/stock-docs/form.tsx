@@ -28,8 +28,10 @@ import {
   defaultDictCode,
   departmentChoices,
   dictChoices,
+  personChoiceFrom,
   personChoices,
   useDepartmentOptions,
+  withKnownChoices,
   useDictEntries,
   usePersonOptions,
   type DictEntry,
@@ -269,6 +271,24 @@ function StockDocForm({
   const leave = usePageLeave(touched && !saved, busy);
   // 出库单的每一行旁边带现存量：填的数量超过它就标红（过账时以服务端的判断为准）。
   const hand = useLineStock(values.lines, def.kind === 'out' && canPick);
+  // 选项只回在职员工与在用部门；老单据上已存过的标识用详情里的摘要补成不可选项，
+  // 免得控件把裸标识画出来。职务没变的人仍在选项里，这里不会重复。
+  const personItems = withKnownChoices(personChoices(people), [
+    personChoiceFrom(doc?.handler),
+    personChoiceFrom(doc?.taker),
+  ]);
+  const departmentItems = withKnownChoices(departmentChoices(departments), [
+    doc?.takerDepartmentId
+      ? {
+          value: doc.takerDepartmentId,
+          label: doc.takerDepartment?.name ?? doc.takerDepartmentId,
+        }
+      : undefined,
+  ]);
+  const selectable = {
+    people: new Set(personChoices(people).map((choice) => choice.value)),
+    departments: new Set(departmentChoices(departments).map((choice) => choice.value)),
+  };
 
   const setHeader = (key: keyof DocFormValues, value: string | readonly string[]) => {
     setTouched(true);
@@ -346,7 +366,7 @@ function StockDocForm({
     setBusy(true);
     setError(undefined);
     try {
-      const body = inputOf(values);
+      const body = inputOf(values, selectable);
       const saved =
         doc === undefined
           ? await client.create({ docType: def.kind, ...body })
@@ -575,7 +595,7 @@ function StockDocForm({
               label={t('stockDocs.fields.handler')}
             >
               <Select
-                items={personChoices(people)}
+                items={personItems}
                 value={values.handlerUserId || null}
                 onValueChange={(next) => setHeader('handlerUserId', next ?? '')}
               >
@@ -583,7 +603,7 @@ function StockDocForm({
                   <SelectValue placeholder={t('orderDocs.form.choose')} />
                 </SelectTrigger>
                 <SelectContent>
-                  {personChoices(people).map((option) => (
+                  {personItems.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>
@@ -600,7 +620,7 @@ function StockDocForm({
                   error={errors.takerDepartmentId}
                 >
                   <Select
-                    items={departmentChoices(departments)}
+                    items={departmentItems}
                     value={values.takerDepartmentId || null}
                     onValueChange={(next) => setHeader('takerDepartmentId', next ?? '')}
                   >
@@ -612,7 +632,7 @@ function StockDocForm({
                       <SelectValue placeholder={t('orderDocs.form.choose')} />
                     </SelectTrigger>
                     <SelectContent>
-                      {departmentChoices(departments).map((option) => (
+                      {departmentItems.map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           {option.label}
                         </SelectItem>
@@ -627,7 +647,7 @@ function StockDocForm({
                   error={errors.takerUserId}
                 >
                   <Select
-                    items={personChoices(people)}
+                    items={personItems}
                     value={values.takerUserId || null}
                     onValueChange={(next) => setHeader('takerUserId', next ?? '')}
                   >
@@ -639,7 +659,7 @@ function StockDocForm({
                       <SelectValue placeholder={t('orderDocs.form.choose')} />
                     </SelectTrigger>
                     <SelectContent>
-                      {personChoices(people).map((option) => (
+                      {personItems.map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           {option.label}
                         </SelectItem>

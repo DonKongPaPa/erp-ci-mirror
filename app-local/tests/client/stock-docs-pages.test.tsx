@@ -28,6 +28,7 @@ import OutboundOrdersPage from '../../client/pages/outbound-orders/index.js';
 import OutboundOrderDetailPage from '../../client/pages/outbound-orders/detail.js';
 import OutboundOrderEditPage from '../../client/pages/outbound-orders/edit.js';
 
+import { rememberPrintTrace } from '../../client/pages/doc-print/trace.js';
 import packageMetadata from '../../package.json' with { type: 'json' };
 
 /**
@@ -199,6 +200,7 @@ const calls = (method: string, path: string) =>
     .filter((call) => call.method === method && call.path === path);
 
 beforeEach(() => {
+  sessionStorage.clear();
   api.mockClear();
   getSession.mockClear();
   answer = notFound;
@@ -580,7 +582,7 @@ describe('R-020 入库单', () => {
     answer = (call) => {
       if (call.method === 'GET' && call.path === 'biz-dict/entries')
         return pageOf([entry('project', 'PRJ-1', 'Sample Project')]);
-      if (call.method === 'GET' && call.path === 'person-options')
+      if (call.method === 'GET' && call.path.startsWith('person-options'))
         return pageOf([{ userId: 'u1', name: 'Sam Keeper', departmentId: 'd1', departmentName: 'Sample Dept' }]);
       if (call.method === 'GET' && call.path === 'department-options')
         return pageOf([{ id: 'd1', name: 'Sample Dept' }]);
@@ -875,4 +877,98 @@ describe('R-020 出库单', () => {
     expect(await screen.findByRole('columnheader', { name: 'Tax-included price' }, WAIT)).toBeVisible();
   });
 
+});
+
+describe('R-072 人员选项与草稿编辑', () => {
+  const waveKeeper: AuthorizationSnapshot = {
+    unrestricted: false,
+    permissions: [
+      permission('inventory', [
+        'stockView', 'stockWrite', 'warehouseView',
+      ]),
+      permission('items', ['view']),
+      permission('bizOptions', ['view']),
+    ],
+  };
+
+  it('asks person-options for the endpoint page size and names a saved handler when options are empty', async () => {
+    let personSize: string | undefined;
+    answer = (call) => {
+      if (call.path === 'person-options') {
+        personSize = call.query?.pageSize as string | undefined;
+        return pageOf([]);
+      }
+      if (call.method === 'GET' && call.path === 'stock-docs/d1')
+        return outDoc({
+          handlerUserId: 'u-admin',
+          handler: { userId: 'u-admin', name: 'Sam Admin' },
+          lines: [line({ qty: 10 })],
+        });
+      return lookups(call);
+    };
+
+    await renderAt('/outbound-orders/d1/edit', waveKeeper);
+    await screen.findByRole('textbox', { name: 'Quantity, line 1' }, WAIT);
+    expect(personSize).toBe('20');
+    const handler = screen.getByRole('combobox', { name: 'Handler' });
+    expect(handler.textContent).toContain('Sam Admin');
+    expect(handler.textContent).not.toContain('u-admin');
+  });
+
+  it('saves an edited draft without echoing a handler the option endpoint did not return', async () => {
+    let patched: Record<string, unknown> | undefined;
+    answer = (call) => {
+      if (call.path.startsWith('person-options')) return pageOf([]);
+      if (call.method === 'GET' && call.path === 'stock-docs/d1')
+        return outDoc({
+          reason: 'other_out',
+          handlerUserId: 'u-admin',
+          handler: { userId: 'u-admin', name: 'Sam Admin' },
+          lines: [line({ qty: 1 })],
+        });
+      if (call.method === 'PATCH' && call.path === 'stock-docs/d1') {
+        patched = call.json as Record<string, unknown>;
+        return outDoc({ lines: [line({ qty: 2 })] });
+      }
+      return lookups(call);
+    };
+    const user = userEvent.setup();
+    await renderAt('/outbound-orders/d1/edit', waveKeeper);
+
+    const qty = await screen.findByRole('textbox', { name: 'Quantity, line 1' }, WAIT);
+    await user.clear(qty);
+    await user.type(qty, '2');
+    await user.click(await screen.findByRole('button', { name: 'Save draft' }, WAIT));
+
+    await waitFor(() => expect(patched).toBeDefined(), WAIT);
+    expect(patched).not.toHaveProperty('handlerUserId');
+    expect(patched).not.toHaveProperty('takerUserId');
+    const lines = patched!.lines as readonly Record<string, unknown>[];
+    expect(lines).toEqual([expect.objectContaining({ qty: 2 })]);
+  });
+});
+
+describe('R-076 详情打印痕迹', () => {
+  it('shows the print count and last printer, and refetches the detail when coming back', async () => {
+    rememberPrintTrace('CK-20261127-0001', {
+      printCount: 2,
+      lastPrintedAt: '2026-11-28T10:01:00+08:00',
+      lastPrintedBy: 'u1',
+      lastPrintedByName: 'Sam Keeper',
+    });
+    answer = (call) => {
+      if (call.method === 'GET' && call.path === 'stock-docs/d1')
+        return outDoc({ lines: [line({ qty: 10 })] });
+      return lookups(call);
+    };
+    await renderAt('/outbound-orders/d1', keeper);
+
+    expect(await screen.findByText('CK-20261127-0001', {}, WAIT)).toBeVisible();
+    expect(await screen.findByText('Print count', {}, WAIT)).toBeVisible();
+    const countField = screen.getByText('Print count').closest('div');
+    expect(countField?.textContent).toContain('2');
+    expect(screen.getByText('Last printed by')).toBeVisible();
+    expect(screen.getByText('Sam Keeper')).toBeVisible();
+    await waitFor(() => expect(calls('GET', 'stock-docs/d1').length).toBeGreaterThan(1), WAIT);
+  });
 });

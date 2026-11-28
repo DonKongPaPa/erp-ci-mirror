@@ -281,16 +281,20 @@ const actionsOf = (grants: Grants, id: string): readonly string[] =>
 test('seed：planning 拿六个评审动作与台账只读，不拿订单 view；sales 只多两个读动作', async ({
   app,
 }) => {
-  // 授权定义钉在新种子上，原种子已执行过、不能回改。
+  // 授权定义钉在新种子上，原种子已执行过、不能回改。整份授权清单（含 007/012/015
+  // 的追加项）只由 business-permission-sets.test.ts 钉住；这里只断言本片（R-064）的条目。
   const authz = app.container.resolve(authorizationToken);
   const planning = await authz.permissionSets.get('planning');
   expect(planning).toBeDefined();
-  expect(planning!.grants).toEqual(planningPermissionSet.grants);
   const grants = planning!.grants as unknown as Grants;
+  for (const added of planningPermissionSet.grants) {
+    expect(grants, '新种子的 planning 补丁授权没有落库').toContainEqual(added);
+  }
   expect(actionsOf(grants, 'orderReviews')).toEqual([
     'view', 'create', 'update', 'submit', 'confirm', 'void',
   ]);
   expect(actionsOf(grants, 'salesOrders')).toEqual(['ledgerView']);
+  expect(actionsOf(grants, 'salesOrders')).not.toContain('view');
   expect(planning!.title).toEqual({
     key: 'permissionSets.business.planning', ns: 'app-local',
   });
@@ -302,8 +306,12 @@ test('seed：planning 拿六个评审动作与台账只读，不拿订单 view�
   for (const added of salesReviewPermissionSet.grants) {
     expect(salesGrants, '新种子的 sales 补丁授权没有落库').toContainEqual(added);
   }
-  const warehouse = await authz.permissionSets.get('warehouse');
-  expect(actionsOf(warehouse!.grants as unknown as Grants, 'orderReviews')).toEqual([]);
+  // 别的角色没拿到本片的评审资源，不必比对它们的整份清单。
+  for (const key of ['warehouse', 'purchase', 'staff']) {
+    const other = await authz.permissionSets.get(key);
+    expect(actionsOf(other!.grants as unknown as Grants, 'orderReviews'),
+      `${key} 不该拿到本片的评审动作`).toEqual([]);
+  }
 });
 
 test('升级：旧环境没有 planning 就建，补齐授权；重跑不写、别的角色不动', async ({

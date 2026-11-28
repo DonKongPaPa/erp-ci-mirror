@@ -24,10 +24,19 @@ export interface OptionPage<T> {
 }
 
 const PAGE_SIZE = 100;
+/**
+ * `person-options` 的 pageSize 上限是 20（R-072 的接口契约）。按 100 请求会 400，
+ * 于是所有选人的下拉都取不到数；这里按端点上限分页。
+ */
+const PERSON_PAGE_SIZE = 20;
 const MAX_PAGES = 10;
 
 /** 把一个列表端点按页读完；`enabled` 为假时不发请求。 */
-export function useOptionPage<T>(path: string, enabled: boolean): OptionPage<T> {
+export function useOptionPage<T>(
+  path: string,
+  enabled: boolean,
+  pageSize = PAGE_SIZE,
+): OptionPage<T> {
   const api = useApiClient();
   const [revision, setRevision] = useState(0);
   const [result, setResult] = useState<{
@@ -44,7 +53,7 @@ export function useOptionPage<T>(path: string, enabled: boolean): OptionPage<T> 
       const separator = path.includes('?') ? '&' : '?';
       for (let page = 1; page <= MAX_PAGES; page += 1) {
         const chunk = await api.request<EntityPage<T>>({
-          path: `${path}${separator}page=${page}&pageSize=${PAGE_SIZE}`,
+          path: `${path}${separator}page=${page}&pageSize=${pageSize}`,
           signal: controller.signal,
         });
         collected.push(...chunk.items);
@@ -56,7 +65,7 @@ export function useOptionPage<T>(path: string, enabled: boolean): OptionPage<T> 
       if (!controller.signal.aborted) setResult({ path, error });
     });
     return () => controller.abort();
-  }, [api, path, enabled, revision]);
+  }, [api, path, enabled, revision, pageSize]);
 
   const reload = useCallback(() => setRevision((value) => value + 1), []);
   const current = result.path === path;
@@ -116,7 +125,7 @@ export interface PersonOption {
 }
 
 export function usePersonOptions(enabled: boolean): OptionPage<PersonOption> {
-  return useOptionPage<PersonOption>('person-options', enabled);
+  return useOptionPage<PersonOption>('person-options', enabled, PERSON_PAGE_SIZE);
 }
 
 export function personChoices(
@@ -126,6 +135,49 @@ export function personChoices(
     value: person.userId,
     label: person.name,
   }));
+}
+
+/**
+ * 单据详情已经带出的人/往来单位摘要，用它补下拉里缺的项。
+ *
+ * 选项端点只回在职员工、在用供应商；老单据引用的标识可能已经停用，或者暂时取不到选项。
+ * 这时 Select 没有对应项就会把裸标识画给用户；把详情里的姓名/名称补成不可选项，
+ * 人能看到是谁，又不会把一个停用对象当成新的可选项。
+ */
+export function withKnownChoices(
+  choices: readonly OptionChoice[],
+  known: readonly (OptionChoice | null | undefined)[],
+): OptionChoice[] {
+  const present = new Set(choices.map((choice) => choice.value));
+  const extras = known.filter(
+    (choice): choice is OptionChoice =>
+      choice !== null && choice !== undefined && choice.value !== '' && !present.has(choice.value),
+  );
+  return [...choices, ...extras.map((choice) => ({ ...choice, disabled: true }))];
+}
+
+/** 详情里的 `handler` / `taker` 摘要转成一个补项。 */
+export function personChoiceFrom(
+  person: { readonly userId: string; readonly name: string } | null | undefined,
+): OptionChoice | undefined {
+  return person === null || person === undefined
+    ? undefined
+    : { value: person.userId, label: person.name };
+}
+
+/** 详情里的往来单位摘要转成一个补项；`code` 有值时和下拉的写法一致。 */
+export function partnerChoiceFrom(
+  partner:
+    | { readonly id: string; readonly name: string; readonly code?: string | null }
+    | null
+    | undefined,
+): OptionChoice | undefined {
+  return partner === null || partner === undefined
+    ? undefined
+    : {
+        value: partner.id,
+        label: partner.code ? `${partner.code} ${partner.name}` : partner.name,
+      };
 }
 
 export interface DepartmentOption {

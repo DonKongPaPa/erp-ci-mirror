@@ -115,6 +115,10 @@ test('旧环境：各补各的订单页，别的角色不动，重跑不写', as
   const authz = resolveAuthz(app);
   const users = app.container.resolve(userManagementServiceToken);
   await removePageGrants(connection, authz);
+  // 升级前的页面清单用于「只加不改」的相对比对；不钉跨片的整份清单。
+  const pagesBefore = new Map<string, string[]>();
+  for (const key of ROLE_KEYS)
+    pagesBefore.set(key, pageGrants((await authz.permissionSets.get(key))!));
   const buyer = await createPerson(users, 'r021pagebuyer', ['purchase']);
   const seller = await createPerson(users, 'r022pageseller', ['sales']);
   const keeper = await createPerson(users, 'r021pagekeeper', ['warehouse']);
@@ -138,24 +142,22 @@ test('旧环境：各补各的订单页，别的角色不动，重跑不写', as
   expect(await pageCan(authz, keeper, PAGES.purchase)).toBe(false);
   expect(await pageCan(authz, keeper, PAGES.sales)).toBe(false);
 
-  // 只加不改：订单页各一条，原有的页面授权（客户与供应商页、仓库页、物料页）原样还在。
-  const purchase = await authz.permissionSets.get('purchase');
-  expect(pageGrants(purchase!)).toEqual([
-    'partners',
-    'warehouses',
-    'items',
-    PAGES.purchase,
-  ]);
-  const sales = await authz.permissionSets.get('sales');
-  expect(pageGrants(sales!)).toEqual([
-    'partners',
-    'warehouses',
-    'items',
-    PAGES.sales,
-  ]);
+  // 本片只钉自己加的订单页：在目标角色上、不在别的角色上。原有的页面授权
+  // 用升级前快照比对「只加不改」；跨片的整份页面清单由 business-permission-sets.test.ts 钉住。
+  for (const key of ROLE_KEYS) {
+    const pages = pageGrants((await authz.permissionSets.get(key))!);
+    const before = pagesBefore.get(key)!;
+    expect(pages.slice(0, before.length), `${key} 原有的页面授权被改动`).toEqual(before);
+    expect(pages, `${key} 没拿到本片的订单页`).toContain(PAGES[key]);
+    const otherPage = key === 'purchase' ? PAGES.sales : PAGES.purchase;
+    expect(pages, `${key} 不该拿到别人的订单页`).not.toContain(otherPage);
+  }
+  const keeperPages = pageGrants((await authz.permissionSets.get('warehouse'))!);
+  for (const page of Object.values(PAGES))
+    expect(keeperPages, `仓管不该拿到订单页 ${page}`).not.toContain(page);
 
   // 幂等：重跑什么都不写，revision 也不变。
-  const revision = sales?.revision;
+  const revision = (await authz.permissionSets.get('sales'))?.revision;
   const again = await upgradeR021Page(services(app), { info: () => undefined });
   expect(again.pages.unchanged).toEqual(['purchase', 'sales']);
   expect(again.pages.changed).toEqual([]);

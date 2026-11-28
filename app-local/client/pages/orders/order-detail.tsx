@@ -29,9 +29,12 @@ import { errorText, type Translate } from '#components/erp/messages';
 import { PendingButton } from '#components/pending-button';
 import { Button } from '#components/ui/button';
 import { TableCell } from '#components/ui/table';
+import { Tabs, TabsList, TabsTrigger } from '#components/ui/tabs';
 
 import { useAncestorSearch } from '../../routing/route-context.js';
 import { OrdersClient, type Order, type OrderLine } from './client.js';
+import { OrderReviewPanel } from './order-review-panel.js';
+import { useReviewAccess } from './review-access.js';
 import { useOrder } from './record.js';
 import { Dash, ItemCell, OrderStatusBadge } from './fields.js';
 import { ORDER_LIST_KEYS, type OrderKindDef } from './kinds.js';
@@ -107,6 +110,9 @@ export function OrderDetailPage({
     resource: { type: 'composite', id: 'inventory' },
     action: 'warehouseView',
   });
+  // R-064：评审页签按会话实际持有的动作显隐；采购订单本就没有这张页签。
+  const review = useReviewAccess();
+  const [detailTab, setDetailTab] = useState('info');
   const record = useOrder(def, orderId, view.can);
   // 明细行只有物料 id，名字、规格、单位要拿物料列表来对。
   const items = useReferencePage<Item>('items', itemsView.can);
@@ -457,6 +463,22 @@ export function OrderDetailPage({
       >
         {order ? (
           <>
+            {def.id === 'sales' && review.view && !review.pending ? (
+              <Tabs value={detailTab} onValueChange={setDetailTab}>
+                <TabsList variant='line'>
+                  <TabsTrigger value='info' className='px-3'>
+                    {t('orderReviews.infoTab')}
+                  </TabsTrigger>
+                  <TabsTrigger value='reviews' className='px-3' data-testid='order-review-tab-trigger'>
+                    {t('orderReviews.tab')}
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+            ) : null}
+            {def.id === 'sales' && detailTab === 'reviews' && review.view ? (
+              <OrderReviewPanel salesOrderId={order.id} access={review} />
+            ) : (
+              <>
             <DocumentSection title={t('orderDocs.form.header')}>
               <DocumentHeaderFields fields={fields} />
             </DocumentSection>
@@ -496,6 +518,8 @@ export function OrderDetailPage({
                 </p>
               ) : null}
             </DocumentSection>
+              </>
+            )}
           </>
         ) : null}
       </DocumentPage>

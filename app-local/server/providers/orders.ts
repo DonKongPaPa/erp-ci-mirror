@@ -620,13 +620,20 @@ async function assertOrderDicts(
   }
 }
 
-/** 经办人显式给出时必须是 R-011 的在职员工；默认填当前登录人时不查。 */
+/** 经办人显式给出时必须是 R-011 的在职员工。 */
 async function requireActivePerson(knex: Knex, userId: string): Promise<void> {
   const row = await knex<{ user_id: string; status: string }>('employees')
     .select('status')
     .where({ user_id: userId })
     .first();
   if (row === undefined || row.status !== 'active') fail('person-invalid', userId);
+}
+
+/** 缺省经办人：登录人是在职员工才填，否则留空，不写一个后面过不了校验的值。 */
+async function isActivePerson(knex: Knex, userId: string): Promise<boolean> {
+  const row = await knex<{ user_id: string; status: string }>('employees')
+    .select('user_id').where({ user_id: userId, status: 'active' }).first();
+  return row !== undefined;
 }
 
 /** 未作废库存单据已占用的数量；过账后行仍在，所以不会与 receivedQty 双重扣减。 */
@@ -981,9 +988,12 @@ export class DatabaseOrderMutations implements OrderMutations {
         if (warehouse.status !== 'active') fail('warehouse-inactive', input.warehouseId);
       }
       await assertOrderDicts(tx, input.settlementCode, input.projectCode);
-      const handlerUserId = input.handlerUserId ?? byUserId;
+      let handlerUserId: string | null = null;
       if (input.handlerUserId !== undefined && input.handlerUserId !== null) {
-        await requireActivePerson(knex, handlerUserId);
+        await requireActivePerson(knex, input.handlerUserId);
+        handlerUserId = input.handlerUserId;
+      } else if (input.handlerUserId === undefined && await isActivePerson(knex, byUserId)) {
+        handlerUserId = byUserId;
       }
       const amounts = computedAmounts(input.lines);
       const totals = headerTotals(amounts, input.discountAmount ?? 0);

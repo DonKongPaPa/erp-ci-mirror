@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 
+import { renderFinanceRequestApprovalTab } from '../finance-requests/approval-tab.js';
+import { renderPurchaseRequestApprovalTab } from '../purchase-requests/approval-tab.js';
 import type { ApprovalDetail } from './client.js';
 
 /**
@@ -28,3 +30,22 @@ export function approvalDocumentTabs(
 ): readonly ApprovalDocumentTab[] {
   return registry.get(collectionName) ?? [];
 }
+
+// R-021 波 2：请购单用自己的业务页签看表头与明细；通用键值快照对这一类不再显示。
+registerApprovalDocumentTabs('purchaseRequests', [
+  {
+    key: 'purchaseRequest',
+    titleKey: 'purchaseRequests.approvalTab.title',
+    render: renderPurchaseRequestApprovalTab,
+  },
+]);
+
+// R-066 页面片：请款 / 报销单（collectionName = financeRequestDocs）用自己的只读页签，
+// 通用键值快照对这一类不再显示。
+registerApprovalDocumentTabs('financeRequestDocs', [
+  {
+    key: 'financeRequest',
+    titleKey: 'financeRequestDocs.approvalTab.title',
+    render: renderFinanceRequestApprovalTab,
+  },
+]);

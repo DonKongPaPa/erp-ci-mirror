@@ -51,6 +51,9 @@ export default function ApprovalDetailPage(): ReactElement {
     { active: true },
   );
   const detail = request.data?.data;
+  // 有业务页签的单据（请购单）不再显示通用键值快照；没有登记的仍照旧显示快照。
+  const documentTabs = detail ? approvalDocumentTabs(detail.collectionName) : [];
+  const showSnapshot = documentTabs.length === 0;
   const [action, setAction] = useState<SimpleAction>();
   const [picker, setPicker] = useState<Picker>();
   const [error, setError] = useState<string>();
@@ -233,21 +236,25 @@ export default function ApprovalDetailPage(): ReactElement {
               <CardTitle className='text-sm'>{t('approvals.detail.document')}</CardTitle>
             </CardHeader>
             <CardContent>
-              <Tabs defaultValue='snapshot'>
+              <Tabs defaultValue={showSnapshot ? 'snapshot' : documentTabs[0]?.key}>
                 <TabsList variant='line'>
-                  <TabsTrigger value='snapshot' className='px-3'>
-                    {t('approvals.detail.snapshot')}
-                  </TabsTrigger>
-                  {approvalDocumentTabs(detail.collectionName).map((tab) => (
+                  {showSnapshot ? (
+                    <TabsTrigger value='snapshot' className='px-3'>
+                      {t('approvals.detail.snapshot')}
+                    </TabsTrigger>
+                  ) : null}
+                  {documentTabs.map((tab) => (
                     <TabsTrigger key={tab.key} value={tab.key} className='px-3'>
                       {t(tab.titleKey)}
                     </TabsTrigger>
                   ))}
                 </TabsList>
-                <TabsContent value='snapshot'>
-                  <SnapshotContent detail={detail} />
-                </TabsContent>
-                {approvalDocumentTabs(detail.collectionName).map((tab) => (
+                {showSnapshot ? (
+                  <TabsContent value='snapshot'>
+                    <SnapshotContent detail={detail} />
+                  </TabsContent>
+                ) : null}
+                {documentTabs.map((tab) => (
                   <TabsContent key={tab.key} value={tab.key}>
                     {tab.render(detail)}
                   </TabsContent>

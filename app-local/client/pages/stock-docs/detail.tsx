@@ -31,6 +31,7 @@ import { ITEMS_RESOURCE, useInventoryLookup } from '../stock/lookup.js';
 import { INVENTORY_RESOURCE } from '../warehouses/page-id.js';
 import { useAncestorSearch } from '../../routing/route-context.js';
 import { DOC_PRINT_PATHS, DOC_PRINT_REASON_PATHS } from '../doc-print/model.js';
+import { readPrintTrace } from '../doc-print/trace.js';
 
 import { StockDocsClient, type StockDoc, type StockDocLine } from './client.js';
 import type { StockKind } from './kind.js';
@@ -102,6 +103,15 @@ export function StockDocDetailPage({ def }: { readonly def: StockKind }): ReactE
   );
   // 另一个方向的单据（拿入库单的地址打开一张出库单）当作不存在。
   const doc = record.data?.docType === def.kind ? record.data : undefined;
+  // 打印视图点过「打印」之后，痕迹在本次标签页里留着；回到详情要看得到并重新取详情。
+  const trace = readPrintTrace(doc?.docNo);
+  const traceKey = trace === undefined ? '' : `${doc?.docNo}:${trace.printCount}`;
+  const reloadedForRef = useRef('');
+  useEffect(() => {
+    if (traceKey === '' || reloadedForRef.current === traceKey) return;
+    reloadedForRef.current = traceKey;
+    record.reload();
+  }, [traceKey, record]);
   // 出库草稿每一行旁边带现存量；入库单与其余状态不带。
   const showHand = doc?.status === 'draft' && def.kind === 'out';
   const hand = useLineStock(
@@ -441,6 +451,14 @@ export function StockDocDetailPage({ def }: { readonly def: StockKind }): ReactE
     {
       label: t('stockDocs.fields.postedAt'),
       value: doc.postedAt ? formatDateTime(doc.postedAt, locale) : null,
+    },
+    {
+      label: t('docPrint.printCount'),
+      value: trace === undefined ? DASH : String(trace.printCount),
+    },
+    {
+      label: t('docPrint.lastPrintedBy'),
+      value: trace?.lastPrintedByName || DASH,
     },
     { label: t('erp.fields.note'), value: doc.remark },
   ];

@@ -189,9 +189,33 @@ export interface DocInput {
   readonly lines: readonly StockLineInput[];
 }
 
+/**
+ * 当前选得到的人员/部门标识。编辑老单据时详情页会带出建单时写进去的标识；
+ * 建单端点在没传经办人时直接写当前登录人，并没有校验他是不是在职员工，
+ * 把这种标识原样回送给改草稿端点会撞 `STOCK_PERSON_INVALID`，改数量也存不了。
+ * 不在下拉里的标识一律不回送：用户没改这一项，服务端原有的值保持不变；
+ * 真要换人只能从选项里选，选出来的必然在集合里。
+ */
+export interface SelectableRefs {
+  readonly people: ReadonlySet<string>;
+  readonly departments: ReadonlySet<string>;
+}
+
 /** 表单的值 → 请求体里改得了的那几项。调用前一定先过 `validateDocForm`。 */
-export function inputOf(values: DocFormValues): DocInput {
+export function inputOf(values: DocFormValues, selectable?: SelectableRefs): DocInput {
   const clear = values.hasAddons;
+  const kept = (
+    value: string,
+    choices: ReadonlySet<string> | undefined,
+  ): string | null | undefined => {
+    // 主动清空照旧发 null；只有「表单里有一个当前选不到的非空标识」才不回送。
+    if (value.trim() === '') return text(value, clear);
+    return choices === undefined || choices.has(value.trim()) ? value.trim() : undefined;
+  };
+  const person = (value: string): string | null | undefined =>
+    kept(value, selectable?.people);
+  const department = (value: string): string | null | undefined =>
+    kept(value, selectable?.departments);
   return {
     reason: values.reason,
     remark: values.remark.trim(),
@@ -204,9 +228,9 @@ export function inputOf(values: DocFormValues): DocInput {
     deliveryAddress: text(values.deliveryAddress, clear),
     customerOrderNo: text(values.customerOrderNo, clear),
     projectCode: text(values.projectCode, clear),
-    handlerUserId: text(values.handlerUserId, clear),
-    takerDepartmentId: text(values.takerDepartmentId, clear),
-    takerUserId: text(values.takerUserId, clear),
+    handlerUserId: person(values.handlerUserId),
+    takerDepartmentId: department(values.takerDepartmentId),
+    takerUserId: person(values.takerUserId),
     ...((values.discountAmount ?? '').trim()
       ? { discountAmount: Number(values.discountAmount) }
       : {}),

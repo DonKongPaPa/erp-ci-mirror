@@ -7,6 +7,7 @@ import { authenticationToken } from '@nocobase/app-plugin-authentication/server'
 import { authorizationToken } from '@nocobase/app-plugin-authorization';
 import { loggingToken } from '@nocobase/app-server/logging';
 import type { Application } from '@nocobase/app-server/application';
+import { i18nToken } from '@nocobase/app-server/i18n';
 import type { DatabaseConnection } from '@nocobase/db';
 import type { TestApp } from '@nocobase/app-testing/server';
 import { describe, expect, test, vi } from 'vitest';
@@ -294,6 +295,53 @@ describe('enabled in development', () => {
 
     // 被拒的切换不注销当前会话。
     expect((await admin.fetch('/users/me/preferences')).status).toBe(200);
+  });
+
+  test('switching to a demo account resets a stale interface language to the application default', async ({
+    connection,
+    testApp,
+    app,
+  }) => {
+    const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+    const accounts = await readAccounts(admin);
+    const manager = accounts.find(
+      (account) => account.username === 'demo.quality_manager',
+    );
+    expect(manager).toBeDefined();
+    const now = new Date();
+    await connection.query
+      .insertInto('userPreferences')
+      .values({
+        id: 'r4-stale-locale',
+        userId: manager!.id,
+        key: 'i18n.locale',
+        value: JSON.stringify('en-US'),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .execute();
+    const before = await connection.query
+      .selectFrom('userPreferences')
+      .select('value')
+      .where('userId', '=', manager!.id)
+      .where('key', '=', 'i18n.locale')
+      .executeTakeFirst();
+    expect(JSON.parse(String(before!.value))).toBe('en-US');
+
+    const switched = await admin.fetch(
+      '/dev-tools/switch-account',
+      json({ userId: manager!.id }),
+    );
+    expect(switched.status).toBe(200);
+    const after = await connection.query
+      .selectFrom('userPreferences')
+      .select('value')
+      .where('userId', '=', manager!.id)
+      .where('key', '=', 'i18n.locale')
+      .executeTakeFirst();
+    expect(JSON.parse(String(after!.value))).toBe(
+      app.container.resolve(i18nToken).getDefaultLocale(),
+    );
   });
 
   // 注销失败就不签发：切换失败并说得出原因、留一条不带令牌的警告，旧会话不被换成新会话。

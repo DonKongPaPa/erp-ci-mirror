@@ -5,8 +5,10 @@ import {
   signIn,
 } from '@nocobase/app-plugin-authentication/testing';
 import { authorizationToken } from '@nocobase/app-plugin-authorization';
+import type { PermissionGrant } from '@nocobase/authorization/core';
 import { createAppTest } from '../helpers/test-app.js';
 import { expect } from 'vitest';
+import type { QueryAdapter } from '@nocobase/db';
 
 import businessPermissionSetsSeed, {
   businessPermissionSets,
@@ -21,6 +23,11 @@ import orderReviewGrantsSeed, {
   planningPermissionSet,
   salesReviewPermissionSet,
 } from '../../database/main/seeds/202611280003_seed_order_review_grants.js';
+import orderReviewPageGrantsSeed, {
+  persistOrderReviewPageGrants,
+  planningPageGrants as expectedPlanningPageGrants,
+  salesPageGrants as expectedSalesPageGrants,
+} from '../../database/main/seeds/202611280015_seed_order_review_page_grants.js';
 import docPrintSeed, {
   docPrintPermissionSets,
   persistDocPrintGrants,
@@ -29,23 +36,50 @@ import docPrintSeed, {
   warehouseDocPrintGrants,
 } from '../../database/main/seeds/202611280006_seed_doc_print_grants.js';
 import { financePageGrants as expectedFinancePageGrants } from '../../database/main/seeds/202611280004_seed_finance_page_grants.js';
+import financeRequestGrantsSeed, {
+  financeFinanceRequestGrant,
+  financeRequestPermissionSets,
+  persistFinanceRequestGrants,
+  staffFinanceRequestGrant,
+} from '../../database/main/seeds/202611280017_seed_finance_request_grants.js';
+import financeRequestPageGrantsSeed, {
+  financeRequestPageGrant,
+  financeRequestPagePermissionSets,
+  persistFinanceRequestPageGrants,
+} from '../../database/main/seeds/202611280018_seed_finance_request_page_grants.js';
 import purchaseRequestGrantsSeed, {
   planningPurchaseRequestGrant,
   purchasePurchaseRequestGrant,
   purchaseRequestPermissionSets,
   staffPurchaseRequestGrant,
 } from '../../database/main/seeds/202611280007_seed_purchase_request_grants.js';
+import purchaseRequestPageGrantsSeed, {
+  persistPurchaseRequestPageGrants,
+  purchaseRequestPageGrant,
+  purchaseRequestPagePermissionSets,
+} from '../../database/main/seeds/202611280012_seed_purchase_request_page_grants.js';
 import stocktakingTransferSeed, {
   financeStocktakingGrant,
   persistStocktakingTransferGrants,
   stocktakingTransferPermissionSets,
   warehouseStocktakingTransferGrants,
 } from '../../database/main/seeds/202611280010_seed_stocktaking_transfer_grants.js';
+import stocktakingTransferPageSeed, {
+  persistStocktakingTransferPageGrants,
+  stocktakingPageGrant,
+  stocktakingTransferPagePermissionSets,
+  transferPageGrant,
+} from '../../database/main/seeds/202611280013_seed_stocktaking_transfer_page_grants.js';
 import quotationGrantsSeed, {
   persistQuotationGrants,
   salesQuotationGrant,
   salesQuotationPermissionSet,
 } from '../../database/main/seeds/202611280009_seed_quotation_grants.js';
+import quotationPageGrantsSeed, {
+  persistQuotationPageGrants,
+  quotationPageGrant,
+  quotationPagePermissionSet,
+} from '../../database/main/seeds/202611280016_seed_quotation_page_grants.js';
 import { createStandaloneServer } from '../../server/standalone.js';
 
 /**
@@ -448,6 +482,12 @@ const expectedPurchaseRequestAdditions = {
   staff: [staffPurchaseRequestGrant],
   purchase: [purchasePurchaseRequestGrant],
 } as const;
+/** R-021 波 2：三个角色各补一条请购单页面授权，root 天然全通、不写进任何权限集。 */
+const expectedPurchaseRequestPageGrants = {
+  planning: [purchaseRequestPageGrant],
+  staff: [purchaseRequestPageGrant],
+  purchase: [purchaseRequestPageGrant],
+} as const;
 /** R-076：三颗打印补丁按角色钉住；仓管只有 print，没有 printPrice。 */
 const expectedDocPrintGrants = {
   warehouse: warehouseDocPrintGrants,
@@ -455,14 +495,36 @@ const expectedDocPrintGrants = {
   sales: salesDocPrintGrants,
 } as const;
 
+/** R-066：新种子给 staff 与 finance 各追加一条请款单授权。 */
+const expectedFinanceRequestAdditions = {
+  staff: [staffFinanceRequestGrant],
+  finance: [financeFinanceRequestGrant],
+} as const;
+/** R-066 页面片：新种子给 staff 与 finance 各追加一条页面授权，root 天然全通、不写进权限集。 */
+const expectedFinanceRequestPageGrants = {
+  staff: [financeRequestPageGrant],
+  finance: [financeRequestPageGrant],
+} as const;
 /** R-020 波 1：盘点与调拨授权只在补丁种子里声明，原种子一份都不带。 */
 const warehouseStocktakingGrants = warehouseStocktakingTransferGrants;
 const expectedStocktakingGrantsByRole = {
   warehouse: warehouseStocktakingGrants,
   finance: [financeStocktakingGrant],
 } as const;
+/** R-020 波 2：仓库两页给仓管，盘点单页给财务；root 天然全通，不写进权限集。 */
+const expectedStocktakingPageGrants = {
+  warehouse: [stocktakingPageGrant, transferPageGrant],
+  finance: [stocktakingPageGrant],
+} as const;
 /** R-022 复刻波 1：报价六个动作只追加给 sales，别的角色一份没有。 */
 const expectedQuotationGrants = [salesQuotationGrant] as const;
+/** R-022 波 2：报价单页面授权也只给 sales；root 天然全通，不写进权限集。 */
+const expectedQuotationPageGrants = [quotationPageGrant] as const;
+/** R-064 页面片：planning 多两条页面授权与选人的 bizOptions.view，sales 只多台账页。 */
+const expectedPageGrantsByRole = {
+  planning: expectedPlanningPageGrants,
+  sales: expectedSalesPageGrants,
+} as const;
 
 const roleKeys = Object.keys(expectedRoles);
 const newRoleKeys = Object.keys(expectedNewRoles);
@@ -510,6 +572,283 @@ test('R-064: the new seed declares planning and the sales additions', () => {
   }
 });
 
+/** R-066：新种子只声明两个现成角色的请款单授权，staff 按建单人收窄。 */
+test('R-066: the new seed declares only finance-request grants for staff and finance', () => {
+  expect(financeRequestGrantsSeed.name).toBe('202611280017_seed_finance_request_grants');
+  expect(financeRequestPermissionSets.map((set) => set.key)).toEqual(['staff', 'finance']);
+  expect(financeRequestPermissionSets.map((set) => set.grants)).toEqual([
+    [staffFinanceRequestGrant],
+    [financeFinanceRequestGrant],
+  ]);
+  expect(staffFinanceRequestGrant.actions.map((entry) => entry.action)).toEqual([
+    'view', 'create', 'update', 'submit', 'void',
+  ]);
+  expect(
+    staffFinanceRequestGrant.actions.every(
+      (entry) => entry.policy?.scopes?.financeRequestDocs === 'financeRequest.creatorOwn',
+    ),
+  ).toBe(true);
+  expect(financeFinanceRequestGrant.actions.map((entry) => entry.action)).toEqual([
+    'view', 'convert',
+  ]);
+  for (const set of businessPermissionSets) {
+    for (const grant of set.grants) {
+      expect(grant.resource.id, `${set.key} 不该在原种子拿到请款单授权`).not.toBe('financeRequests');
+    }
+  }
+});
+
+/**
+ * 2026-11-28 定的规矩：幂等只看本条授权在不在，不比对角色的整份授权。
+ * 两个角色先带着别的种子加的授权，种子照常补；已有动作不重复，落库必须带仅本人范围。
+ */
+test('R-066: the seed fills its own grants beside grants added by other seeds', async () => {
+  const makeQuery = (rows: ReadonlyMap<string, string>) => {
+    const stored = new Map(rows);
+    const writes: { key: string; grants: string }[] = [];
+    const query = {
+      selectFrom: () => ({
+        select: () => ({
+          where: (_column: string, _op: string, key: string) => ({
+            executeTakeFirst: async () => {
+              const value = stored.get(key);
+              return value === undefined ? undefined : { key, grants: value };
+            },
+          }),
+        }),
+      }),
+      updateTable: () => ({
+        set: (value: { grants: string }) => ({
+          where: (_column: string, _op: string, key: string) => ({
+            execute: async () => {
+              writes.push({ key, grants: value.grants });
+              stored.set(key, value.grants);
+            },
+          }),
+        }),
+      }),
+    } as unknown as QueryAdapter;
+    return { query, writes, stored };
+  };
+
+  /** 模拟别的种子后来加的同形状授权，以及 staff 上只补了一半的请款单授权。 */
+  const otherGrant: PermissionGrant = {
+    resource: { type: 'page', id: 'quotations' },
+    actions: [{ action: 'access' }],
+  };
+  const partialStaffGrant: PermissionGrant = {
+    resource: { type: 'composite', id: 'financeRequests' },
+    actions: [staffFinanceRequestGrant.actions[0]!],
+  };
+  const state = makeQuery(
+    new Map([
+      ['staff', JSON.stringify([otherGrant, partialStaffGrant])],
+      ['finance', JSON.stringify([otherGrant])],
+    ]),
+  );
+
+  expect(await persistFinanceRequestGrants(state.query)).toEqual({
+    granted: ['staff', 'finance'],
+    skipped: [],
+  });
+  expect(state.writes.map((write) => write.key)).toEqual(['staff', 'finance']);
+  const storedStaff = JSON.parse(state.stored.get('staff') ?? '[]') as PermissionGrant[];
+  const storedFinance = JSON.parse(state.stored.get('finance') ?? '[]') as PermissionGrant[];
+  // 已有授权一份不改、不重排；别的种子加的授权也留在原处。
+  expect(storedStaff.slice(0, 2)).toEqual([otherGrant, partialStaffGrant]);
+  expect(storedFinance[0]).toEqual(otherGrant);
+
+  const staffActions = storedStaff
+    .filter((grant) => grant.resource.id === 'financeRequests')
+    .flatMap((grant) => grant.actions);
+  expect(staffActions.map((entry) => entry.action)).toEqual([
+    'view', 'create', 'update', 'submit', 'void',
+  ]);
+  // 范围键必须是「仅本人」，不能写成不带范围的更宽授权。
+  expect(
+    staffActions.every(
+      (entry) => entry.policy?.scopes?.financeRequestDocs === 'financeRequest.creatorOwn',
+    ),
+  ).toBe(true);
+  const financeActions = storedFinance
+    .filter((grant) => grant.resource.id === 'financeRequests')
+    .flatMap((grant) => grant.actions);
+  expect(financeActions.map((entry) => entry.action)).toEqual(['view', 'convert']);
+  expect(financeActions.every((entry) => entry.policy === undefined)).toBe(true);
+
+  // 都已在：重跑什么都不写。
+  expect(await persistFinanceRequestGrants(state.query)).toEqual({
+    granted: [],
+    skipped: ['staff', 'finance'],
+  });
+  expect(state.writes, '重跑不写').toHaveLength(2);
+
+  // 角色不存在：跳过、不建新角色、不写。
+  const absent = makeQuery(new Map());
+  expect(await persistFinanceRequestGrants(absent.query)).toEqual({
+    granted: [],
+    skipped: ['staff', 'finance'],
+  });
+  expect(absent.writes, '不建新角色').toHaveLength(0);
+});
+
+/** R-066 页面片：018 只声明两个现成角色的页面授权，root 天然全通、不写进权限集。 */
+test('R-066 页面片: the page seed declares only the finance request page grant for staff and finance', () => {
+  expect(financeRequestPageGrantsSeed.name).toBe(
+    '202611280018_seed_finance_request_page_grants',
+  );
+  expect(typeof financeRequestPageGrantsSeed.run).toBe('function');
+  expect(financeRequestPageGrant).toEqual({
+    resource: { type: 'page', id: 'financeRequests' },
+    actions: [{ action: 'access' }],
+  });
+  expect(financeRequestPagePermissionSets.map((set) => set.key)).toEqual([
+    'staff',
+    'finance',
+  ]);
+  expect(financeRequestPagePermissionSets.map((set) => set.grants)).toEqual([
+    [financeRequestPageGrant],
+    [financeRequestPageGrant],
+  ]);
+  for (const set of businessPermissionSets) {
+    for (const grant of set.grants) {
+      expect(
+        grant.resource.id,
+        `${set.key} 不该在原种子拿到请款页面授权`,
+      ).not.toBe('financeRequests');
+    }
+  }
+});
+
+/** 018 排在 017 之后：按本条授权判幂等，staff/finance 带着 017 的业务动作也照常补。 */
+test('R-066 页面片: the page seed fills its grant beside other grants and re-runs write nothing', async () => {
+  const makeQuery = (rows: ReadonlyMap<string, string>) => {
+    const stored = new Map(rows);
+    const writes: { key: string; grants: string }[] = [];
+    const query = {
+      selectFrom: () => ({
+        select: () => ({
+          where: (_column: string, _op: string, key: string) => ({
+            executeTakeFirst: async () => {
+              const value = stored.get(key);
+              return value === undefined ? undefined : { key, grants: value };
+            },
+          }),
+        }),
+      }),
+      updateTable: () => ({
+        set: (value: { grants: string }) => ({
+          where: (_column: string, _op: string, key: string) => ({
+            execute: async () => {
+              writes.push({ key, grants: value.grants });
+              stored.set(key, value.grants);
+            },
+          }),
+        }),
+      }),
+    } as unknown as QueryAdapter;
+    return { query, writes, stored };
+  };
+
+  const otherGrant: PermissionGrant = {
+    resource: { type: 'page', id: 'quotations' },
+    actions: [{ action: 'access' }],
+  };
+  const state = makeQuery(
+    new Map([
+      ['staff', JSON.stringify([otherGrant])],
+      ['finance', JSON.stringify([otherGrant, financeFinanceRequestGrant])],
+    ]),
+  );
+  expect(await persistFinanceRequestPageGrants(state.query)).toEqual({
+    granted: ['staff', 'finance'],
+    skipped: [],
+  });
+  expect(state.writes.map((write) => write.key)).toEqual(['staff', 'finance']);
+  expect(JSON.parse(state.stored.get('staff') ?? '[]')).toEqual([
+    otherGrant,
+    financeRequestPageGrant,
+  ]);
+  expect(JSON.parse(state.stored.get('finance') ?? '[]')).toEqual([
+    otherGrant,
+    financeFinanceRequestGrant,
+    financeRequestPageGrant,
+  ]);
+
+  // 都已在：重跑什么都不写；角色不存在：跳过、不建新角色。
+  expect(await persistFinanceRequestPageGrants(state.query)).toEqual({
+    granted: [],
+    skipped: ['staff', 'finance'],
+  });
+  expect(state.writes, '重跑不写').toHaveLength(2);
+  const absent = makeQuery(new Map());
+  expect(await persistFinanceRequestPageGrants(absent.query)).toEqual({
+    granted: [],
+    skipped: ['staff', 'finance'],
+  });
+  expect(absent.writes, '不建新角色').toHaveLength(0);
+});
+
+/** R-064 页面片：原种子与 003 都不带页面授权；页面授权只在 011 里声明。 */
+test('R-064 pages: the new seed grants only the page access the pages need', () => {
+  expect(orderReviewPageGrantsSeed.name).toBe(
+    '202611280015_seed_order_review_page_grants',
+  );
+  expect(typeof orderReviewPageGrantsSeed.run).toBe('function');
+  expect(expectedPlanningPageGrants).toEqual([
+    {
+      resource: { type: 'page', id: 'salesOrders' },
+      actions: [{ action: 'access' }],
+    },
+    {
+      resource: { type: 'page', id: 'orderLedger' },
+      actions: [{ action: 'access' }],
+    },
+    {
+      resource: { type: 'composite', id: 'bizOptions' },
+      actions: [{ action: 'view' }],
+    },
+  ]);
+  // sales 原种子已有销售订单页 access；这里只补台账页。
+  expect(expectedSalesPageGrants).toEqual([
+    {
+      resource: { type: 'page', id: 'orderLedger' },
+      actions: [{ action: 'access' }],
+    },
+  ]);
+  for (const set of businessPermissionSets) {
+    for (const grant of set.grants) {
+      expect(grant.resource.id, `${set.key} 不该在原种子拿到台账页授权`).not.toBe(
+        'orderLedger',
+      );
+    }
+  }
+});
+
+test('R-064 pages: an administrator-changed role is skipped without writing', async () => {
+  // 纯函数验证幂等分支：角色授权里出现未知形状就整条跳过，不碰库、不污染后续用例。
+  const changed = {
+    resource: { type: 'composite', id: 'someOtherResource' },
+    actions: [{ action: 'view' }],
+  };
+  const query = {
+    selectFrom: () => ({
+      select: () => ({
+        where: () => ({
+          executeTakeFirst: async () => ({ key: 'sales', grants: JSON.stringify([changed]) }),
+        }),
+      }),
+    }),
+    updateTable: () => {
+      throw new Error('管理员改过的角色不应被写入');
+    },
+  } as unknown as QueryAdapter;
+  expect(await persistOrderReviewPageGrants(query)).toEqual({
+    granted: [],
+    skipped: ['planning', 'sales'],
+  });
+});
+
 test('R-021 波 1：新种子只声明三个角色的请购单授权，staff 按建单人收窄', () => {
   expect(purchaseRequestGrantsSeed.name).toBe('202611280007_seed_purchase_request_grants');
   expect(purchaseRequestPermissionSets.map((set) => set.key)).toEqual([
@@ -536,6 +875,52 @@ test('R-021 波 1：新种子只声明三个角色的请购单授权，staff 按
   ]);
 });
 
+/** R-021 波 2：页面授权只由新种子声明，三个角色各一条；重跑不写，改过的角色跳过。 */
+test('R-021 波 2: the page-grant seed gives planning, staff and purchase access and is idempotent', async ({
+  app,
+  connection,
+}) => {
+  expect(purchaseRequestPageGrantsSeed.name).toBe(
+    '202611280012_seed_purchase_request_page_grants',
+  );
+  expect(purchaseRequestPageGrant).toEqual({
+    resource: { type: 'page', id: 'purchaseRequests' },
+    actions: [{ action: 'access' }],
+  });
+  expect(purchaseRequestPagePermissionSets.map((set) => set.key)).toEqual([
+    'planning',
+    'staff',
+    'purchase',
+  ]);
+  for (const set of purchaseRequestPagePermissionSets) {
+    expect(set.grants).toEqual([purchaseRequestPageGrant]);
+  }
+  for (const set of businessPermissionSets) {
+    for (const grant of set.grants) {
+      expect(grant.resource.id, `${set.key} 不该在原种子拿到请购单页面授权`).not.toBe(
+        'purchaseRequests',
+      );
+    }
+  }
+
+  const sets = app.container.resolve(authorizationToken).permissionSets;
+  for (const key of ['planning', 'staff', 'purchase']) {
+    expect((await sets.get(key))?.grants ?? []).toContainEqual(
+      purchaseRequestPageGrant,
+    );
+  }
+  for (const key of ['warehouse', 'sales', 'finance']) {
+    expect((await sets.get(key))?.grants ?? []).not.toContainEqual(
+      purchaseRequestPageGrant,
+    );
+  }
+  expect(await persistPurchaseRequestPageGrants(connection.query)).toEqual({
+    granted: [],
+    skipped: ['planning', 'staff', 'purchase'],
+  });
+
+});
+
 test('R-013: the seed creates the designed roles', async ({ app }) => {
   const sets = app.container.resolve(authorizationToken).permissionSets;
   const stored = await sets.list();
@@ -546,7 +931,8 @@ test('R-013: the seed creates the designed roles', async ({ app }) => {
     // 几颗种子都跑过：staff 在 M3 补了审批的两个仅本人动作；sales 在原种子的授权后面
     // 多出 R-064 的两条只读授权；warehouse / purchase / sales 再按 R-076 各补一份打印授权；
     // finance 再按 R-065 的页面片补两条页面授权（支出与到票两个页面）；
-    // planning / staff / purchase 最后按 R-021 波 1 各补一条请购单授权。
+    // planning / staff / purchase 最后按 R-021 波 1 各补一条请购单授权；
+    // staff 与 finance 的请款单授权来自 017，排在按整份授权判幂等的页面种子之后。
     expect(set?.grants).toEqual([
       ...expected.grants,
       ...(key === 'staff' ? [APPROVAL_GRANT] : []),
@@ -556,6 +942,12 @@ test('R-013: the seed creates the designed roles', async ({ app }) => {
       ...(expectedPurchaseRequestAdditions[key as keyof typeof expectedPurchaseRequestAdditions] ?? []),
       ...(expectedStocktakingGrantsByRole[key as keyof typeof expectedStocktakingGrantsByRole] ?? []),
       ...(key === 'sales' ? expectedQuotationGrants : []),
+      ...(expectedStocktakingPageGrants[key as keyof typeof expectedStocktakingPageGrants] ?? []),
+      ...(expectedPurchaseRequestPageGrants[key as keyof typeof expectedPurchaseRequestPageGrants] ?? []),
+      ...(expectedPageGrantsByRole[key as keyof typeof expectedPageGrantsByRole] ?? []),
+      ...(key === 'sales' ? expectedQuotationPageGrants : []),
+      ...(expectedFinanceRequestAdditions[key as keyof typeof expectedFinanceRequestAdditions] ?? []),
+      ...(expectedFinanceRequestPageGrants[key as keyof typeof expectedFinanceRequestPageGrants] ?? []),
     ]);
   }
 });
@@ -573,6 +965,8 @@ test('R-064: the new seed creates planning and adds the two sales grants on a fr
   expect(planning?.grants).toEqual([
     ...expectedNewRoles.planning.grants,
     ...expectedPurchaseRequestAdditions.planning,
+    ...expectedPurchaseRequestPageGrants.planning,
+    ...expectedPlanningPageGrants,
   ]);
 
   const sales = stored.find((entry) => entry.key === 'sales');
@@ -581,12 +975,77 @@ test('R-064: the new seed creates planning and adds the two sales grants on a fr
     ...expectedSalesAdditions,
     ...salesDocPrintGrants,
     ...expectedQuotationGrants,
+    ...expectedSalesPageGrants,
+    ...expectedQuotationPageGrants,
   ]);
 
   // 重跑什么都不写：角色与授权都已经存在。
   expect(await persistOrderReviewGrants(connection.query)).toEqual({
     created: [],
     granted: [],
+  });
+});
+
+/**
+ * 全新库按文件名次序执行：012（请购单页面）、015（评审页签与总台账页面）、016（报价单页面）。
+ * 015 在 016 之前跑，不必认识报价单页授权；016 只看本条授权在不在，sales 因此同时拿到
+ * 总台账页与报价单页。逐角色钉住最终授权：planning 两份都在、sales 多一张总台账页与
+ * 一张报价单页、别的角色不变。017 的请款单授权排在页面种子之后，也是这里的既有基线。
+ */
+test('R-064 页面片 / R-021 波 2 / R-022 波 2: 015 先于 016 执行，sales 同时拿到两份页面授权', async ({
+  app,
+}) => {
+  const sets = app.container.resolve(authorizationToken).permissionSets;
+  const stored = new Map((await sets.list()).map((set) => [set.key, set]));
+
+  expect(stored.get('planning')?.grants, 'planning 同时拿到 012 与 015 的授权').toEqual([
+    ...expectedNewRoles.planning.grants,
+    ...expectedPurchaseRequestAdditions.planning,
+    ...expectedPurchaseRequestPageGrants.planning,
+    ...expectedPlanningPageGrants,
+  ]);
+
+  expect(stored.get('sales')?.grants, 'sales 同时拿到 015 的总台账页与 016 的报价单页').toEqual([
+    ...expectedRoles.sales.grants,
+    ...expectedSalesAdditions,
+    ...salesDocPrintGrants,
+    ...expectedQuotationGrants,
+    ...expectedSalesPageGrants,
+    ...expectedQuotationPageGrants,
+  ]);
+
+  for (const key of [
+    'quality_manager',
+    'quality_inspector',
+    'dept_manager',
+    'staff',
+    'warehouse',
+    'purchase',
+    'finance',
+  ] as const) {
+    expect(stored.get(key)?.grants, `${key} 不该被页面种子改动`).toEqual([
+      ...expectedRoles[key].grants,
+      ...(key === 'staff' ? [APPROVAL_GRANT] : []),
+      ...(key === 'finance' ? expectedFinancePageGrants : []),
+      ...(expectedDocPrintGrants[key as keyof typeof expectedDocPrintGrants] ?? []),
+      ...(expectedPurchaseRequestAdditions[key as keyof typeof expectedPurchaseRequestAdditions] ?? []),
+      ...(expectedStocktakingGrantsByRole[key as keyof typeof expectedStocktakingGrantsByRole] ?? []),
+      ...(expectedPurchaseRequestPageGrants[key as keyof typeof expectedPurchaseRequestPageGrants] ?? []),
+      ...(expectedStocktakingPageGrants[key as keyof typeof expectedStocktakingPageGrants] ?? []),
+      ...(expectedFinanceRequestAdditions[key as keyof typeof expectedFinanceRequestAdditions] ?? []),
+      ...(expectedFinanceRequestPageGrants[key as keyof typeof expectedFinanceRequestPageGrants] ?? []),
+    ]);
+  }
+});
+
+test('R-064 pages: the page-grant seed is idempotent on a fresh database', async ({
+  connection,
+}) => {
+  // 全新库里 015 已经跑过：planning 与 sales 的目标授权都在，重跑什么都不写。
+  // 这里不改角色授权 —— 同文件的后续用例共用这个库，改了会污染它们的基线。
+  expect(await persistOrderReviewPageGrants(connection.query)).toEqual({
+    granted: [],
+    skipped: ['planning', 'sales'],
   });
 });
 
@@ -671,6 +1130,100 @@ test('R-022: the quotation seed declares six actions for sales only and is idemp
   expect(await persistQuotationGrants(connection.query)).toEqual({
     created: [], granted: [], skipped: ['sales'],
   });
+});
+
+/**
+ * R-022 波 2：016 排在 015 之后，幂等只看报价单页这一条授权在不在 —— sales 带着
+ * 015 给的总台账页（以及别的授权）时照常补上；在就跳过，不建新角色、不补用户指派。
+ */
+test('R-022 波 2: 016 grants the quotation page beside other grants and re-runs write nothing', async ({
+  app,
+}) => {
+  expect(quotationPageGrantsSeed.name).toBe(
+    '202611280016_seed_quotation_page_grants',
+  );
+  expect(quotationPageGrant).toEqual({
+    resource: { type: 'page', id: 'quotations' },
+    actions: [{ action: 'access' }],
+  });
+  expect(quotationPagePermissionSet.key).toBe('sales');
+  expect(quotationPagePermissionSet.grants).toEqual(expectedQuotationPageGrants);
+  for (const set of businessPermissionSets) {
+    for (const grant of set.grants) {
+      expect(grant.resource.id, `${set.key} 不该在原种子拿到报价单页面授权`).not.toBe(
+        'quotations',
+      );
+    }
+  }
+
+  const sets = app.container.resolve(authorizationToken).permissionSets;
+  expect((await sets.get('sales'))?.grants ?? []).toContainEqual(
+    quotationPageGrant,
+  );
+  for (const key of ['purchase', 'warehouse', 'finance', 'staff', 'planning']) {
+    expect(
+      (await sets.get(key))?.grants ?? [],
+      `${key} 不该拿到报价单页面授权`,
+    ).not.toContainEqual(quotationPageGrant);
+  }
+
+  // 假查询只记录写入：sales 已带 015 的总台账页与别的授权，016 仍只追加报价单页。
+  const makeQuery = (storedGrants: readonly PermissionGrant[] | undefined) => {
+    let stored: string | undefined = storedGrants
+      ? JSON.stringify(storedGrants)
+      : undefined;
+    const writes: string[] = [];
+    const query = {
+      selectFrom: () => ({
+        select: () => ({
+          where: () => ({
+            executeTakeFirst: async () =>
+              stored === undefined ? undefined : { key: 'sales', grants: stored },
+          }),
+        }),
+      }),
+      updateTable: () => ({
+        set: (value: { grants: string }) => ({
+          where: () => ({
+            execute: async () => {
+              writes.push(value.grants);
+              stored = value.grants;
+            },
+          }),
+        }),
+      }),
+    } as unknown as QueryAdapter;
+    return { query, writes, current: () => stored };
+  };
+
+  const otherGrant: PermissionGrant = {
+    resource: { type: 'page', id: 'quality' },
+    actions: [{ action: 'access' }],
+  };
+  const salesWithOtherGrants = [...expectedSalesPageGrants, otherGrant];
+  const state = makeQuery(salesWithOtherGrants);
+  expect(await persistQuotationPageGrants(state.query)).toEqual({
+    granted: ['sales'],
+    skipped: [],
+  });
+  expect(JSON.parse(state.current() ?? '[]')).toEqual([
+    ...salesWithOtherGrants,
+    quotationPageGrant,
+  ]);
+  expect(state.writes).toHaveLength(1);
+  expect(await persistQuotationPageGrants(state.query)).toEqual({
+    granted: [],
+    skipped: ['sales'],
+  });
+  expect(state.writes, '重跑不写').toHaveLength(1);
+
+  // 角色不存在：跳过、不建新角色、不写。
+  const missing = makeQuery(undefined);
+  expect(await persistQuotationPageGrants(missing.query)).toEqual({
+    granted: [],
+    skipped: ['sales'],
+  });
+  expect(missing.writes, '不建新角色').toHaveLength(0);
 });
 
 /** 建一个持有所给角色的用户；用户名只收字母数字。 */
@@ -1164,4 +1717,186 @@ test('R-020 波 1: fresh database gets the stocktaking grants; a changed role is
     created: [], granted: [], skipped: ['warehouse', 'finance'],
   });
   expect((await sets.get('finance'))?.grants, '管理员改过的财务角色不被覆盖').toEqual(changedGrants);
+});
+
+/** R-020 波 2：页面授权只由新种子声明，仓管两页、财务一页；重跑不写，两页都在就跳过。 */
+test('R-020 波 2: the page-grant seed gives warehouse both pages and finance only stocktaking', async ({
+  app,
+  connection,
+}) => {
+  expect(stocktakingTransferPageSeed.name).toBe(
+    '202611280013_seed_stocktaking_transfer_page_grants',
+  );
+  expect(stocktakingPageGrant).toEqual({
+    resource: { type: 'page', id: 'stocktakings' },
+    actions: [{ action: 'access' }],
+  });
+  expect(transferPageGrant).toEqual({
+    resource: { type: 'page', id: 'transfers' },
+    actions: [{ action: 'access' }],
+  });
+  expect(stocktakingTransferPagePermissionSets.map((set) => set.key)).toEqual([
+    'warehouse',
+    'finance',
+  ]);
+  expect(stocktakingTransferPagePermissionSets[0]?.grants).toEqual(
+    expectedStocktakingPageGrants.warehouse,
+  );
+  expect(stocktakingTransferPagePermissionSets[1]?.grants).toEqual(
+    expectedStocktakingPageGrants.finance,
+  );
+  for (const set of businessPermissionSets) {
+    for (const grant of set.grants) {
+      expect(grant.resource.id, `${set.key} 不该在原种子拿到盘点/调拨页面授权`).not.toMatch(
+        /^(stocktakings|transfers)$/u,
+      );
+    }
+  }
+
+  const sets = app.container.resolve(authorizationToken).permissionSets;
+  // 同文件前面的用例删掉并重建过这两个角色、还改过 finance；先恢复一份确定的授权，
+  // 再让种子补出页面授权（带着别的授权也能补的情形在下面的假查询用例里覆盖）。
+  await sets.update('finance', {
+    key: 'finance',
+    grants: [
+      ...expectedRoles.finance.grants,
+      ...expectedFinancePageGrants,
+      ...expectedStocktakingGrantsByRole.finance,
+    ],
+  });
+  await persistStocktakingTransferPageGrants(connection.query);
+  const warehouseGrants = (await sets.get('warehouse'))?.grants ?? [];
+  expect(warehouseGrants).toContainEqual(stocktakingPageGrant);
+  expect(warehouseGrants).toContainEqual(transferPageGrant);
+  const financeGrants = (await sets.get('finance'))?.grants ?? [];
+  expect(financeGrants).toContainEqual(stocktakingPageGrant);
+  expect(financeGrants).not.toContainEqual(transferPageGrant);
+  expect(await persistStocktakingTransferPageGrants(connection.query)).toEqual({
+    granted: [],
+    skipped: ['warehouse', 'finance'],
+  });
+
+  // 幂等只看两条页面授权在不在：带着别的授权也跳过，原样保留、不重排。
+  const changedGrants = [
+    { resource: { type: 'page', id: 'quality' }, actions: [{ action: 'access' }] },
+    ...expectedStocktakingPageGrants.warehouse,
+  ];
+  await sets.update('warehouse', { key: 'warehouse', grants: changedGrants });
+  expect(await persistStocktakingTransferPageGrants(connection.query)).toEqual({
+    granted: [],
+    skipped: ['warehouse', 'finance'],
+  });
+  expect((await sets.get('warehouse'))?.grants, '带着别的授权也不覆盖、不重排').toEqual(
+    changedGrants,
+  );
+});
+
+/**
+ * R-020 波 2（幂等口径改为按本条授权）：013 排在 011（请款报销业务动作）之后，
+ * 幂等只看本条页面授权在不在 —— finance/warehouse 带着别的授权也照常补；
+ * 在就跳过，不在就加；不建新角色、不补指派、不重排已有授权、重跑不写。
+ */
+test('R-020 波 2: 013 grants pages beside other grants and re-runs write nothing', async () => {
+  const makeQuery = (stored: Readonly<Record<string, readonly PermissionGrant[]>>) => {
+    const rows = new Map(
+      Object.entries(stored).map(([key, grants]) => [key, JSON.stringify(grants)]),
+    );
+    const writes: { key: string; grants: PermissionGrant[]; updatedAt: unknown }[] = [];
+    const query = {
+      selectFrom: () => ({
+        select: () => ({
+          where: (...args: unknown[]) => ({
+            executeTakeFirst: async () => {
+              const key = args[args.length - 1] as string;
+              const grants = rows.get(key);
+              return grants === undefined ? undefined : { key, grants };
+            },
+          }),
+        }),
+      }),
+      updateTable: () => ({
+        set: (value: { grants: string; updatedAt: unknown }) => ({
+          where: (...args: unknown[]) => ({
+            execute: async () => {
+              const key = args[args.length - 1] as string;
+              writes.push({
+                key,
+                grants: JSON.parse(value.grants) as PermissionGrant[],
+                updatedAt: value.updatedAt,
+              });
+              rows.set(key, value.grants);
+            },
+          }),
+        }),
+      }),
+    } as unknown as QueryAdapter;
+    return {
+      query,
+      writes,
+      current: (key: string) => JSON.parse(rows.get(key) ?? '[]') as PermissionGrant[],
+    };
+  };
+
+  // 模拟 011 先跑给 finance 加的业务动作：形状相同，但不属于 013 的已知授权。
+  const expenseClaimGrant: PermissionGrant = {
+    resource: { type: 'collection', id: 'expenseClaims' },
+    actions: [{ action: 'create' }],
+  };
+  const financeStored = [...expectedFinancePageGrants, expenseClaimGrant];
+  const financeState = makeQuery({ finance: financeStored });
+  expect(await persistStocktakingTransferPageGrants(financeState.query)).toEqual({
+    granted: ['finance'],
+    skipped: ['warehouse'],
+  });
+  expect(financeState.current('finance')).toEqual([
+    ...financeStored,
+    stocktakingPageGrant,
+  ]);
+  expect(financeState.writes, '只写缺的那一条').toHaveLength(1);
+  expect(financeState.writes[0]?.updatedAt).toBeInstanceOf(Date);
+  expect(await persistStocktakingTransferPageGrants(financeState.query)).toEqual({
+    granted: [],
+    skipped: ['warehouse', 'finance'],
+  });
+  expect(financeState.writes, '重跑不写（revision 不动）').toHaveLength(1);
+
+  // 仓管已带打印与盘点/调拨业务动作，两页照常补齐，已有授权不重排。
+  const warehouseStored = [
+    ...warehouseDocPrintGrants,
+    ...warehouseStocktakingGrants,
+    expenseClaimGrant,
+  ];
+  const warehouseState = makeQuery({ warehouse: warehouseStored });
+  expect(await persistStocktakingTransferPageGrants(warehouseState.query)).toEqual({
+    granted: ['warehouse'],
+    skipped: ['finance'],
+  });
+  expect(warehouseState.current('warehouse')).toEqual([
+    ...warehouseStored,
+    stocktakingPageGrant,
+    transferPageGrant,
+  ]);
+  expect(warehouseState.writes).toHaveLength(1);
+  expect(await persistStocktakingTransferPageGrants(warehouseState.query)).toEqual({
+    granted: [],
+    skipped: ['warehouse', 'finance'],
+  });
+  expect(warehouseState.writes, '重跑不写').toHaveLength(1);
+
+  // 两页都在时整条跳过；角色不存在时也跳过、不建新角色。
+  const complete = makeQuery({
+    warehouse: [...warehouseStored, ...expectedStocktakingPageGrants.warehouse],
+    finance: [...financeStored, stocktakingPageGrant],
+  });
+  expect(await persistStocktakingTransferPageGrants(complete.query)).toEqual({
+    granted: [],
+    skipped: ['warehouse', 'finance'],
+  });
+  expect(complete.writes).toHaveLength(0);
+  const missing = makeQuery({});
+  expect(await persistStocktakingTransferPageGrants(missing.query)).toEqual({
+    granted: [],
+    skipped: ['warehouse', 'finance'],
+  });
+  expect(missing.writes, '不建新角色').toHaveLength(0);
 });

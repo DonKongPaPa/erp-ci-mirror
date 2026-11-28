@@ -66,10 +66,15 @@ export default class LifecycleProvider extends ServiceProvider<Application> {
       services: () => ({
         notifyApproval: (event) =>
           this.app.container.resolve(approvalNotifierToken).notify(event),
-        // R-021 波 1 加片：审批终态回写在转移事务内完成；延迟 import 避开与审批服务的模块环。
+        // R-021 波 1 加片：请购单终态回写在转移事务内完成；延迟 import 避开模块环。
         syncPurchaseRequest: async (event) => {
           const { purchaseRequestsServiceToken } = await import('./purchase-requests.js');
           await this.app.container.resolve(purchaseRequestsServiceToken).onApprovalFinal(event);
+        },
+        // R-066：请款单终态回写在转移事务内完成；延迟 import 避开模块环。
+        syncFinanceRequest: async (event) => {
+          const { financeRequestsServiceToken } = await import('./finance-requests.js');
+          await this.app.container.resolve(financeRequestsServiceToken).onApprovalFinal(event);
         },
       }),
     });

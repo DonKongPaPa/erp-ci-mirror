@@ -25,6 +25,7 @@ import AuthzUpgradeR025 from '../../cli/authz/upgrade-r025.js';
 import AuthzUpgradeR076 from '../../cli/authz/upgrade-r076.js';
 import AuthzUpgradeR026 from '../../cli/authz/upgrade-r026.js';
 import AuthzUpgradeR065 from '../../cli/authz/upgrade-r065.js';
+import AuthzUpgradeR066 from '../../cli/authz/upgrade-r066.js';
 import AuthzUpgradeR064 from '../../cli/authz/upgrade-r064.js';
 import AuthzUpgradeR072 from '../../cli/authz/upgrade-r072.js';
 import cliPlugins from '../../cli/plugins.js';
@@ -67,6 +68,7 @@ test('R-013: the authz commands are registered under their own topic', () => {
     'upgrade-r026',
     'upgrade-r064',
     'upgrade-r065',
+    'upgrade-r066',
     'upgrade-r072',
     'upgrade-r076',
   ]);
@@ -121,6 +123,10 @@ test('R-013: the authz commands are registered under their own topic', () => {
   expect(AuthzUpgradeR064.description).toContain('orderReviews.view');
   expect(AuthzUpgradeR064.description).toContain('salesOrders.ledgerView');
   expect(plugin!.commands['upgrade-r065']).toBe(AuthzUpgradeR065);
+  // R-066：给 staff（仅本人）与 finance 补请款单动作，可单独跑、可重跑。
+  expect(plugin!.commands['upgrade-r066']).toBe(AuthzUpgradeR066);
+  expect(AuthzUpgradeR066.description).toContain('financeRequests');
+  expect(AuthzUpgradeR066.description).toContain('creator');
   expect(plugin!.commands['upgrade-r072']).toBe(AuthzUpgradeR072);
   expect(AuthzUpgradeR072.description).toContain('bizDict.view');
   expect(AuthzUpgradeR072.description).toContain('bizOptions.view');

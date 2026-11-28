@@ -222,6 +222,13 @@ async function requirePerson(knex: Knex, userId: string): Promise<void> {
   if (row === undefined || row.status !== 'active') return fail('person-invalid', userId);
 }
 
+/** 缺省经办人：登录人是在职员工才填，否则留空，不写一个后面过不了校验的值。 */
+async function isActivePerson(knex: Knex, userId: string): Promise<boolean> {
+  const row = await knex<{ user_id: string; status: string }>('employees')
+    .select('user_id').where({ user_id: userId, status: 'active' }).first();
+  return row !== undefined;
+}
+
 async function requireItems(knex: Knex, ids: readonly string[]): Promise<void> {
   const unique = [...new Set(ids)];
   if (unique.length === 0) return;
@@ -410,8 +417,12 @@ export class DatabaseTransferMutations implements TransferMutations {
       validateLines(input.lines);
       const knex = await this.knex(tx);
       await requireItems(knex, input.lines.map((line) => line.itemId));
+      let handlerUserId: string | null = null;
       if (input.handlerUserId !== undefined && input.handlerUserId !== null) {
         await requirePerson(knex, input.handlerUserId);
+        handlerUserId = input.handlerUserId;
+      } else if (input.handlerUserId === undefined && await isActivePerson(knex, byUserId)) {
+        handlerUserId = byUserId;
       }
       const now = new Date();
       const docNo = await this.codes.nextCode(tx, 'DB');
@@ -422,7 +433,7 @@ export class DatabaseTransferMutations implements TransferMutations {
         doc_date: input.docDate ?? null,
         transfer_in_warehouse_id: input.transferInWarehouseId,
         transfer_out_warehouse_id: input.transferOutWarehouseId ?? null,
-        handler_user_id: input.handlerUserId ?? byUserId,
+        handler_user_id: handlerUserId,
         status: 'draft',
         remark: input.remark ?? '',
         created_by_id: byUserId,
@@ -497,16 +508,17 @@ export class DatabaseTransferMutations implements TransferMutations {
         return { itemId: line.item_id, qty: transferQty };
       });
       const docDate = dayString(header.doc_date);
+      // 生成单据的经办人随源调拨单；源单为空时传 null，不回落到操作人。
       let outDocId: string | null = null;
       if (header.transfer_out_warehouse_id !== null) {
         outDocId = await this.generateDoc(
           'out', 'other_out', header.transfer_out_warehouse_id, qtyByItem,
-          id, docDate, byUserId, tx,
+          id, docDate, header.handler_user_id, byUserId, tx,
         );
       }
       const inDocId = await this.generateDoc(
         'in', 'other_in', header.transfer_in_warehouse_id, qtyByItem,
-        id, docDate, byUserId, tx,
+        id, docDate, header.handler_user_id, byUserId, tx,
       );
       if (inDocId === null) return fail('line-invalid', 'empty');
       await knex('transfer_docs').where({ id }).update({
@@ -547,6 +559,7 @@ export class DatabaseTransferMutations implements TransferMutations {
     lines: readonly { readonly itemId: string; readonly qty: number }[],
     transferDocId: string,
     docDate: string | null,
+    handlerUserId: string | null,
     byUserId: string,
     tx: DatabaseConnection,
   ): Promise<string | null> {
@@ -557,6 +570,7 @@ export class DatabaseTransferMutations implements TransferMutations {
         reason,
         docDate,
         transferDocId,
+        handlerUserId,
         lines: lines.map((line) => ({ itemId: line.itemId, warehouseId, qty: line.qty })),
       }, byUserId, tx);
       docId = String(doc.id);

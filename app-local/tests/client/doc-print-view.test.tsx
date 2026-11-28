@@ -106,6 +106,7 @@ const dataCalls = (method: string) =>
   );
 
 beforeEach(() => {
+  sessionStorage.clear();
   api.mockClear();
   getSession.mockClear();
   answer = () => new Response(null, { status: 404 });
@@ -162,4 +163,57 @@ it('审批四项在视图里不渲染', async () => {
   for (const key of ['approver', 'approvedAt', 'approvalStatus', 'approvalFlow', '审批人', '审批时间']) {
     expect(body).not.toContain(key);
   }
+});
+
+it('印出合计与人民币大写；没有金额时画破折号', async () => {
+  const priced = {
+    ...printData,
+    docType: 'purchase_receipt',
+    totals: { totalQty: 2, payableTotal: 37.5, taxIncludedTotal: 37.5, taxExcludedTotal: 33.19, taxTotal: 4.31, discountAmount: 0 },
+    amountInWords: '叁拾柒元伍角整',
+  };
+  answer = (call) =>
+    call.method === 'GET' && call.path === `doc-print/purchase-receipt/${docNo}`
+      ? priced
+      : new Response(null, { status: 404 });
+  await renderAt(pathOf('purchase-receipt'), snapshot(permission('docPrintPurchaseReceipt', ['print'])));
+  await screen.findByTestId('doc-print-lines-3', {}, WAIT);
+  for (const copy of [1, 2, 3]) {
+    const totals = screen.getByTestId(`doc-print-totals-${copy}`);
+    expect(totals).toHaveTextContent('Total qty: 2');
+    expect(screen.getByTestId(`doc-print-amount-${copy}`)).toHaveTextContent('Amount payable: 37.5');
+    expect(screen.getByTestId(`doc-print-amount-words-${copy}`)).toHaveTextContent('叁拾柒元伍角整');
+  }
+});
+
+it('没有金额键的三联不出现空合计，破折号占位', async () => {
+  answer = (call) =>
+    call.method === 'GET' && call.path === `doc-print/internal-use/${docNo}`
+      ? printData
+      : new Response(null, { status: 404 });
+  await renderAt(pathOf('internal-use'), snapshot(permission('docPrintInternalIssue', ['print'])));
+  await screen.findByTestId('doc-print-lines-2', {}, WAIT);
+  for (const copy of [1, 2, 3]) {
+    expect(screen.getByTestId(`doc-print-totals-${copy}`)).toHaveTextContent('Total qty: 10');
+    expect(screen.getByTestId(`doc-print-amount-${copy}`)).toHaveTextContent('—');
+    expect(screen.getByTestId(`doc-print-amount-words-${copy}`)).toHaveTextContent('—');
+  }
+});
+
+it('点打印后计数当场加一并把痕迹留给详情', async () => {
+  answer = (call) => {
+    if (call.method === 'GET' && call.path === `doc-print/internal-use/${docNo}`)
+      return printData;
+    if (call.method === 'POST' && call.path === `doc-print/internal-use/${docNo}/print-mark`)
+      return { docNo, printCount: 1, lastPrintedAt: '2026-11-28T10:01:00+08:00', lastPrintedBy: 'u1' };
+    return new Response(null, { status: 404 });
+  };
+  await renderAt(pathOf('internal-use'), snapshot(permission('docPrintInternalIssue', ['print'])));
+  const button = await screen.findByRole('button', { name: 'Print' }, WAIT);
+  await waitFor(() => expect(button).toBeEnabled(), WAIT);
+  expect(screen.getByTestId('print-count')).toHaveTextContent('0');
+  await userEvent.click(button);
+  await waitFor(() => expect(screen.getByTestId('print-count')).toHaveTextContent('1'), WAIT);
+  const stored = JSON.parse(sessionStorage.getItem(`nocobase.doc-print.trace:${docNo}`) ?? '{}') as Record<string, unknown>;
+  expect(stored).toMatchObject({ printCount: 1, lastPrintedBy: 'u1', lastPrintedByName: '' });
 });

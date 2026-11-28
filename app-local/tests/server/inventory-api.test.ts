@@ -552,3 +552,102 @@ test('加片金额与价格反向：没给税率的旧行照旧没有金额键�
   for (const key of priceKeys.slice(5)) expect(Object.keys(priced)).toContain(key);
   for (const key of priceKeys.slice(0, 5)) expect(Object.keys(priced.lines![0]!)).toContain(key);
 }, 30_000);
+
+const HANDLER_PASSWORD = 'R020-handler-123!';
+
+/** 仓管账号：缺省经办人测试用，默认没有员工档案。 */
+async function makeWarehouseUser(
+  admin: TestSession,
+  testApp: Parameters<typeof signIn>[0],
+  prefix: string,
+): Promise<{ session: TestSession; id: string }> {
+  const username = unique(prefix);
+  const created = await admin.fetch('/users', write({
+    name: username,
+    username,
+    email: `${username.toLowerCase()}@example.test`,
+    password: HANDLER_PASSWORD,
+    roleScopes: { app: ['warehouse'] },
+  }));
+  expect(created.status, `建用户失败：${await created.clone().text()}`).toBe(201);
+  const body = await jsonOf(created);
+  const id = String((body.data as Row | undefined)?.id ?? body.id ?? '');
+  expect(id, '前置：用户 id').not.toBe('');
+  return { id, session: await signIn(testApp, { username, password: HANDLER_PASSWORD }) };
+}
+
+test('经办人缺省：非员工建单留空、随后能改草稿；显式传非员工仍被拒', async ({
+  testApp, connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const warehouse = await createWarehouse(admin);
+  const itemId = await createItem(connection);
+  const wh = String(warehouse.id);
+  const keeper = await makeWarehouseUser(admin, testApp, 'r020keeper');
+  // 前置：这个仓管会话没有在职员工档案。
+  expect(
+    await connection.repository<Row>('employees').findOne({ filter: { userId: keeper.id } }),
+    '前置：仓管不应有员工档案',
+  ).toBeUndefined();
+
+  for (const [label, session] of [
+    ['root', admin],
+    ['无员工身份的仓管', keeper.session],
+  ] as const) {
+    const createdResponse = await session.fetch('/stock-docs', write({
+      docType: 'in', reason: 'other_in',
+      lines: [{ itemId, warehouseId: wh, qty: 1 }],
+    }));
+    expect(createdResponse.status, `${label}建单失败：${await createdResponse.clone().text()}`).toBe(201);
+    const created = await jsonOf(createdResponse);
+    expect(created.handler, `${label}的经办人应为空`).toBeNull();
+    expect(created.handlerUserId, `${label}的经办人标识应为空`).toBeNull();
+    expect(
+      (await connection.repository<Row>('stockDocs').findOne({ filter: { id: created.id } }))?.handlerUserId,
+      '库里的经办人列也应为空',
+    ).toBeNull();
+
+    const patchedResponse = await session.fetch(`/stock-docs/${String(created.id)}`, write({
+      remark: `${label}改草稿`,
+      lines: [{ itemId, warehouseId: wh, qty: 2 }],
+    }, 'PATCH'));
+    expect(patchedResponse.status, `${label}改草稿失败：${await patchedResponse.clone().text()}`).toBe(200);
+    expect((await jsonOf(patchedResponse)).handler, '改完经办人仍为空').toBeNull();
+  }
+
+  // 反向：明确指定一个非在职员工，照旧 422，不能把整条校验一起放宽。
+  const explicit = await admin.fetch('/stock-docs', write({
+    docType: 'in', reason: 'other_in', handlerUserId: keeper.id,
+    lines: [{ itemId, warehouseId: wh, qty: 1 }],
+  }));
+  expect(explicit.status, `显式非员工应当被拒：${await explicit.clone().text()}`).toBe(422);
+  expect((await jsonOf(explicit)).error?.reason).toBe('STOCK_PERSON_INVALID');
+}, 30_000);
+
+test('经办人缺省：在职员工取登录人；显式离职员工仍 422', async ({ testApp, connection }) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const warehouse = await createWarehouse(admin);
+  const itemId = await createItem(connection);
+  const wh = String(warehouse.id);
+  const keeper = await makeWarehouseUser(admin, testApp, 'r020staff');
+  await createEmployee(connection, keeper.id);
+  const staff = keeper.session;
+
+  const createdResponse = await staff.fetch('/stock-docs', write({
+    docType: 'in', reason: 'other_in',
+    lines: [{ itemId, warehouseId: wh, qty: 1 }],
+  }));
+  expect(createdResponse.status, `在职员工建单失败：${await createdResponse.clone().text()}`).toBe(201);
+  const created = await jsonOf(createdResponse);
+  expect(created.handler).toMatchObject({ userId: keeper.id });
+  expect(created.handlerUserId).toBe(keeper.id);
+
+  const leftId = unique('LEFT');
+  await createEmployee(connection, leftId, 'left');
+  const rejected = await staff.fetch('/stock-docs', write({
+    docType: 'in', reason: 'other_in', handlerUserId: leftId,
+    lines: [{ itemId, warehouseId: wh, qty: 1 }],
+  }));
+  expect(rejected.status, `显式离职员工应当被拒：${await rejected.clone().text()}`).toBe(422);
+  expect((await jsonOf(rejected)).error?.reason).toBe('STOCK_PERSON_INVALID');
+}, 30_000);

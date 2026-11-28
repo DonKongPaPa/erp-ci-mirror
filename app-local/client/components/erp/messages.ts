@@ -17,17 +17,21 @@ function errorBody(error: ApiClientError): Record<string, unknown> | undefined {
     : undefined;
 }
 
+/** 服务端翻好的那句话（`error.localizedMessage.message`），没有就没有。 */
+function localizedMessage(error: ApiClientError): string | undefined {
+  const localized = (
+    errorBody(error)?.localizedMessage as { message?: unknown } | undefined
+  )?.message;
+  return typeof localized === 'string' && localized.trim() ? localized : undefined;
+}
+
 /**
- * 服务端翻好的那句话（`error.localizedMessage.message`），没有就 `error.message`。
+ * 表单字段用的那句话：服务端翻好的在前，没有就 `error.message`。
  * 设计文档 2.8：被拒时先显示它，不自己拼。
  */
 export function serverMessage(error: unknown): string | undefined {
   if (!(error instanceof ApiClientError)) return undefined;
-  const localized = (
-    errorBody(error)?.localizedMessage as { message?: unknown } | undefined
-  )?.message;
-  if (typeof localized === 'string' && localized.trim()) return localized;
-  return error.message.trim() || undefined;
+  return localizedMessage(error) ?? (error.message.trim() || undefined);
 }
 
 const STATUS_KEYS: Readonly<Record<number, string>> = {
@@ -44,6 +48,14 @@ const STATUS_KEYS: Readonly<Record<number, string>> = {
  * 请求根本没发出去（网络断开）单独一句，不把英文原话端给用户。
  */
 export function errorText(error: unknown, t: Translate): string {
+  if (error instanceof ApiClientError) {
+    const localized = localizedMessage(error);
+    if (localized) return localized;
+    // 403/404 的服务端 `message` 是框架的英文授权码与 "The requested record was not found."；
+    // 没有文案时不端给用户，改说用户看得懂的一句话。字段级校验仍走 serverMessage。
+    if (error.status === 403) return t('erp.errors.denied');
+    if (error.status === 404) return t('erp.errors.notFound');
+  }
   const server = serverMessage(error);
   if (server) return server;
   if (error instanceof ApiClientError) {

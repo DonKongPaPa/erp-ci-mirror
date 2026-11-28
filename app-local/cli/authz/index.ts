@@ -19,6 +19,7 @@ import AuthzUpgradeR021PurchaseRequest from './upgrade-r021-purchase-request.js'
 import AuthzUpgradeR022Quotation from './upgrade-r022-quotation.js';
 import AuthzUpgradeR026 from './upgrade-r026.js';
 import AuthzUpgradeR065 from './upgrade-r065.js';
+import AuthzUpgradeR066 from './upgrade-r066.js';
 import AuthzUpgradeR064 from './upgrade-r064.js';
 import AuthzUpgradeR072 from './upgrade-r072.js';
 import AuthzUpgradeR025 from './upgrade-r025.js';
@@ -69,6 +70,8 @@ const authzCli = defineCliPlugin({
     // R-072：给已有环境的 purchase / sales / warehouse 补字典与选项的读授权。可单独跑、可重跑。
     // R-065：给已有环境建财务角色并补三份业务授权。可单独跑、可重跑。
     'upgrade-r065': AuthzUpgradeR065,
+    // R-066：给 staff（仅本人）与 finance 补请款单动作，可单独跑、可重跑。
+    'upgrade-r066': AuthzUpgradeR066,
     // R-064：建 planning 角色并补评审写动作与台账只读；只加不改，可重跑。
     'upgrade-r064': AuthzUpgradeR064,
     'upgrade-r072': AuthzUpgradeR072,

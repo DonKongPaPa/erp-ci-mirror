@@ -24,8 +24,12 @@ const EXT_FIELDS = [
   'taxExcludedTotal', 'taxTotal', 'payableTotal',
 ];
 const PRINT_FIELDS = ['printCount', 'lastPrintedAt', 'lastPrintedBy'];
-const EXPECTED = [...BASE_DOC_FIELDS, ...EXT_FIELDS, ...PRINT_FIELDS].sort();
-const BEFORE = [...BASE_DOC_FIELDS, ...EXT_FIELDS].sort();
+/** 202611260023 先于本迁移给 stock_docs 加的两列，applies 前后都在。 */
+const STOCKTAKING_TRANSFER_FIELDS = ['stocktakingId', 'transferDocId'];
+const EXPECTED = [
+  ...BASE_DOC_FIELDS, ...EXT_FIELDS, ...PRINT_FIELDS, ...STOCKTAKING_TRANSFER_FIELDS,
+].sort();
+const BEFORE = [...BASE_DOC_FIELDS, ...EXT_FIELDS, ...STOCKTAKING_TRANSFER_FIELDS].sort();
 
 describe('R-076：单据打印痕迹的迁移', () => {
   describeMigration('202611260027_doc_print_trace', {

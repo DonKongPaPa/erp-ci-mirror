@@ -311,6 +311,33 @@ const enUS = {
       approvalFailed: 'The approval could not be created: {{reason}}.',
     },
   },
+  // R-066：请款单规则码文案；端点在缺键时用英文原句兜底。
+  financeRequest: {
+    errors: {
+      notFound: 'That finance request does not exist.',
+      notEditable: 'Only a draft or rejected finance request can be changed.',
+      amountInvalid: 'The amount must be positive with at most two decimals.',
+      personInvalid: 'That handler is not an active employee: {{reason}}.',
+      dictCodeInvalid: 'That code is not an active dictionary entry: {{reason}}.',
+      notApproved: 'Only an approved finance request can be converted into an expense record.',
+      converted: 'This finance request has already been converted.',
+      approvalFailed: 'The approval could not be created: {{reason}}.',
+    },
+  },
+  // R-065: readable finance rule messages; returned in localizedMessage.
+  finance: {
+    errors: {
+      financeNotFound: 'That expense or invoice receipt does not exist.',
+      notDraft: 'Only a draft record can be edited or registered.',
+      voided: 'This record has been voided and cannot be registered.',
+      lineInvalid: 'The lines are not valid: add a line and use a positive amount with at most two decimals.',
+      orderNotPayable: 'The selected purchase order does not exist, or is still a draft or cancelled.',
+      supplierMixed: 'All lines of one record must come from the same supplier.',
+      dictCodeInvalid: 'The expense type, fund account, invoice type or project code is not an active dictionary entry.',
+      personInvalid: 'The handler is not an active employee; choose someone else.',
+      partnerInvalid: 'The supplier on the selected order is inactive or unavailable; choose another order.',
+    },
+  },
 } as const;
 
 export type AppServerResource = LocaleResource<typeof enUS>;

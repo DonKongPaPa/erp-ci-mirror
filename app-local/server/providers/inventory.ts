@@ -710,6 +710,13 @@ async function requireActivePerson(knex: Knex, userId: string): Promise<void> {
   if (row === undefined || row.status !== 'active') fail('person-invalid', userId);
 }
 
+/** 缺省经办人：登录人是在职员工才填，否则留空，不写一个后面过不了校验的值。 */
+async function isActivePerson(knex: Knex, userId: string): Promise<boolean> {
+  const row = await knex<{ user_id: string; status: string }>('employees')
+    .select('user_id').where({ user_id: userId, status: 'active' }).first();
+  return row !== undefined;
+}
+
 async function requireDepartment(knex: Knex, departmentId: string): Promise<void> {
   const row = await knex<{ id: string; active: boolean }>('departments')
     .select('id', 'active').where({ id: departmentId }).first();
@@ -1014,9 +1021,12 @@ export class DatabaseStockMutations implements StockMutations {
       await assertPartnerReason(knex, input.reason, input.partnerId);
       await assertSourceRules(knex, input);
       await assertStockDicts(tx, input.projectCode);
-      const handlerUserId = input.handlerUserId ?? byUserId;
+      let handlerUserId: string | null = null;
       if (input.handlerUserId !== undefined && input.handlerUserId !== null) {
-        await requireActivePerson(knex, handlerUserId);
+        await requireActivePerson(knex, input.handlerUserId);
+        handlerUserId = input.handlerUserId;
+      } else if (input.handlerUserId === undefined && await isActivePerson(knex, byUserId)) {
+        handlerUserId = byUserId;
       }
       if (input.takerUserId !== undefined && input.takerUserId !== null) {
         await requireActivePerson(knex, input.takerUserId);

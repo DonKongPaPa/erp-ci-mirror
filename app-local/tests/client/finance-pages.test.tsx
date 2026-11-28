@@ -13,7 +13,7 @@ import {
   renderWithApp,
   type ApiCall,
 } from '@nocobase/app-testing/client';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type ReactElement } from 'react';
 import { Route, Routes, useLocation } from 'react-router';
@@ -84,6 +84,8 @@ const record = (overrides: Record<string, unknown> = {}) => ({
 
 let permissions: AuthorizationSnapshot;
 let answer: (call: ApiCall) => unknown;
+/** 页面实际发出的完整请求地址（含查询串），用来钉住下拉的取数参数。 */
+const requestUrls: string[] = [];
 const api = vi.fn((call: ApiCall) =>
   call.path === 'authorization/permissions'
     ? { data: permissions }
@@ -120,7 +122,11 @@ async function renderAt(route: string, grants: AuthorizationSnapshot) {
       route,
       namespace: packageMetadata.name,
       namespaces: { [packageMetadata.name]: enUS },
-      fetch: answerApi(api),
+      fetch: (request: Request) => {
+        const url = new URL(request.url);
+        requestUrls.push(`${url.pathname}${url.search}`);
+        return answerApi(api)(request);
+      },
       services: (app) => {
         app.container.instance(authenticationClientToken, { getSession });
         app.container.singleton(
@@ -135,9 +141,9 @@ async function renderAt(route: string, grants: AuthorizationSnapshot) {
 const lookups = (call: ApiCall): unknown => {
   if (call.path === 'biz-dict/entries')
     return pageOf([{ id: 'e1', dictType: 'expense_type', code: 'GOODS', name: 'Goods', rate: null, startDate: null, endDate: null, description: null, isDefault: true, sort: 0, status: 'active', createdAt: at, updatedAt: at }]);
-  if (call.path === 'person-options')
+  if (call.path.startsWith('person-options'))
     return pageOf([{ userId: 'u1', name: 'Sam Finance', departmentId: null, departmentName: null }]);
-  if (call.path === 'expenses/supplier-options') return pageOf([supplier]);
+  if (call.path.startsWith('expenses/supplier-options')) return pageOf([supplier]);
   if (call.path === 'purchase-orders/payable') return pageOf([payable]);
   return notFound();
 };
@@ -145,6 +151,7 @@ const lookups = (call: ApiCall): unknown => {
 beforeEach(() => {
   api.mockClear();
   getSession.mockClear();
+  requestUrls.length = 0;
   answer = lookups;
 });
 
@@ -241,5 +248,116 @@ describe('R-065 finance pages', () => {
       invoiceNo: 'INV-001',
       confirm: true,
     });
+  });
+});
+
+describe('finance option lookups and rule messages', () => {
+  it('requests each option endpoint at its limit and names a supplier absent from the options', async () => {
+    const personSizes: (string | undefined)[] = [];
+    const supplierSizes: (string | undefined)[] = [];
+    answer = (call) => {
+      if (call.path === 'person-options') {
+        personSizes.push(call.query?.pageSize as string | undefined);
+        return pageOf([]);
+      }
+      if (call.path === 'expenses/supplier-options') {
+        supplierSizes.push(call.query?.pageSize as string | undefined);
+        return pageOf([]);
+      }
+      return lookups(call);
+    };
+    const user = userEvent.setup();
+    await renderAt('/expenses/new', finance());
+    await screen.findByRole('heading', { name: 'New expense record' }, WAIT);
+    await screen.findByRole('combobox', { name: 'Handler' }, WAIT);
+    await waitFor(() => expect(personSizes).toContain('20'), WAIT);
+    expect(personSizes).not.toContain('100');
+    expect(supplierSizes).toContain('100');
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Select a purchase order' }, WAIT),
+    );
+    await user.click(
+      await screen.findByRole('button', { name: 'Select order CG-20261127-0001' }, WAIT),
+    );
+    const supplier = await screen.findByRole('combobox', { name: 'Supplier' }, WAIT);
+    expect(supplier.textContent).toContain('Sample Vendor');
+    expect(supplier.textContent).not.toContain('s1');
+  });
+
+  it('loads the expense supplier dropdown with the exact page query and shows the supplier name', async () => {
+    const supplierCalls: ApiCall[] = [];
+    answer = (call) => {
+      if (call.path === 'expenses/supplier-options') supplierCalls.push(call);
+      return lookups(call);
+    };
+    const user = userEvent.setup();
+    await renderAt('/expenses/new', finance());
+    await screen.findByRole('heading', { name: 'New expense record' }, WAIT);
+
+    await user.click(await screen.findByRole('combobox', { name: 'Supplier' }, WAIT));
+    expect(
+      await screen.findByRole('option', { name: 'SU1 Sample Vendor' }, WAIT),
+    ).toBeVisible();
+    expect(supplierCalls.length).toBeGreaterThan(0);
+    expect(supplierCalls[0]).toMatchObject({
+      method: 'GET', path: 'expenses/supplier-options', query: { q: '', pageSize: '100' },
+    });
+    expect(requestUrls).toEqual(expect.arrayContaining([
+      expect.stringMatching(/\/expenses\/supplier-options\?q=&pageSize=100$/u),
+    ]));
+  });
+
+  it('loads the invoice receipt supplier dropdown with the same query and shows the supplier name', async () => {
+    const supplierCalls: ApiCall[] = [];
+    answer = (call) => {
+      if (call.path === 'expenses/supplier-options') supplierCalls.push(call);
+      return lookups(call);
+    };
+    const user = userEvent.setup();
+    await renderAt('/invoice-receipts/new', finance());
+    await screen.findByRole('heading', { name: 'New invoice receipt record' }, WAIT);
+
+    await user.click(await screen.findByRole('combobox', { name: 'Supplier' }, WAIT));
+    expect(
+      await screen.findByRole('option', { name: 'SU1 Sample Vendor' }, WAIT),
+    ).toBeVisible();
+    expect(supplierCalls.length).toBeGreaterThan(0);
+    expect(supplierCalls[0]).toMatchObject({
+      method: 'GET', path: 'expenses/supplier-options', query: { q: '', pageSize: '100' },
+    });
+    expect(requestUrls).toEqual(expect.arrayContaining([
+      expect.stringMatching(/\/expenses\/supplier-options\?q=&pageSize=100$/u),
+    ]));
+  });
+
+  it('shows the localized finance rule message instead of the raw reason when registering fails', async () => {
+    answer = (call) => {
+      if (call.method === 'GET' && call.path === 'expenses/f1') return record();
+      if (call.method === 'POST' && call.path === 'expenses/f1/confirm')
+        return Response.json(
+          {
+            error: {
+              reason: 'FINANCE_PARTNER_INVALID',
+              message: 'Finance rule violated: partner-invalid (s1)',
+              localizedMessage: {
+                locale: 'en-US',
+                message: 'The supplier on the selected order is inactive.',
+              },
+            },
+          },
+          { status: 422 },
+        );
+      return lookups(call);
+    };
+    const user = userEvent.setup();
+    await renderAt('/expenses/f1', finance());
+    await user.click(await screen.findByRole('button', { name: 'Register' }, WAIT));
+    const dialog = await screen.findByRole('alertdialog', { name: /Register EXP-20261128-0001/u }, WAIT);
+    await user.click(within(dialog).getByRole('button', { name: 'Register' }));
+    expect(
+      await within(dialog).findByText('The supplier on the selected order is inactive.', {}, WAIT),
+    ).toBeVisible();
+    expect(document.body.textContent).not.toContain('partner-invalid (s1)');
   });
 });

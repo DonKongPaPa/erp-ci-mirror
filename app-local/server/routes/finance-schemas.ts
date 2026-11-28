@@ -88,8 +88,11 @@ export const PayableListQuery = z.object({
   page,
   pageSize,
 });
+/** 下拉把空关键词原样发成 `?q=`；空串与纯空白都等价于不传。 */
+const optionQuery = z.string().max(128).optional()
+  .transform((value) => (value === undefined || value.trim() === '' ? undefined : value));
 export const SupplierOptionsQuery = z.object({
-  q: z.string().min(1).max(128).optional(),
+  q: optionQuery,
   page,
   pageSize,
 });

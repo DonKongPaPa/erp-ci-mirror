@@ -32,14 +32,6 @@ const test = createAppTest({
 
 const KEEPER = 'warehouse';
 const BUYERS = ['purchase', 'sales'] as const;
-/**
- * 订单页的页面授权（R-021 / R-022）与这一片写在同一份角色里：采购只有采购订单页，销售只有销售订单页。
- * 它们是别的片写的，升级前后都原样保留；这里逐项列出来，是为了不把别人的授权当成自己的或漏掉。
- */
-const ORDER_PAGE_OF = {
-  purchase: 'purchaseOrders',
-  sales: 'salesOrders',
-} as const;
 const TARGETS = [KEEPER, ...BUYERS] as const;
 const OTHER_ROLES = [
   'staff',
@@ -108,6 +100,47 @@ const pageIdsOf = (set: Snapshot): string[] =>
     .filter((grant) => grant.resource.type === 'page')
     .map((grant) => grant.resource.id)
     .sort();
+/**
+ * 本片（R-020）只钉自己补的页面：仓库页给仓管与两个买家，库存/入库/出库页只给仓管。
+ * 别的片的页面（物料、伙伴、订单页、请购单页、台账页等）整份清单由
+ * business-permission-sets.test.ts 钉住，这里不再整份比对。
+ */
+const assertSlicePages = async (
+  authz: AppAuthorization,
+  key: string,
+): Promise<void> => {
+  const pages = pageIdsOf(await snapshot(authz, key));
+  expect(pages, `${key} 缺仓库页`).toContain('warehouses');
+  if (key === KEEPER) {
+    for (const id of KEEPER_PAGES)
+      expect(pages, `仓管缺页面 ${id}`).toContain(id);
+  } else {
+    for (const id of KEEPER_PAGES.filter((id) => id !== 'warehouses'))
+      expect(pages, `${key} 不该拿到 ${id}`).not.toContain(id);
+  }
+};
+/** 本片该追加的页面：仓管四页，采购与销售只有仓库页，别的角色一个都不加。 */
+const SLICE_PAGES: Record<string, readonly string[]> = {
+  [KEEPER]: KEEPER_PAGES,
+  purchase: ['warehouses'],
+  sales: ['warehouses'],
+};
+/**
+ * 集合层面的「只加不改」：升级后页面清单恰好等于升级前 ∪ expectedAdded。
+ * 页面清单只从这份测试已有的 snapshot / pageIdsOf 取，去重排序后比对。
+ */
+const expectOnlyAddedPages = (
+  key: string,
+  before: Snapshot,
+  after: Snapshot,
+  expectedAdded: readonly string[],
+): void => {
+  const expected = [...new Set([...pageIdsOf(before), ...expectedAdded])].sort();
+  expect(
+    pageIdsOf(after),
+    `${key} 升级后页面清单应恰好等于升级前 ∪ 本片页面`,
+  ).toEqual(expected);
+};
 
 /** 造升级之前的环境：把三个角色里的物料与库存页面授权整条删掉，revision 不动。 */
 async function makeOld(
@@ -137,17 +170,8 @@ test('新环境 seed 已含四页的页面授权：仓管四页，采购与销�
 }) => {
   const authz = app.container.resolve(authorizationToken);
   const users = app.container.resolve(userManagementServiceToken);
-  expect(pageIdsOf(await snapshot(authz, KEEPER))).toEqual(
-    [...KEEPER_PAGES].sort(),
-  );
-  // items、partners、订单页是别的片的页面授权；R-020 只补仓库页。
-  for (const key of BUYERS)
-    expect(pageIdsOf(await snapshot(authz, key))).toEqual([
-      'items',
-      'partners',
-      ORDER_PAGE_OF[key],
-      'warehouses',
-    ]);
+  await assertSlicePages(authz, KEEPER);
+  for (const key of BUYERS) await assertSlicePages(authz, key);
 
   const keeper = await createPerson(users, 'r020pageseedkeeper', [KEEPER]);
   const buyer = await createPerson(users, 'r020pageseedbuyer', ['purchase']);
@@ -188,33 +212,36 @@ test('旧环境只补页面授权，别的角色逐项不变，重跑不写', as
 
   // 只加不改：原有的授权一条一条原样排在前面。
   for (const key of TARGETS) {
-    const after = await snapshot(authz, KEEPER === key ? key : key);
-    expect(after.revision).not.toBe(before.get(key)!.revision);
-    expect(after.grants.slice(0, before.get(key)!.grants.length)).toEqual(
+    const afterSet = await snapshot(authz, key);
+    expect(afterSet.revision).not.toBe(before.get(key)!.revision);
+    expect(afterSet.grants.slice(0, before.get(key)!.grants.length)).toEqual(
       before.get(key)!.grants,
     );
   }
-  expect(pageIdsOf(await snapshot(authz, KEEPER))).toEqual(
-    [...KEEPER_PAGES].sort(),
-  );
-  // items、partners 不是这一片写的，升级前后都该原样保留。
-  for (const key of BUYERS)
-    expect(pageIdsOf(await snapshot(authz, key))).toEqual([
-      'items',
-      'partners',
-      ORDER_PAGE_OF[key],
-      'warehouses',
-    ]);
+  await assertSlicePages(authz, KEEPER);
+  for (const key of BUYERS) await assertSlicePages(authz, key);
   for (const id of KEEPER_PAGES)
     expect(await canOpen(authz, keeper, id)).toBe(true);
   for (const key of OTHER_ROLES) {
     expect(await snapshot(authz, key), `${key} 不该被动`).toEqual(
       before.get(key),
     );
+    const pages = pageIdsOf(await snapshot(authz, key));
+    for (const id of PAGE_IDS)
+      expect(pages, `${key} 不该拿到本片页面 ${id}`).not.toContain(id);
   }
 
   const after = new Map<string, Snapshot>();
-  for (const key of TARGETS) after.set(key, await snapshot(authz, key));
+  for (const key of [...TARGETS, ...OTHER_ROLES])
+    after.set(key, await snapshot(authz, key));
+  // 集合层面的只加不改：每个角色的页面清单恰好等于升级前 ∪ 本片该给它的页面。
+  for (const key of [...TARGETS, ...OTHER_ROLES])
+    expectOnlyAddedPages(
+      key,
+      before.get(key)!,
+      after.get(key)!,
+      SLICE_PAGES[key] ?? [],
+    );
   const second = await upgradeR020Page(services(app), {
     info: () => undefined,
   });
@@ -233,7 +260,8 @@ test('业务授权的声明对不上时那个角色整条跳过，页面授权�
 }) => {
   const authz = app.container.resolve(authorizationToken);
   await makeOld(connection, authz);
-  const before = await snapshot(authz, KEEPER);
+  const before = new Map<string, Snapshot>();
+  for (const key of TARGETS) before.set(key, await snapshot(authz, key));
   const real = authz.compositeResources.getAction.bind(
     authz.compositeResources,
   );
@@ -249,15 +277,24 @@ test('业务授权的声明对不上时那个角色整条跳过，页面授权�
     expect(report.grants.invalid).toEqual([KEEPER]);
     expect(report.pages.invalid).toEqual([KEEPER]);
     expect(report.pages.changed).toEqual([...BUYERS]);
-    // 仓管一条都没写；采购、销售的 items、partners、订单页原样留着，仓库页照补。
-    expect(await snapshot(authz, KEEPER)).toEqual(before);
-    for (const key of BUYERS)
-      expect(pageIdsOf(await snapshot(authz, key))).toEqual([
-        'items',
-        'partners',
-        ORDER_PAGE_OF[key],
-        'warehouses',
-      ]);
+    // 仓管一条都没写：升级后与升级前完全相等，页面清单也不多不少。
+    expect(await snapshot(authz, KEEPER)).toEqual(before.get(KEEPER));
+    expectOnlyAddedPages(
+      KEEPER,
+      before.get(KEEPER)!,
+      await snapshot(authz, KEEPER),
+      [],
+    );
+    // 采购、销售原有的页面原样留着，只追加仓库页。
+    for (const key of BUYERS) {
+      await assertSlicePages(authz, key);
+      expectOnlyAddedPages(
+        key,
+        before.get(key)!,
+        await snapshot(authz, key),
+        SLICE_PAGES[key],
+      );
+    }
   } finally {
     spy.mockRestore();
   }
@@ -279,9 +316,7 @@ test('角色不存在时记一行跳过，别的角色照补', async ({ app, con
   expect(
     lines.some((line) => line.includes('sales') && line.includes('not found')),
   ).toBe(true);
-  expect(pageIdsOf(await snapshot(authz, KEEPER))).toEqual(
-    [...KEEPER_PAGES].sort(),
-  );
+  await assertSlicePages(authz, KEEPER);
 });
 
 test('升级命令挂在 authz 主题下，说明里写明补的是哪些页面', () => {

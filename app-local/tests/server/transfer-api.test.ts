@@ -10,6 +10,7 @@ import { expect } from 'vitest';
 
 import { createAppTest } from '../helpers/test-app.js';
 import { createItem } from '../helpers/inventory.js';
+import { createEmployee } from '../helpers/orders.js';
 import { createStandaloneServer } from '../../server/standalone.js';
 import { transferMutationsToken } from '../../server/providers/transfer.js';
 
@@ -134,7 +135,8 @@ test('调拨正向：过账生成一出一入两张单，两仓一减一增、�
   for (const key of FORBIDDEN_KEYS) expect(Object.keys(body)).not.toContain(key);
   expect(Object.keys(body.warehouseIn as Row).sort()).toEqual(['id', 'name']);
   expect(Object.keys(body.warehouseOut as Row).sort()).toEqual(['id', 'name']);
-  expect(Object.keys(body.handler as Row).sort()).toEqual(['name', 'userId']);
+  // 仓管默认没有员工档案：缺省经办人为空，不再写一个后面过不了校验的标识。
+  expect(body.handler, '非员工建单的经办人应为空').toBeNull();
 
   const posted = await keeper.fetch(`/transfers/${id}/post`, write());
   expect(posted.status, `过账失败：${await posted.clone().text()}`).toBe(200);
@@ -293,4 +295,92 @@ test('无调出仓时只生成调入单，按其他入库口径增加现存量',
   const listed = await keeper.fetch('/transfers?status=posted', get());
   expect(listed.status).toBe(200);
   expect((await jsonOf(listed)).items?.some((row) => row.id === id)).toBe(true);
+});
+
+test('经办人缺省：root 建调拨单留空，一出一入单据经办人随源单为空且过账不受影响', async ({
+  testApp, connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const outWarehouse = await createWarehouse(admin);
+  const inWarehouse = await createWarehouse(admin);
+  const itemId = await createItem(connection);
+  await stockIn(admin, itemId, outWarehouse, 20);
+
+  // root 没有员工档案：缺省经办人留空，之后带空标识编辑照旧能存。
+  const created = await admin.fetch('/transfers', write({
+    transferInWarehouseId: inWarehouse, transferOutWarehouseId: outWarehouse,
+    remark: 'root 调拨', lines: [{ itemId, qty: 10 }],
+  }));
+  expect(created.status, `root 建调拨单失败：${await created.clone().text()}`).toBe(201);
+  const body = await jsonOf(created);
+  const id = String(body.id);
+  expect(body.handler, 'root 建单的经办人应为空').toBeNull();
+  expect(
+    (await connection.repository<Row>('transferDocs').findOne({ filter: { id } }))?.handlerUserId,
+    '库里的经办人列也应为空',
+  ).toBeNull();
+  const patched = await admin.fetch(`/transfers/${id}`, write({
+    remark: 'root 改草稿', handlerUserId: null,
+  }, 'PATCH'));
+  expect(patched.status, `root 改草稿失败：${await patched.clone().text()}`).toBe(200);
+  expect((await jsonOf(patched)).handler, '编辑后经办人仍为空').toBeNull();
+
+  // 在职员工不传经办人取本人；显式离职员工照旧 422。
+  const username = unique('trfdefault');
+  const createdUser = await admin.fetch('/users', write({
+    name: username, username, email: `${username.toLowerCase()}@example.test`,
+    password: PASSWORD, roleScopes: { app: ['warehouse'] },
+  }));
+  expect(createdUser.status, `建用户失败：${await createdUser.clone().text()}`).toBe(201);
+  const staffId = String((await jsonOf(createdUser)).data?.id);
+  expect(staffId, '前置：用户 id').toBeTruthy();
+  await createEmployee(connection, staffId);
+  const staff = await signIn(testApp, { username, password: PASSWORD });
+  const staffCreated = await staff.fetch('/transfers', write({
+    transferInWarehouseId: inWarehouse, lines: [{ itemId, qty: 1 }],
+  }));
+  expect(staffCreated.status, `在职员工建单失败：${await staffCreated.clone().text()}`).toBe(201);
+  const staffBody = await jsonOf(staffCreated);
+  expect(staffBody.handler).toMatchObject({ userId: staffId });
+  expect(Object.keys(staffBody.handler as Row).sort()).toEqual(['name', 'userId']);
+  const leftId = unique('LEFT');
+  await createEmployee(connection, leftId, 'left');
+  const rejected = await admin.fetch('/transfers', write({
+    transferInWarehouseId: inWarehouse, handlerUserId: leftId, lines: [{ itemId, qty: 1 }],
+  }));
+  expect(rejected.status, `显式离职员工应当被拒：${await rejected.clone().text()}`).toBe(422);
+  expect((await jsonOf(rejected)).error?.reason).toBe('STOCK_PERSON_INVALID');
+
+  const posted = await admin.fetch(`/transfers/${id}/post`, write());
+  expect(posted.status, `过账失败：${await posted.clone().text()}`).toBe(200);
+  const result = await jsonOf(posted);
+  expect(result.outDocId).toEqual(expect.any(String));
+  expect(result.inDocId).toEqual(expect.any(String));
+  const docs = await docsOf(connection, id);
+  expect(docs).toHaveLength(2);
+  for (const doc of docs) {
+    expect(doc, '生成单据经办人应随源单为空').toMatchObject({ status: 'posted', handlerUserId: null });
+    const read = await admin.fetch(`/stock-docs/${String(doc.id)}`, get());
+    expect(read.status, `读生成单据失败：${await read.clone().text()}`).toBe(200);
+    expect((await jsonOf(read)).handler).toBeNull();
+  }
+  expect(await balanceOf(connection, itemId, outWarehouse)).toBe(10);
+  expect(await balanceOf(connection, itemId, inWarehouse)).toBe(10);
+
+  // 反向对照：源单经办人是在职员工时，一出一入两张单都跟着带这个人。
+  const staffCreatedTransfer = await staff.fetch('/transfers', write({
+    transferInWarehouseId: inWarehouse, transferOutWarehouseId: outWarehouse,
+    lines: [{ itemId, qty: 1 }],
+  }));
+  expect(staffCreatedTransfer.status, `员工建调拨单失败：${await staffCreatedTransfer.clone().text()}`).toBe(201);
+  const staffTransferId = String((await jsonOf(staffCreatedTransfer)).id);
+  const staffPosted = await admin.fetch(`/transfers/${staffTransferId}/post`, write());
+  expect(staffPosted.status, `员工调拨过账失败：${await staffPosted.clone().text()}`).toBe(200);
+  const staffDocs = await docsOf(connection, staffTransferId);
+  expect(staffDocs).toHaveLength(2);
+  for (const doc of staffDocs) {
+    expect(doc, '生成单据经办人应随源调拨单').toMatchObject({
+      status: 'posted', handlerUserId: staffId,
+    });
+  }
 });

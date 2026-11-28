@@ -264,9 +264,16 @@ describe('System settings navigation', () => {
       // 物料与库存排在客户与供应商后面、质量工单前面（《基座ERP前端设计》1.1）。
       'inventory',
       'purchaseOrders',
+      'purchaseRequests',
       'salesOrders',
+      // R-022 波 2：报价单排在销售订单之后、业务字典之前。
+      'quotations',
+      // R-064：订单总台账排在销售订单后面，不动已有顺序。
+      'orderLedger',
       // R-072：业务字典维护页，只给管理入口 root；排在系统设置前面，不动已有顺序。
       'bizDict',
+      // R-066：请款单与报销单排在业务字典后、支出记录前，不动已有顺序。
+      'financeRequests',
       // R-065：财务的两张记录页排在业务字典后、质量工单前。
       'expenses',
       'invoiceReceipts',

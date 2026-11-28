@@ -20,6 +20,7 @@ import { Route, Routes, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import enUS from '../../client/locales/en-US.js';
+import zhCN from '../../client/locales/zh-CN.js';
 import ApprovalDetailPage from '../../client/pages/approvals/detail.js';
 import ApprovalMinePage from '../../client/pages/approvals/mine.js';
 import ApprovalTasksPage from '../../client/pages/approvals/tasks.js';
@@ -71,7 +72,7 @@ function LocationProbe(): ReactElement {
   );
 }
 
-async function renderAt(route: string, grants: AuthorizationSnapshot) {
+async function renderAt(route: string, grants: AuthorizationSnapshot, resource = enUS) {
   permissions = grants;
   return renderWithApp(
     <AuthenticationProvider>
@@ -85,7 +86,7 @@ async function renderAt(route: string, grants: AuthorizationSnapshot) {
     {
       route,
       namespace: packageMetadata.name,
-      namespaces: { [packageMetadata.name]: enUS },
+      namespaces: { [packageMetadata.name]: resource },
       fetch: answerApi(api),
       services: (app) => {
         app.container.instance(authenticationClientToken, { getSession });
@@ -389,4 +390,158 @@ describe('R-017 审批页面', () => {
       ),
     );
   });
+
+  it('请购单的审批详情显示业务页签，通用键值快照不再出现', async () => {
+    answer = (call) =>
+      call.path === 'approvals/a1'
+        ? {
+            data: detail({
+              collectionName: 'purchaseRequests',
+              dataKey: 'pr-1',
+              rounds: [
+                {
+                  id: 'r1',
+                  approvalId: 'a1',
+                  round: 1,
+                  status: 'processing',
+                  snapshot: {
+                    id: 'pr-1',
+                    docNo: 'QG-20261127-0001',
+                    requestDate: '2026-11-27',
+                    department: { id: 'd1', name: 'Sample Planning Dept' },
+                    requester: { userId: 'u1', name: 'Sample Requester' },
+                    projectCode: 'PJ01',
+                    projectLabel: 'Sample Project',
+                    customText1: 'Custom one',
+                    customText2: 'Custom two',
+                    description: 'Sample description',
+                    totalQty: 10,
+                    estimatedTotal: 50,
+                    lines: [
+                      {
+                        id: 'l1',
+                        itemId: 'i1',
+                        qty: 10,
+                        expectedPrice: 5,
+                        expectedAmount: 50,
+                        item: {
+                          id: 'i1',
+                          code: 'M2611180001',
+                          name: 'Sample Steel Sheet',
+                          spec: null,
+                          unitCode: 'KG',
+                        },
+                      },
+                    ],
+                    files: [],
+                    approvers: ['u2'],
+                  },
+                  startedAt: CREATED,
+                  endedAt: null,
+                },
+              ],
+            }),
+          }
+        : new Response(null, { status: 404 });
+    await renderAt('/approvals/a1', both);
+
+    const panel = await screen.findByTestId('approval-detail', {}, WAIT);
+    await waitFor(() => expect(panel).not.toHaveAttribute('aria-busy'));
+    expect(
+      within(panel).queryByRole('tab', {
+        name: enUS.approvals.detail.snapshot,
+      }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(
+      within(panel).getByRole('tab', {
+        name: enUS.purchaseRequests.approvalTab.title,
+      }),
+    );
+    expect(await within(panel).findByText('QG-20261127-0001', {}, WAIT)).toBeVisible();
+    expect(within(panel).getByText('Sample Steel Sheet')).toBeInTheDocument();
+    expect(
+      within(panel).getByRole('button', {
+        name: enUS.purchaseRequests.actions.openRequest,
+      }),
+    ).toHaveAttribute('href', '/purchase-requests/pr-1');
+  });
+
+  it('请款 / 报销单的审批详情显示业务页签，通用键值快照不再出现', async () => {
+    answer = (call) =>
+      call.path === 'approvals/a1'
+        ? {
+            data: detail({
+              collectionName: 'financeRequestDocs',
+              dataKey: 'fr-1',
+              rounds: [
+                {
+                  id: 'r1',
+                  approvalId: 'a1',
+                  round: 1,
+                  status: 'processing',
+                  snapshot: {
+                    id: 'fr-1',
+                    docType: 'payment_request',
+                    docNo: 'QK-20261128-0001',
+                    requestDate: '2026-11-28',
+                    expenseTypeCode: 'TRAVEL',
+                    expenseTypeLabel: 'Sample Travel',
+                    amount: 50,
+                    reason: 'Sample reason',
+                    handler: { userId: 'u1', name: 'Sample Handler' },
+                    projectCode: 'PJ01',
+                    projectLabel: 'Sample Project',
+                    files: [],
+                    approvers: ['u2'],
+                  },
+                  startedAt: CREATED,
+                  endedAt: null,
+                },
+              ],
+            }),
+          }
+        : new Response(null, { status: 404 });
+    await renderAt('/approvals/a1', both);
+
+    const panel = await screen.findByTestId('approval-detail', {}, WAIT);
+    await waitFor(() => expect(panel).not.toHaveAttribute('aria-busy'));
+    expect(
+      within(panel).queryByRole('tab', {
+        name: enUS.approvals.detail.snapshot,
+      }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(
+      within(panel).getByRole('tab', {
+        name: enUS.financeRequestDocs.approvalTab.title,
+      }),
+    );
+    expect(await within(panel).findByText('QK-20261128-0001', {}, WAIT)).toBeVisible();
+    expect(within(panel).getByText('Sample Travel')).toBeInTheDocument();
+    expect(
+      within(panel).getByRole('button', {
+        name: enUS.financeRequestDocs.actions.openRequest,
+      }),
+    ).toHaveAttribute('href', '/finance-requests/fr-1');
+  });
+});
+
+
+it('审批详情读不到时显示中文提示，不端出英文原句', async () => {
+  answer = (call) =>
+    call.path === 'approvals/missing'
+      ? Response.json(
+          {
+            error: {
+              reason: 'APPROVAL_NOT_FOUND',
+              message: 'The requested record was not found.',
+            },
+          },
+          { status: 404 },
+        )
+      : new Response(null, { status: 404 });
+  await renderAt('/approvals/missing', submitOnly, zhCN);
+  expect(
+    await screen.findByText('这条记录不存在，请刷新后重试。', {}, WAIT),
+  ).toBeVisible();
+  expect(document.body.textContent).not.toContain('The requested record was not found.');
 });

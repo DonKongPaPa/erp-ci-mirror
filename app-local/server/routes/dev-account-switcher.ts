@@ -3,7 +3,12 @@ import {
   authenticationToken,
   type AuthEnv,
 } from '@nocobase/app-plugin-authentication/server';
+import {
+  USER_LOCALE_PREFERENCE_KEY,
+  userPreferencesServiceToken,
+} from '@nocobase/app-plugin-users/server';
 import type { Application } from '@nocobase/app-server/application';
+import { i18nToken } from '@nocobase/app-server/i18n';
 import { loggingToken } from '@nocobase/app-server/logging';
 import { databaseManagerToken } from '@nocobase/db';
 import {
@@ -193,6 +198,16 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes(
             `http-${signOutResponse.status}`,
           );
         }
+
+        // R-037：演示身份是点验用的固定账号。建号时没写语言偏好，早先一次语言切换
+        // 又可能把 en-US 留在某个账号上（第四轮只有质量主管是英文），所以切过去之前
+        // 按应用默认语言（zh-CN）写回。只碰演示账号的界面语言，不改任何业务授权。
+        const preferences = app.container.resolve(userPreferencesServiceToken);
+        await preferences.set(
+          target.id,
+          USER_LOCALE_PREFERENCE_KEY,
+          app.container.resolve(i18nToken).getDefaultLocale(),
+        );
 
         const signedIn = await auth.signInUser(
           target.id,

@@ -1362,6 +1362,8 @@ test('R-013: booting the authorization resources provider twice registers once',
     'bizDictEntries',
     // R-064：订单评审头表与五项明细表。
     ...ORDER_REVIEW_COLLECTIONS.map((collection) => collection.name),
+    // R-066：请款单与报销单一表分型（注册顺序在 R-020/R-021 之前）。
+    'financeRequestDocs',
     // R-020 波 1：盘点单与调拨单各两张表。
     'stocktakingDocs', 'stocktakingDocLines', 'transferDocs', 'transferDocLines',
     // R-021 波 1 加片：请购单头表与明细表。
@@ -1383,6 +1385,8 @@ test('R-013: booting the authorization resources provider twice registers once',
   expect(registered.composites.map((composite) => composite.name)).toContain('orderReviews');
   expect(registered.composites.map((composite) => composite.name)).toContain('purchaseRequests');
   expect(registered.recordAccess).toContain('purchaseRequest.creatorOwn');
+  expect(registered.composites.map((composite) => composite.name)).toContain('financeRequests');
+  expect(registered.recordAccess).toContain('financeRequest.creatorOwn');
   // R-076：三组打印资源各两个动作；表沿用 inventory，不重复登记集合。
   for (const name of ['docPrintInternalIssue', 'docPrintSalesIssue', 'docPrintPurchaseReceipt']) {
     expect(registered.composites.map((composite) => composite.name)).toContain(name);
@@ -1424,6 +1428,9 @@ test('R-065: financeView 只登记在采购订单资源上，销售订单的动�
   // R-022 复刻波 1：报价单新资源六个动作，不提供删除。
   expect(actionsOf('quotations')).toEqual([
     'confirm', 'convert', 'create', 'update', 'view', 'void',
+  ]);
+  expect(actionsOf('financeRequests')).toEqual([
+    'convert', 'create', 'submit', 'update', 'view', 'void',
   ]);
   expect(actionsOf('purchaseOrders')).toContain('financeView');
   expect(actionsOf('salesOrders'), '销售订单不该有借采购授权的 financeView').not.toContain('financeView');

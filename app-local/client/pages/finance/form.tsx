@@ -27,9 +27,12 @@ import type { FieldErrors } from '#components/erp/form-dialog';
 import { errorText } from '#components/erp/messages';
 import {
   dictChoices,
+  partnerChoiceFrom,
+  personChoiceFrom,
   personChoices,
   useDictEntries,
   usePersonOptions,
+  withKnownChoices,
   type DictEntry,
 } from '#components/erp/options';
 import { useRecord } from '#components/erp/record';
@@ -325,11 +328,22 @@ function FinanceForm({
   const typeChoices = dictChoices(types);
   const fundChoices = dictChoices(funds);
   const projectChoices = dictChoices(projects);
-  const personOptions = personChoices(people);
-  const supplierChoices = (suppliers ?? []).map((one) => ({
-    value: one.id,
-    label: `${one.code} ${one.name}`,
-  }));
+  // 选项端点只回在职员工与在用供应商；已停用对象在老单据/待付款订单上仍要按标识显示名称。
+  const personOptions = withKnownChoices(personChoices(people), [
+    personChoiceFrom(record?.handler),
+  ]);
+  const supplierChoices = withKnownChoices(
+    (suppliers ?? []).map((one) => ({
+      value: one.id,
+      label: `${one.code} ${one.name}`,
+    })),
+    [
+      partnerChoiceFrom(record?.supplier),
+      partnerChoiceFrom(
+        (payable ?? []).find((one) => one.supplier?.id === values.supplierId)?.supplier,
+      ),
+    ],
+  );
   const orderChoices = (payable ?? []).map((one) => ({
     value: one.id,
     label: `${one.orderNo} · ${one.supplier?.name ?? ''}`,

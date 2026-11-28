@@ -40,6 +40,7 @@ import {
   CardTitle,
 } from '#components/ui/card';
 
+import { DeliveryReminders } from './delivery-reminders.js';
 import { useCopy } from './use-copy.js';
 
 // The cards and their wording come from the capability guide, built from this application's own dependencies, so
@@ -64,6 +65,7 @@ export default function HomePage(): ReactElement {
   return (
     <PageContainer className='mx-auto max-w-6xl'>
       <AgentIntro />
+      <DeliveryReminders />
       <section
         aria-labelledby='home-capabilities'
         className='flex flex-col gap-4'

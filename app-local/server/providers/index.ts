@@ -23,6 +23,7 @@ import NotificationManagementProvider from './notification-management.js';
 import OrdersProvider from './orders.js';
 import PurchaseRequestsProvider from './purchase-requests.js';
 import QuotationsProvider from './quotations.js';
+import FinanceRequestsProvider from './finance-requests.js';
 import OrderLedgerProvider from './order-ledger.js';
 import OrderReviewsProvider from './order-reviews.js';
 import PartnersProvider from './partners.js';
@@ -76,6 +77,8 @@ const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
   PurchaseRequestsProvider,
   // R-022 复刻波 1：报价单读写服务；转单复用 OrdersProvider 的建单服务。顺序无关。
   QuotationsProvider,
+  // R-066：请款单读写服务；submit 建审批单，终态回写挂在 lifecycle 回调上。
+  FinanceRequestsProvider,
   // R-072：业务字典的读服务与写服务；assertActiveCodes 供各单据片共用。无调用方时也可解析。
   BizDictProvider,
   // R-064：订单评审的读写服务与总台账的只读投影；无调用方时也能被容器解析。

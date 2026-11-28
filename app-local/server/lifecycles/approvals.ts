@@ -60,8 +60,17 @@ export interface ApprovalServices {
     readonly version: number;
   }): Promise<boolean>;
   /**
-   * R-021 波 1 加片：审批终态回写业务单据。由宿主在转移事务里调用，
-   * 没有注入服务时跳过（测试工具与不含请购单的组合）。
+   * R-066：请款单终态回写；没有注入服务时跳过，重复终态由业务侧条件更新挡住。
+   */
+  syncFinanceRequest?(event: {
+    readonly approvalId: string;
+    readonly collectionName: string;
+    readonly dataKey: string;
+    readonly status: 'approved' | 'rejected';
+    readonly transactionHandle: unknown;
+  }): Promise<void>;
+  /**
+   * R-021 波 1 加片：请购单终态回写；没有注入服务时跳过。
    */
   syncPurchaseRequest?(event: {
     readonly approvalId: string;
@@ -124,6 +133,33 @@ const writeBackBusinessState = (
       return;
     }
     const sync = (services as Partial<ApprovalServices> | undefined)?.syncPurchaseRequest;
+    if (sync === undefined) return;
+    await sync({
+      approvalId: String(record.id),
+      collectionName: String(record.collectionName),
+      dataKey: String(record.dataKey),
+      status,
+      transactionHandle: tx.handle,
+    });
+  };
+
+/**
+ * R-066：请款单与报销单的终态回写，同样在转移事务里完成；只认 finance_request
+ * 工作流。重复终态由业务侧条件更新挡住。
+ */
+const writeBackFinanceRequest = (
+  approvalStatus: 'approved' | 'rejected' | 'returned',
+  status: 'approved' | 'rejected',
+): EnterStateHook<ApprovalTypes> =>
+  async ({ record, services, tx }) => {
+    if (record.status !== approvalStatus) return;
+    if (
+      record.workflowKey !== 'finance_request' ||
+      record.collectionName !== 'financeRequestDocs'
+    ) {
+      return;
+    }
+    const sync = (services as Partial<ApprovalServices> | undefined)?.syncFinanceRequest;
     if (sync === undefined) return;
     await sync({
       approvalId: String(record.id),
@@ -209,12 +245,21 @@ export const approvalsLifecycle: Lifecycle<ApprovalTypes> =
       withdraw: { from: 'submitted', to: 'draft' },
       abort: { from: ['draft', 'submitted', 'processing'], to: 'aborted' },
     },
-    // 两处应用回调：进入审批终态时把业务单据状态写回同一个事务，不改状态与转移表。
+    // 两处应用回调（R-021 请购单、R-066 请款单）：终态在转移事务里写回业务单据。
     onEnterState: {
-      approved: [writeBackBusinessState('approved', 'approved')],
-      rejected: [writeBackBusinessState('rejected', 'rejected')],
+      approved: [
+        writeBackBusinessState('approved', 'approved'),
+        writeBackFinanceRequest('approved', 'approved'),
+      ],
+      rejected: [
+        writeBackBusinessState('rejected', 'rejected'),
+        writeBackFinanceRequest('rejected', 'rejected'),
+      ],
       // 退回是可改后重提的驳回：业务单据同样进 rejected。
-      returned: [writeBackBusinessState('returned', 'rejected')],
+      returned: [
+        writeBackBusinessState('returned', 'rejected'),
+        writeBackFinanceRequest('returned', 'rejected'),
+      ],
     },
     // 触发器由定时 sweep 执行；只找在 submitted/processing 停留够久的单。
     triggers: {

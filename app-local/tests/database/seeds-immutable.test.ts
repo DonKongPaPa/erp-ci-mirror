@@ -30,6 +30,23 @@ const EXECUTED_SEED_HASHES: Readonly<Record<string, string>> = {
     'cceff5aba936d20bd9d6876ce417de8dea25538ad041ee3ce711140c998de0b3',
   '202611280010_seed_stocktaking_transfer_grants.ts':
     '4e6cca552126636f55e0081ed53df61ca205c787ee0b907727dbeab0ac0edcea',
+  '202611280017_seed_finance_request_grants.ts':
+    'b2536823bd829c4f22637cd26c6dc22bfa7565a9e2d67b98e19e8e56e3fcac90',
+  // R-066 页面片：请款 / 报销页面授权的新种子，随本片入库后同样不可改。
+  '202611280018_seed_finance_request_page_grants.ts':
+    'dd8f6ce2725876095f2fbc91ab5437df57b47a42c294556ec9a25a5ca5fd3722',
+  // R-064 页面片：页面授权新种子，随本片入库后同样不可改。
+  '202611280015_seed_order_review_page_grants.ts':
+    'ab582d4d561158f9db12c3e9891bfb72457be508167fdcc638a8d54605d530b2',
+  // R-021 波 2：请购单页面授权的新种子，随本片入库后同样不可改。
+  '202611280012_seed_purchase_request_page_grants.ts':
+    '987f44f94373a843987803963b5bde7c6369bf3907197eabda1c30bdb20458b4',
+  // R-020 波 2：盘点单与调拨单页面授权的新种子，随本片入库后同样不可改。
+  '202611280013_seed_stocktaking_transfer_page_grants.ts':
+    'db44d78af12c1cb62b86dea10c1131024b22d0f64db5858cc25bc193908eef4f',
+  // R-022 波 2：报价单页面授权的新种子，排在 015 之后；随本片入库后同样不可改。
+  '202611280016_seed_quotation_page_grants.ts':
+    'decc8433ac042d6fad58dae1bfeb3b769cf5c1990234d60f0b2451b0bf923d0a',
 };
 
 const RULE =

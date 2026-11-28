@@ -64,6 +64,19 @@ export const APPROVAL_WORKFLOWS: Readonly<Record<string, ApprovalWorkflow>> = {
     amountField: 'amount',
   },
   /**
+   * R-066：请款单与报销单共用一条工作流。单节点、无阈值；审批人由业务片解析后
+   * 放进提交快照的 `approvers`（R-017 的 context 选择器），不额外加级。
+   */
+  finance_request: {
+    key: 'finance_request',
+    nodes: [{
+      key: 'manager',
+      negotiation: 'all',
+      reviewers: [CONTEXT('approvers')],
+    }],
+    amountField: 'amount',
+  },
+  /**
    * R-021 波 1 加片：单节点、无阈值；审批人由业务片按部门编码解析后放进提交快照的
    * `approvers`（R-017 的 context 选择器），金额字段只供节点计划读取，不额外加级。
    */

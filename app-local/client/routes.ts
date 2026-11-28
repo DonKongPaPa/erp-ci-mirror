@@ -6,7 +6,11 @@ import notificationLogRoutes from './pages/settings/notification-log-routes.js';
 import { ITEMS_PAGE_ID } from './pages/items/page-id.js';
 import { BIZ_DICT_PAGE_ID } from './pages/biz-dict/page-id.js';
 import { PURCHASE_ORDERS_PAGE_ID } from './pages/purchase-orders/page-id.js';
+import { PURCHASE_REQUESTS_PAGE_ID } from './pages/purchase-requests/page-id.js';
+import { FINANCE_REQUESTS_PAGE_ID } from './pages/finance-requests/page-id.js';
 import { SALES_ORDERS_PAGE_ID } from './pages/sales-orders/page-id.js';
+import { QUOTATIONS_PAGE_ID } from './pages/quotations/page-id.js';
+import { ORDER_LEDGER_PAGE_ID } from './pages/order-ledger/page-id.js';
 import { PARTNERS_PAGE_ID } from './pages/partners/page-id.js';
 import { SHIFTS_PAGE_ID } from './pages/shifts/page-id.js';
 import {
@@ -15,20 +19,25 @@ import {
   STOCK_PAGE_ID,
 } from './pages/stock-docs/page-id.js';
 import { WAREHOUSES_PAGE_ID } from './pages/warehouses/page-id.js';
+import { STOCKTAKINGS_PAGE_ID } from './pages/stocktaking/page-id.js';
+import { TRANSFERS_PAGE_ID } from './pages/transfer/page-id.js';
 import {
   EXPENSES_PAGE_ID,
   INVOICE_RECEIPTS_PAGE_ID,
 } from './pages/finance/page-id.js';
 import {
   ArrowDownToLine,
+  ArrowLeftRight,
   ArrowUpFromLine,
   BookOpen,
   Boxes,
   Bot,
   ChartColumn,
   ClipboardCheck,
+  ClipboardList,
   Clock,
   Cpu,
+  FileText,
   Handshake,
   Home,
   IdCard,
@@ -337,6 +346,84 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
         ],
       },
       {
+        // R-020 波 2 盘点单：页面授权 `stocktakings` 给仓管与财务；建、改、暂存、作废按业务动作决定，
+        // 「结束盘点」单独按 stocktakings.finish 显隐。新建、详情、编辑是盖在列表上的子页。
+        auth: 'required',
+        authz: {
+          resource: { type: 'page', id: STOCKTAKINGS_PAGE_ID },
+          action: 'access',
+        },
+        breadcrumb: { title: 'navigation.stocktakings' },
+        componentLoader: () => import('./pages/stocktaking/index.js'),
+        name: 'stocktakings',
+        navigation: { title: 'navigation.stocktakings', icon: ClipboardList },
+        path: '/stocktakings',
+        children: [
+          {
+            componentLoader: () => import('./pages/stocktaking/new.js'),
+            name: 'stocktakingNew',
+            path: 'new',
+            breadcrumb: { title: 'stocktaking.newTitle' },
+            presentation: { kind: 'child-page' },
+          },
+          {
+            componentLoader: () => import('./pages/stocktaking/detail.js'),
+            name: 'stocktaking',
+            path: ':stocktakingId',
+            breadcrumb: { title: 'stocktaking.detailTitle' },
+            presentation: { kind: 'child-page' },
+            children: [
+              {
+                componentLoader: () => import('./pages/stocktaking/edit.js'),
+                name: 'stocktakingEdit',
+                path: 'edit',
+                breadcrumb: { title: 'stocktaking.editTitle' },
+                presentation: { kind: 'child-page' },
+              },
+            ],
+          },
+        ],
+      },
+      {
+        // R-020 波 2 调拨单：页面授权 `transfers` 给仓管；建、改、过账、作废按业务动作决定，
+        // 过账才改库存，详情里先确认再发请求。
+        auth: 'required',
+        authz: {
+          resource: { type: 'page', id: TRANSFERS_PAGE_ID },
+          action: 'access',
+        },
+        breadcrumb: { title: 'navigation.transfers' },
+        componentLoader: () => import('./pages/transfer/index.js'),
+        name: 'transfers',
+        navigation: { title: 'navigation.transfers', icon: ArrowLeftRight },
+        path: '/transfers',
+        children: [
+          {
+            componentLoader: () => import('./pages/transfer/new.js'),
+            name: 'transferNew',
+            path: 'new',
+            breadcrumb: { title: 'transfer.newTitle' },
+            presentation: { kind: 'child-page' },
+          },
+          {
+            componentLoader: () => import('./pages/transfer/detail.js'),
+            name: 'transfer',
+            path: ':transferId',
+            breadcrumb: { title: 'transfer.detailTitle' },
+            presentation: { kind: 'child-page' },
+            children: [
+              {
+                componentLoader: () => import('./pages/transfer/edit.js'),
+                name: 'transferEdit',
+                path: 'edit',
+                breadcrumb: { title: 'transfer.editTitle' },
+                presentation: { kind: 'child-page' },
+              },
+            ],
+          },
+        ],
+      },
+      {
         // R-019 物料：物料清单、计量单位、物料分类三个标签共用这一条路由（标签记在地址栏的 view 上）。
         // 页面授权 `items` 给销售、采购与 root；打开之后读、写再分 items 的 view / manage。
         auth: 'required',
@@ -461,6 +548,45 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
     ],
   },
   {
+    // R-021 波 2 请购单：一页，页面授权 `purchaseRequests` 给请购人（planning / staff）与采购；
+    // 打开之后读、写、提交、作废、转订单分别按业务资源的动作决定，没有动作就不画入口。
+    auth: 'required',
+    authz: {
+      resource: { type: 'page', id: PURCHASE_REQUESTS_PAGE_ID },
+      action: 'access',
+    },
+    breadcrumb: { title: 'navigation.purchaseRequests' },
+    componentLoader: () => import('./pages/purchase-requests/index.js'),
+    name: 'purchaseRequests',
+    navigation: { title: 'navigation.purchaseRequests', icon: FileText },
+    path: '/purchase-requests',
+    children: [
+      {
+        name: 'purchaseRequestNew',
+        path: 'new',
+        breadcrumb: { title: 'purchaseRequests.newTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/purchase-requests/new.js'),
+      },
+      {
+        name: 'purchaseRequest',
+        path: ':purchaseRequestId',
+        breadcrumb: { title: 'purchaseRequests.detailTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/purchase-requests/detail.js'),
+        children: [
+          {
+            name: 'purchaseRequestEdit',
+            path: 'edit',
+            breadcrumb: { title: 'purchaseRequests.editTitle' },
+            presentation: { kind: 'child-page' },
+            componentLoader: () => import('./pages/purchase-requests/edit.js'),
+          },
+        ],
+      },
+    ],
+  },
+  {
     // R-022 销售订单：一页，入口直接进页面（《基座ERP前端设计》1.1）。页面授权 `salesOrders` 只给销售与 root；
     // 打开之后读、写再分 `salesOrders` 资源的各动作。另一类订单的角色一个动作都没有，也进不了这一页。
     auth: 'required',
@@ -508,6 +634,59 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
     ],
   },
   {
+    // R-022 波 2 报价单：一页，页面授权 `quotations` 只给销售与 root；打开之后读、写、
+    // 确定、转单、作废分别按 `quotations` 业务资源的动作决定，没有动作就不画入口。
+    auth: 'required',
+    authz: {
+      resource: { type: 'page', id: QUOTATIONS_PAGE_ID },
+      action: 'access',
+    },
+    breadcrumb: { title: 'navigation.quotations' },
+    componentLoader: () => import('./pages/quotations/index.js'),
+    name: 'quotations',
+    navigation: { title: 'navigation.quotations', icon: FileText },
+    path: '/quotations',
+    children: [
+      {
+        name: 'quotationNew',
+        path: 'new',
+        breadcrumb: { title: 'quotations.newTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/quotations/new.js'),
+      },
+      {
+        name: 'quotation',
+        path: ':quotationId',
+        breadcrumb: { title: 'quotations.detailTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/quotations/detail/index.js'),
+        children: [
+          {
+            name: 'quotationEdit',
+            path: 'edit',
+            breadcrumb: { title: 'quotations.editTitle' },
+            presentation: { kind: 'child-page' },
+            componentLoader: () => import('./pages/quotations/edit.js'),
+          },
+        ],
+      },
+    ],
+  },
+  {
+    // R-064 订单总台账：计划与销售的只读入口。页面授权 `orderLedger` 只管能不能打开这一页，
+    // 读数据再要 salesOrders.ledgerView；六段与超期都来自窄端点，端点没有价格与联系方式。
+    auth: 'required',
+    authz: {
+      resource: { type: 'page', id: ORDER_LEDGER_PAGE_ID },
+      action: 'access',
+    },
+    breadcrumb: { title: 'navigation.orderLedger' },
+    componentLoader: () => import('./pages/order-ledger/index.js'),
+    name: 'orderLedger',
+    navigation: { title: 'navigation.orderLedger', icon: ReceiptText },
+    path: '/order-ledger',
+  },
+  {
     // R-072 业务字典：九个类型一页，标签记在地址栏的 type 上。页面授权 `bizDict` 只给 root
     // （维护入口）；采购、销售、仓管持 bizDict.view 在单据里用下拉选值，默认不进这一页。
     auth: 'required',
@@ -532,6 +711,45 @@ const appRoutes: AppClientRouteContribution = defineAppRoutes([
         name: 'bizDictEdit',
         path: ':entryId/edit',
         presentation: { kind: 'dialog', title: 'bizDict.form.editTitle' },
+      },
+    ],
+  },
+  {
+    // R-066 请款单与报销单：一张表用 docType 分型，一页承载两种单。页面授权 `financeRequests`
+    // 给 staff 与 finance；打开之后读、写、提交、作废、转支出分别按业务资源的动作决定。
+    auth: 'required',
+    authz: {
+      resource: { type: 'page', id: FINANCE_REQUESTS_PAGE_ID },
+      action: 'access',
+    },
+    breadcrumb: { title: 'navigation.financeRequests' },
+    componentLoader: () => import('./pages/finance-requests/index.js'),
+    name: 'financeRequests',
+    navigation: { title: 'navigation.financeRequests', icon: FileText },
+    path: '/finance-requests',
+    children: [
+      {
+        name: 'financeRequestNew',
+        path: 'new',
+        breadcrumb: { title: 'financeRequestDocs.newTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/finance-requests/new.js'),
+      },
+      {
+        name: 'financeRequest',
+        path: ':financeRequestId',
+        breadcrumb: { title: 'financeRequestDocs.detailTitle' },
+        presentation: { kind: 'child-page' },
+        componentLoader: () => import('./pages/finance-requests/detail.js'),
+        children: [
+          {
+            name: 'financeRequestEdit',
+            path: 'edit',
+            breadcrumb: { title: 'financeRequestDocs.editTitle' },
+            presentation: { kind: 'child-page' },
+            componentLoader: () => import('./pages/finance-requests/edit.js'),
+          },
+        ],
       },
     ],
   },

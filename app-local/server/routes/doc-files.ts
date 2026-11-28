@@ -47,6 +47,8 @@ const WRITE_CHECKS: readonly Check[] = [
   { resource: 'suppliers', actions: ['create', 'update'] },
   { resource: 'expenses', actions: ['create', 'update', 'confirm', 'void'] },
   { resource: 'invoiceReceipts', actions: ['create', 'update', 'confirm', 'void'] },
+  // R-066：请款单上传先过建/改动作。
+  { resource: 'financeRequests', actions: ['create', 'update'] },
 ];
 // 往来单位附件随它自己的片来做，读取要按侧裁（客户/供应商不能互相放行）。
 const READ_CHECKS: Readonly<Record<string, readonly Check[]>> = {
@@ -56,6 +58,9 @@ const READ_CHECKS: Readonly<Record<string, readonly Check[]>> = {
   stock_doc: [{ resource: 'inventory', actions: ['stockView'] }],
   expense: [{ resource: 'expenses', actions: ['view'] }],
   invoice_receipt: [{ resource: 'invoiceReceipts', actions: ['view'] }],
+  // R-066：按 docType 分型取附件内容，先过 view 或 convert。
+  payment_request: [{ resource: 'financeRequests', actions: ['view', 'convert'] }],
+  expense_claim: [{ resource: 'financeRequests', actions: ['view', 'convert'] }],
 };
 
 async function may(context: DocContext, checks: readonly Check[]): Promise<boolean> {

@@ -147,7 +147,8 @@ test('盘点正向：快照不冻结库存，财务监盘结束后盘盈盘亏�
   }
   for (const key of FORBIDDEN_KEYS) expect(Object.keys(body)).not.toContain(key);
   expect(Object.keys(body.warehouse as Row).sort()).toEqual(['id', 'name']);
-  expect(Object.keys(body.handler as Row).sort()).toEqual(['name', 'userId']);
+  // 仓管默认没有员工档案：缺省经办人为空，不再写一个后面过不了校验的标识。
+  expect(body.handler, '非员工建单的经办人应为空').toBeNull();
 
   const patched = await keeper.session.fetch(`/stocktakings/${id}`, write({
     lines: [{ itemId: itemA, actualQty: 12 }, { itemId: itemB, actualQty: 8 }],
@@ -344,4 +345,88 @@ test('两个事务同时结束同一张盘点单：只有一个成功，库存�
   expect((failure as StocktakingRuleError).code).toBe('stocktaking-not-staging');
   expect(await balanceOf(connection, itemId, warehouseId)).toBe(12);
   expect(await docsOf(connection, 'stocktakingId', id)).toHaveLength(1);
+}, 60_000);
+
+test('经办人缺省：root 建盘点单留空，盘盈盘亏单经办人随源单为空且过账不受影响', async ({
+  testApp, connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const warehouseId = await createWarehouse(admin);
+  const itemA = await createItem(connection);
+  const itemB = await createItem(connection);
+  await stockIn(admin, itemA, warehouseId, 10);
+  await stockIn(admin, itemB, warehouseId, 10);
+
+  // root 没有员工档案：缺省经办人留空，之后带空标识编辑照旧能存。
+  const created = await admin.fetch('/stocktakings', write({
+    warehouseId, remark: 'root 盘点',
+    lines: [{ itemId: itemA }, { itemId: itemB }],
+  }));
+  expect(created.status, `root 建盘点单失败：${await created.clone().text()}`).toBe(201);
+  const body = await jsonOf(created);
+  const id = String(body.id);
+  expect(body.handler, 'root 建单的经办人应为空').toBeNull();
+  expect(
+    (await connection.repository<Row>('stocktakingDocs').findOne({ filter: { id } }))?.handlerUserId,
+    '库里的经办人列也应为空',
+  ).toBeNull();
+  const patched = await admin.fetch(`/stocktakings/${id}`, write({
+    remark: 'root 暂存', handlerUserId: null,
+    lines: [{ itemId: itemA, actualQty: 12 }, { itemId: itemB, actualQty: 8 }],
+  }, 'PATCH'));
+  expect(patched.status, `root 暂存失败：${await patched.clone().text()}`).toBe(200);
+  expect((await jsonOf(patched)).handler, '暂存后经办人仍为空').toBeNull();
+
+  // 在职员工不传经办人取本人；显式离职员工照旧 422。
+  const keeper = await makeRoleUser(admin, testApp, 'stkdefault', ['warehouse']);
+  await createEmployee(connection, keeper.id);
+  const staffCreated = await keeper.session.fetch('/stocktakings', write({
+    warehouseId, lines: [{ itemId: itemA }],
+  }));
+  expect(staffCreated.status, `在职员工建单失败：${await staffCreated.clone().text()}`).toBe(201);
+  const staffBody = await jsonOf(staffCreated);
+  expect(staffBody.handler).toMatchObject({ userId: keeper.id });
+  expect(Object.keys(staffBody.handler as Row).sort()).toEqual(['name', 'userId']);
+  const leftId = unique('LEFT');
+  await createEmployee(connection, leftId, 'left');
+  const rejected = await admin.fetch('/stocktakings', write({
+    warehouseId, handlerUserId: leftId, lines: [{ itemId: itemA }],
+  }));
+  expect(rejected.status, `显式离职员工应当被拒：${await rejected.clone().text()}`).toBe(422);
+  expect((await jsonOf(rejected)).error?.reason).toBe('STOCK_PERSON_INVALID');
+
+  // 财务监盘只是取一个在职监盘人；结束盘点仍由 root 做，生成单据的经办人随源单为空。
+  const finance = await makeRoleUser(admin, testApp, 'stksupervisor', ['finance']);
+  await createEmployee(connection, finance.id);
+  const finished = await admin.fetch(`/stocktakings/${id}/finish`, write({
+    supervisorUserId: finance.id,
+  }));
+  expect(finished.status, `结束盘点失败：${await finished.clone().text()}`).toBe(200);
+  const result = await jsonOf(finished);
+  expect(result.profitDocId).toEqual(expect.any(String));
+  expect(result.lossDocId).toEqual(expect.any(String));
+  const docs = await docsOf(connection, 'stocktakingId', id);
+  expect(docs).toHaveLength(2);
+  for (const doc of docs) {
+    expect(doc, '生成单据经办人应随源单为空').toMatchObject({ status: 'posted', handlerUserId: null });
+    const read = await admin.fetch(`/stock-docs/${String(doc.id)}`, get());
+    expect(read.status, `读生成单据失败：${await read.clone().text()}`).toBe(200);
+    expect((await jsonOf(read)).handler).toBeNull();
+  }
+  expect(await balanceOf(connection, itemA, warehouseId)).toBe(12);
+  expect(await balanceOf(connection, itemB, warehouseId)).toBe(8);
+
+  // 反向对照：源单经办人是在职员工时，生成单据跟着带这个人，不丢源单信息。
+  const staffDoc = await keeper.session.fetch('/stocktakings', write({
+    warehouseId, lines: [{ itemId: itemA, actualQty: 13 }],
+  }));
+  expect(staffDoc.status, `员工建盘点单失败：${await staffDoc.clone().text()}`).toBe(201);
+  const staffId = String((await jsonOf(staffDoc)).id);
+  const staffFinish = await admin.fetch(`/stocktakings/${staffId}/finish`, write({
+    supervisorUserId: finance.id,
+  }));
+  expect(staffFinish.status, `结束员工盘点单失败：${await staffFinish.clone().text()}`).toBe(200);
+  const staffDocs = await docsOf(connection, 'stocktakingId', staffId);
+  expect(staffDocs).toHaveLength(1);
+  expect(staffDocs[0]).toMatchObject({ docType: 'in', status: 'posted', handlerUserId: keeper.id });
 }, 60_000);

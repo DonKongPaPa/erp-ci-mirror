@@ -48,8 +48,8 @@ test('没有任何写动作的会话上传得 403，而且坏请求体不会先�
       { resource: { type: 'composite', id: 'purchaseOrders' }, actions: [{ action: 'view' }] },
     ],
   );
-  // R-021 波 1 加片给 staff 补了请购单建/改，也就补了附件上传入口；这里撤掉基线
-  // staff，才是真正「没有任何写动作」的会话。
+  // R-021 请购单与 R-066 请款单都给 staff 补了建/改，也就补了附件上传入口；
+  // 撤掉基线 staff，才是真正「没有任何写动作」的会话。
   await app.container.resolve(authorizationToken).permissionSets.revoke(`user:${id}:staff`);
   for (const init of [
     { method: 'POST', headers: { origin: 'http://localhost' }, body: 'not multipart' },

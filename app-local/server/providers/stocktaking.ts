@@ -241,6 +241,13 @@ async function requirePerson(knex: Knex, userId: string): Promise<void> {
   if (row === undefined || row.status !== 'active') return fail('person-invalid', userId);
 }
 
+/** 缺省经办人：登录人是在职员工才填，否则留空，不写一个后面过不了校验的值。 */
+async function isActivePerson(knex: Knex, userId: string): Promise<boolean> {
+  const row = await knex<{ user_id: string; status: string }>('employees')
+    .select('user_id').where({ user_id: userId, status: 'active' }).first();
+  return row !== undefined;
+}
+
 async function requireItems(knex: Knex, ids: readonly string[]): Promise<void> {
   const unique = [...new Set(ids)];
   if (unique.length === 0) return;
@@ -434,8 +441,12 @@ export class DatabaseStocktakingMutations implements StocktakingMutations {
       const knex = await this.knex(tx);
       await requireWarehouse(knex, input.warehouseId);
       await requireItems(knex, (input.lines ?? []).map((line) => line.itemId));
+      let handlerUserId: string | null = null;
       if (input.handlerUserId !== undefined && input.handlerUserId !== null) {
         await requirePerson(knex, input.handlerUserId);
+        handlerUserId = input.handlerUserId;
+      } else if (input.handlerUserId === undefined && await isActivePerson(knex, byUserId)) {
+        handlerUserId = byUserId;
       }
       const now = new Date();
       const docNo = await this.codes.nextCode(tx, 'PD');
@@ -445,7 +456,7 @@ export class DatabaseStocktakingMutations implements StocktakingMutations {
         doc_no: docNo,
         doc_date: input.docDate ?? today(),
         warehouse_id: input.warehouseId,
-        handler_user_id: input.handlerUserId ?? byUserId,
+        handler_user_id: handlerUserId,
         supervisor_user_id: null,
         status: 'staging',
         remark: input.remark ?? '',
@@ -532,12 +543,13 @@ export class DatabaseStocktakingMutations implements StocktakingMutations {
       const docDate = dayString(header.doc_date);
       const profit = results.filter((line) => line.result === 'profit');
       const loss = results.filter((line) => line.result === 'loss');
-      const profitDocId = await this.generateDoc('in', 'other_in', profit, {
+      // 生成单据的经办人随源盘点单；源单为空时传 null，不回落到操作人。
+      const link = {
         docDate, warehouseId: header.warehouse_id, stocktakingId: id,
-      }, byUserId, tx);
-      const lossDocId = await this.generateDoc('out', 'other_out', loss, {
-        docDate, warehouseId: header.warehouse_id, stocktakingId: id,
-      }, byUserId, tx);
+        handlerUserId: header.handler_user_id,
+      };
+      const profitDocId = await this.generateDoc('in', 'other_in', profit, link, byUserId, tx);
+      const lossDocId = await this.generateDoc('out', 'other_out', loss, link, byUserId, tx);
       await knex('stocktaking_docs').where({ id }).update({
         supervisor_user_id: supervisorUserId,
         status: 'finished',
@@ -567,7 +579,12 @@ export class DatabaseStocktakingMutations implements StocktakingMutations {
     docType: 'in' | 'out',
     reason: 'other_in' | 'other_out',
     lines: readonly { readonly itemId: string; readonly delta: number }[],
-    link: { docDate: string; warehouseId: string; stocktakingId: string },
+    link: {
+      readonly docDate: string;
+      readonly warehouseId: string;
+      readonly stocktakingId: string;
+      readonly handlerUserId: string | null;
+    },
     byUserId: string,
     tx: DatabaseConnection,
   ): Promise<string | null> {
@@ -579,6 +596,7 @@ export class DatabaseStocktakingMutations implements StocktakingMutations {
         reason,
         docDate: link.docDate,
         stocktakingId: link.stocktakingId,
+        handlerUserId: link.handlerUserId,
         lines: lines.map((line) => ({
           itemId: line.itemId,
           warehouseId: link.warehouseId,

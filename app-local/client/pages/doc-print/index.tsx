@@ -1,4 +1,5 @@
 import { useApiClient } from '@nocobase/app-client';
+import { useAuthentication } from '@nocobase/app-plugin-authentication/client';
 import { useCan } from '@nocobase/app-plugin-authorization/client';
 import { useTranslation } from '@nocobase/i18n/client';
 import { useEffect, useState, type ReactElement } from 'react';
@@ -6,6 +7,7 @@ import { useParams } from 'react-router';
 
 import { Button } from '#components/ui/button';
 import { DOC_PRINT_PATHS, type DocPrintPath } from './model.js';
+import { rememberPrintTrace } from './trace.js';
 import './print.css';
 
 /**
@@ -41,9 +43,23 @@ interface PrintData {
     remark: string;
   };
   lines: PrintLine[];
-  totals: { totalQty: number | null };
+  /**
+   * 金额只随 `printPrice` 回来；没有这个动作时这些键不出现，三联上画「—」。
+   */
+  totals: {
+    totalQty: number | null;
+    payableTotal?: number | null;
+    taxIncludedTotal?: number | null;
+    taxExcludedTotal?: number | null;
+    taxTotal?: number | null;
+    discountAmount?: number | null;
+  };
+  amountInWords?: string;
   printCount: number;
 }
+
+/** 没有金额可印时用破折号，不让三联上出现空行或 `null`。 */
+const DASH = '—';
 
 type State =
   | { readonly kind: 'loading' }
@@ -54,6 +70,7 @@ export default function DocPrintViewPage(): ReactElement {
   const { docType = '', docNo = '' } = useParams();
   const { t } = useTranslation();
   const api = useApiClient();
+  const { session } = useAuthentication();
   const config = DOC_PRINT_PATHS[docType as DocPrintPath];
   const print = useCan(
     config === undefined
@@ -84,13 +101,32 @@ export default function DocPrintViewPage(): ReactElement {
   }, [api, path, config, print.isPending, print.can]);
   const viewState: State = state.path === path ? state.value : { kind: 'loading' };
 
-  /** 痕迹记在「点打印」这一次；先写成功再打开原生打印对话框。 */
+  /** 痕迹记在「点打印」这一次；回执先写进本地状态，计数当场加一，再打开打印对话框。 */
   const markAndPrint = async (): Promise<void> => {
     setMarking(true);
     try {
-      await api.request({
+      const marked = await api.request<{
+        readonly printCount: number;
+        readonly lastPrintedAt: string;
+        readonly lastPrintedBy: string;
+      }>({
         path: `${path}/print-mark`,
         method: 'POST',
+      });
+      if (viewState.kind === 'ready') {
+        setState({
+          path,
+          value: {
+            kind: 'ready',
+            data: { ...viewState.data, printCount: marked.printCount },
+          },
+        });
+      }
+      rememberPrintTrace(viewState.kind === 'ready' ? viewState.data.docNo : docNo, {
+        printCount: marked.printCount,
+        lastPrintedAt: marked.lastPrintedAt,
+        lastPrintedBy: marked.lastPrintedBy,
+        lastPrintedByName: session?.user.name ?? '',
       });
       window.print?.();
     } finally {
@@ -192,11 +228,15 @@ export default function DocPrintViewPage(): ReactElement {
               ))}
             </tbody>
           </table>
-          {internal ? null : (
-            <p data-testid={`doc-print-totals-${copy}`}>
-              {t('docPrint.totalQty')}: {data.totals.totalQty ?? ''}
-            </p>
-          )}
+          <p data-testid={`doc-print-totals-${copy}`}>
+            {t('docPrint.totalQty')}: {data.totals.totalQty ?? DASH}
+          </p>
+          <p data-testid={`doc-print-amount-${copy}`}>
+            {t('docPrint.payableTotal')}: {data.totals.payableTotal ?? DASH}
+          </p>
+          <p data-testid={`doc-print-amount-words-${copy}`}>
+            {t('docPrint.amountInWords')}: {data.amountInWords ?? DASH}
+          </p>
           <p className='doc-print-signoff'>{t('docPrint.signoff')}</p>
         </section>
       ))}

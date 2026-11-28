@@ -66,6 +66,11 @@ import {
   purchaseRequests as purchaseRequestsResource,
 } from '../purchase-request-resources.js';
 import { PURCHASE_REQUEST_RECORD_ACCESS } from '../purchase-request-record-access.js';
+import {
+  FINANCE_REQUEST_COLLECTIONS,
+  financeRequests as financeRequestsResource,
+} from '../finance-request-resources.js';
+import { FINANCE_REQUEST_RECORD_ACCESS } from '../finance-request-record-access.js';
 import { departmentServiceToken } from './departments.js';
 
 /**
@@ -111,6 +116,7 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
       ...FINANCE_COLLECTIONS,
       ...BIZ_DICT_COLLECTIONS,
       ...ORDER_REVIEW_COLLECTIONS,
+      ...FINANCE_REQUEST_COLLECTIONS,
       ...STOCKTAKING_COLLECTIONS,
       ...TRANSFER_COLLECTIONS,
       ...PURCHASE_REQUEST_COLLECTIONS,
@@ -151,6 +157,8 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
     authz.compositeResources.define(transfersResource);
     // R-021 波 1 加片：请购单资源只声明、不 ui.place；staff 通过「仅本人」范围键收窄。
     authz.compositeResources.define(purchaseRequestsResource);
+    // R-066：请款单资源只声明、不 ui.place；staff 通过「仅本人」范围键收窄。
+    authz.compositeResources.define(financeRequestsResource);
     // R-076：三类打印单据各两个动作（print / printPrice）；表沿用 inventory 已登记的
     // stockDocs / stockDocLines，不重复登记，也不做页面目录（打印视图按 docType 自检动作）。
     for (const resource of DOC_PRINT_RESOURCES) authz.compositeResources.define(resource);
@@ -164,6 +172,9 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
       authz.recordAccess.define(access);
     }
     for (const access of PURCHASE_REQUEST_RECORD_ACCESS) {
+      authz.recordAccess.define(access);
+    }
+    for (const access of FINANCE_REQUEST_RECORD_ACCESS) {
       authz.recordAccess.define(access);
     }
     authz.ui.sections.add({

@@ -142,7 +142,14 @@ test('拒绝路径：订单状态、供应商混用、金额、草稿状态、�
   const reject = async (body: Row, reason: string): Promise<void> => {
     const response = await finance.fetch('/expenses', write(body));
     expect(response.status, `${reason}: ${await response.clone().text()}`).toBe(422);
-    expect((await jsonOf(response)).error?.reason).toBe(reason);
+    const failure = await jsonOf(response);
+    expect(failure.error?.reason).toBe(reason);
+    // R-065：规则码要有服务端语言包句子，不能把英文原码端给页面。
+    const localized = failure.error?.localizedMessage as
+      | { locale?: unknown; message?: unknown }
+      | undefined;
+    expect(typeof localized?.message).toBe('string');
+    expect(String(localized?.message)).not.toContain(reason);
   };
   const base = { expenseDate: '2026-11-28', bindMode: 'purchase_order' };
   await reject({ ...base, lines: [{ purchaseOrderId: draft.id, amount: 1 }] }, 'FINANCE_ORDER_NOT_PAYABLE');
@@ -254,4 +261,40 @@ test('风险反向：两个真事务同时登记同一订单，paidAmount 等于
   expect(failure, '并发登记不能失败').toBeNull();
   const detail = await jsonOf(await admin.fetch(`/purchase-orders/${String(order.id)}`, get()));
   expect(detail.paidAmount).toBe(50);
+}, TIMEOUT);
+
+/**
+ * R-065 缺陷复验：页面的 supplierOptions() 原样发 `?q=&pageSize=100`，
+ * 空串 q 必须等价于不传；到票持 invoiceReceipts.view 也能调同一个端点。
+ */
+test('供应商选项：页面原样查询串、省略 q 与非空 q 都返回在用的供应商', async ({ testApp }) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const finance = await createFinanceUser(admin, testApp);
+  const supplier = await createPartner(admin, { isSupplier: true });
+  const { session: receiptReader } = await makeRoleUser(admin, testApp, 'r065opt', [
+    { resource: { type: 'composite', id: 'invoiceReceipts' }, actions: [{ action: 'view' }] },
+  ]);
+  const term = encodeURIComponent(String(supplier.name));
+
+  const check = async (session: TestSession, path: string, label: string): Promise<void> => {
+    const response = await session.fetch(path, get());
+    expect(response.status, `${label}：${await response.clone().text()}`).toBe(200);
+    const body = await jsonOf(response);
+    expect(body.items?.length, `${label} 应当至少有一家在用供应商`).toBeGreaterThan(0);
+    expect(body.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: supplier.id, code: supplier.code, name: supplier.name }),
+    ]));
+    // 接口契约只回 id、code、name 与收款三列，不外泄联系人、电话、邮箱。
+    expect(Object.keys(body.items![0] as Row).sort()).toEqual([
+      'code', 'id', 'name', 'payeeAccountNo', 'payeeBankCode', 'payeeBankName',
+    ]);
+  };
+
+  for (const [session, label] of [
+    [finance, '财务会话'], [admin, 'root'], [receiptReader, '仅持到票 view'],
+  ] as const) {
+    await check(session, '/expenses/supplier-options?q=&pageSize=100', `${label}：页面原样空串 q`);
+    await check(session, '/expenses/supplier-options?pageSize=100', `${label}：省略 q`);
+    await check(session, `/expenses/supplier-options?q=${term}&pageSize=100`, `${label}：非空 q`);
+  }
 }, TIMEOUT);

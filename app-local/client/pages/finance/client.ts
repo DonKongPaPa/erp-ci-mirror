@@ -205,10 +205,13 @@ export class FinanceClient {
     });
   }
 
-  /** 到票页沿用支出页的供应商选项端点；持任一财务读动作即可。 */
+  /**
+   * 到票页沿用支出页的供应商选项端点；持任一财务读动作即可。
+   * 端点 pageSize 上限 100（R-065），下拉一次取满，避免只列出前 20 家。
+   */
   supplierOptions(q = ''): Promise<EntityPage<SupplierOption>> {
     return this.api.request<EntityPage<SupplierOption>>({
-      path: `expenses/supplier-options?q=${encodeURIComponent(q)}`,
+      path: `expenses/supplier-options?q=${encodeURIComponent(q)}&pageSize=100`,
     });
   }
 }

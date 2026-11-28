@@ -22,6 +22,11 @@ import {
   type ApiErrorStatus,
   type AppApiRouteContribution,
 } from '@nocobase/app-server/router';
+import {
+  getRequestLocale,
+  getRequestTranslator,
+  type Translator,
+} from '@nocobase/i18n/server';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 
@@ -68,7 +73,10 @@ const RULE_REASON: Readonly<Record<FinanceRuleCode, string>> = {
   'partner-invalid': 'FINANCE_PARTNER_INVALID',
 };
 
-function apiError(error: unknown): never {
+const camelOf = (code: FinanceRuleCode): string =>
+  code.replace(/-([a-z])/gu, (_, letter: string) => letter.toUpperCase());
+
+function apiError(error: unknown, translate: Translator, locale: string): never {
   if (error instanceof DocFileRuleError) {
     const status = error.code === 'file-not-found'
       ? 'NOT_FOUND'
@@ -92,6 +100,12 @@ function apiError(error: unknown): never {
   throw new ApiError({
     status: rule.status, reason: RULE_REASON[error.code], domain: 'finance',
     message: error.message,
+    localizedMessage: {
+      locale,
+      message: translate(`finance.errors.${camelOf(error.code)}`, {
+        defaultValue: error.message,
+      }),
+    },
     ...(rule.httpStatus === undefined ? {} : { httpStatus: rule.httpStatus }),
     cause: error,
   });
@@ -127,11 +141,18 @@ function actorOf(context: FinanceContext): string {
   return String(session.user.id);
 }
 
-const withErrors = async <T>(work: () => Promise<T>): Promise<T> => {
+const withErrors = async <T>(
+  context: FinanceContext,
+  work: () => Promise<T>,
+): Promise<T> => {
   try {
     return await work();
   } catch (error) {
-    return apiError(error);
+    return apiError(
+      error,
+      getRequestTranslator(context),
+      getRequestLocale(context) ?? 'zh-CN',
+    );
   }
 };
 
@@ -226,6 +247,28 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes((
     },
   ];
 
+  // 静态路径必须先登记：否则 /expenses/:id 会把 supplier-options 当成单据编号吞掉。
+  router.get(
+    '/expenses/supplier-options',
+    describeRoute({
+      tags: ['Finance'], summary: 'List active suppliers for finance',
+      operationId: 'listFinanceSupplierOptions',
+      responses: {
+        '200': objectResponse(SupplierOptionsSchema, 'One page of suppliers'),
+        '401': apiErrorResponse(401), '403': apiErrorResponse(403), '500': apiErrorResponse(500),
+      },
+    }),
+    apiValidator('query', SupplierOptionsQuery),
+    async (context) => {
+      if (!(await may(context, 'expenses', 'view'))) {
+        await authorize(context, 'invoiceReceipts', 'view');
+      }
+      const query = context.req.valid('query') as Query;
+      const result = await reader.supplierOptions(query);
+      return context.json({ ...result, page: query.page, pageSize: query.pageSize });
+    },
+  );
+
   for (const config of kinds) {
     router.get(
       config.base,
@@ -266,7 +309,11 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes((
         await authorize(context, config.resource, 'view');
         const row = await reader.detail(config.kind, context.req.param('id'));
         if (row === undefined) {
-          return apiError(new FinanceRuleError('finance-not-found'));
+          return apiError(
+            new FinanceRuleError('finance-not-found'),
+            getRequestTranslator(context),
+            getRequestLocale(context) ?? 'zh-CN',
+          );
         }
         return context.json(row);
       },
@@ -288,7 +335,7 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes((
       async (context) => {
         await authorize(context, config.resource, 'create');
         const body = context.req.valid('json') as Body;
-        const row = await withErrors(() => mutations.create(
+        const row = await withErrors(context, () => mutations.create(
           config.kind, createInput(config.kind, body), actorOf(context),
         ));
         return context.json(row, 201);
@@ -311,7 +358,7 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes((
       async (context) => {
         await authorize(context, config.resource, 'update');
         const body = context.req.valid('json') as Body;
-        const row = await withErrors(() => mutations.update(
+        const row = await withErrors(context, () => mutations.update(
           config.kind, context.req.param('id'), updateInput(config.kind, body), actorOf(context),
         ));
         return context.json(row);
@@ -335,7 +382,7 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes((
         }),
         async (context) => {
           await authorize(context, config.resource, action);
-          const row = await withErrors(() => mutations[action](
+          const row = await withErrors(context, () => mutations[action](
             config.kind, context.req.param('id'), actorOf(context),
           ));
           return context.json(row);
@@ -362,27 +409,6 @@ export const apiRoutes: AppApiRouteContribution<Application> = defineApiRoutes((
       }
       const query = context.req.valid('query') as Query;
       const result = await reader.payable(query);
-      return context.json({ ...result, page: query.page, pageSize: query.pageSize });
-    },
-  );
-
-  router.get(
-    '/expenses/supplier-options',
-    describeRoute({
-      tags: ['Finance'], summary: 'List active suppliers for finance',
-      operationId: 'listFinanceSupplierOptions',
-      responses: {
-        '200': objectResponse(SupplierOptionsSchema, 'One page of suppliers'),
-        '401': apiErrorResponse(401), '403': apiErrorResponse(403), '500': apiErrorResponse(500),
-      },
-    }),
-    apiValidator('query', SupplierOptionsQuery),
-    async (context) => {
-      if (!(await may(context, 'expenses', 'view'))) {
-        await authorize(context, 'invoiceReceipts', 'view');
-      }
-      const query = context.req.valid('query') as Query;
-      const result = await reader.supplierOptions(query);
       return context.json({ ...result, page: query.page, pageSize: query.pageSize });
     },
   );

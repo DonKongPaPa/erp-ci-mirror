@@ -306,6 +306,34 @@ const zhCN: AppServerResource = {
       approvalFailed: '建审批单失败：{{reason}}。',
     },
   },
+  financeRequest: {
+    errors: {
+      notFound: '这张请款单不存在。',
+      notEditable: '只有草稿或被驳回的请款单可以修改。',
+      amountInvalid: '金额必须大于 0，且最多两位小数。',
+      personInvalid: '经办人不是在职员工：{{reason}}。',
+      dictCodeInvalid: '类型或项目的码不在字典里，或已经停用：{{reason}}。',
+      notApproved: '只有审批通过的请款单才能转支出记录。',
+      converted: '这张请款单已经转过支出记录。',
+      approvalFailed: '建审批单失败：{{reason}}。',
+    },
+  },
+
+
+  // R-065：财务单据规则码文案。端点把这句话放进 localizedMessage，页面显示它而不是英文原码。
+  finance: {
+    errors: {
+      financeNotFound: '这张支出或到票记录不存在。',
+      notDraft: '只有草稿状态的记录可以修改或登记。',
+      voided: '这张记录已经作废，不能再登记。',
+      lineInvalid: '明细不合法：至少一行、金额要大于零且最多两位小数。',
+      orderNotPayable: '选中的采购订单不存在，或者是草稿、已取消。',
+      supplierMixed: '同一张记录只能选同一家供应商的采购订单。',
+      dictCodeInvalid: '支出类型、资金账户、发票类型或项目的码不在字典里，或已经停用。',
+      personInvalid: '经办人不是在职员工，请重新选一个人。',
+      partnerInvalid: '选中的订单所用供应商已停用或不可用，请换一张订单。',
+    },
+  },
 
 };
 

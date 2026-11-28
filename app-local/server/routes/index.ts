@@ -15,6 +15,7 @@ import { apiRoutes as shiftRoutes } from './shifts.js';
 import { apiRoutes as inventoryRoutes } from './inventory.js';
 import { apiRoutes as purchaseOrderRoutes } from './purchase-orders.js';
 import { apiRoutes as purchaseRequestRoutes } from './purchase-requests.js';
+import { apiRoutes as financeRequestRoutes } from './finance-requests.js';
 import { apiRoutes as orderReviewRoutes } from './order-reviews.js';
 import { apiRoutes as salesOrderRoutes } from './sales-orders.js';
 import { apiRoutes as quotationRoutes } from './quotations.js';
@@ -44,6 +45,8 @@ const routes: readonly AppRouteContribution<Application>[] = [
   purchaseOrderRoutes,
   // R-021 波 1 加片：请购单自己的路由，静态段在 /purchase-requests/:id 之前由 Hono 区分。
   purchaseRequestRoutes,
+  // R-066：请款单与报销单自己的路由，静态段在 /finance-requests/:id 之前由 Hono 区分。
+  financeRequestRoutes,
   // R-064：/sales-orders/ledger 必须先于 /sales-orders/:id 注册，否则会被当成订单 id。
   orderReviewRoutes,
   salesOrderRoutes,

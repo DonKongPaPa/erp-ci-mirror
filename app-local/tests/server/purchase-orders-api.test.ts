@@ -410,3 +410,61 @@ test('风险反向：只持 view 的会话读列表与详情都没有价格键�
     for (const key of linePriceKeys) expect(Object.keys(line)).toContain(key);
   }
 }, TIMEOUT);
+
+test('经办人缺省：非员工建单留空且能改草稿；在职员工取登录人；显式离职员工仍被拒', async ({
+  testApp, connection,
+}) => {
+  const admin = await signIn(testApp, DEFAULT_ADMIN_CREDENTIALS);
+  const supplier = await createPartner(admin, { isSupplier: true });
+  const item = await createItem(connection);
+  const base = {
+    supplierId: supplier.id, orderDate: '2026-11-28',
+    lines: [{ itemId: item, qty: 1 }],
+  };
+
+  // root 没有员工档案：缺省经办人必须留空，否则编辑时回送这个标识会被拒。
+  const rootCreated = await admin.fetch(PATH, write(base));
+  expect(rootCreated.status, `root 建单失败：${await rootCreated.clone().text()}`).toBe(201);
+  const rootOrder = await jsonOf(rootCreated);
+  expect(rootOrder.handler, 'root 建单的经办人应为空').toBeNull();
+  expect(rootOrder.handlerUserId, 'root 建单的经办人标识应为空').toBeNull();
+  expect(
+    (await connection.repository<Row>('purchaseOrders').findOne({ filter: { id: rootOrder.id } }))?.handlerUserId,
+    '库里的经办人列也应为空',
+  ).toBeNull();
+  const edited = await admin.fetch(`${PATH}/${String(rootOrder.id)}`, write({
+    remark: 'root 改草稿',
+  }, 'PATCH'));
+  expect(edited.status, `root 改草稿失败：${await edited.clone().text()}`).toBe(200);
+  const returned = await jsonOf(edited);
+  expect(returned.handlerUserId, '编辑后经办人仍为空').toBeNull();
+  const echoed = await admin.fetch(`${PATH}/${String(rootOrder.id)}`, write({
+    remark: '回送经办人标识', handlerUserId: returned.handlerUserId,
+  }, 'PATCH'));
+  expect(echoed.status, `回送空经办人编辑失败：${await echoed.clone().text()}`).toBe(200);
+
+  // 在职员工不传经办人：取登录人本人。
+  const username = unique('r021default');
+  const password = 'R021-default-123!';
+  const createdUser = await admin.fetch('/users', write({
+    name: username, username, email: `${username.toLowerCase()}@example.test`,
+    password, roleScopes: { app: ['purchase'] },
+  }));
+  expect(createdUser.status, `建用户失败：${await createdUser.clone().text()}`).toBe(201);
+  const userId = String((await jsonOf(createdUser)).data?.id);
+  expect(userId, '前置：用户 id').toBeTruthy();
+  await createEmployee(connection, userId);
+  const buyer = await signIn(testApp, { username, password });
+  const staffCreated = await buyer.fetch(PATH, write(base));
+  expect(staffCreated.status, `在职员工建单失败：${await staffCreated.clone().text()}`).toBe(201);
+  const staffOrder = await jsonOf(staffCreated);
+  expect(staffOrder.handler).toMatchObject({ userId });
+  expect(staffOrder.handlerUserId).toBe(userId);
+
+  // 显式离职员工照旧 422。
+  const leftId = unique('LEFT');
+  await createEmployee(connection, leftId, 'left');
+  const rejected = await admin.fetch(PATH, write({ ...base, handlerUserId: leftId }));
+  expect(rejected.status, `显式离职员工应当被拒：${await rejected.clone().text()}`).toBe(422);
+  expect((await jsonOf(rejected)).error?.reason).toBe('ORDER_PERSON_INVALID');
+}, TIMEOUT);
