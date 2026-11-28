@@ -84,6 +84,17 @@ describe('frontend gates in gate.sh', () => {
     ).toBe(true);
   });
 
+  it('runs the layout guard in the fast channel', () => {
+    const fastBlock = gate.slice(
+      gate.indexOf('if [ "$STAGE" = "fast" ]'),
+      gate.indexOf('run_stage lint pnpm lint\nrun_stage typecheck'),
+    );
+    expect(
+      fastBlock.includes('tests/project/frontend-layout-gates.test.ts'),
+      'fast 档必须显式跑版式守门 —— 它扫整个 client/，--changed 关联不到它。',
+    ).toBe(true);
+  });
+
   it('runs the component reuse check on changed files in fast and on everything in unit', () => {
     expect(
       gate.includes('run_stage component-check run_component_check changed'),

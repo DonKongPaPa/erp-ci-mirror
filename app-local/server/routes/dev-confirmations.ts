@@ -23,8 +23,10 @@ import { z } from 'zod';
 import {
   answerError,
   appendAnswer,
+  appendClarification,
   buildSnapshot,
   InvalidConfirmationAnswer,
+  InvalidConfirmationClarification,
   type ConfirmationSnapshot,
 } from '../dev-tools/confirmations.js';
 import {
@@ -44,6 +46,11 @@ import { isDevAccountSwitcherEnabled } from '../dev-tools/settings.js';
 const AnswerSchema = z.object({
   answer: z.string(),
   note: z.string().optional(),
+});
+
+/** note 可空（「可不填」），非空时 1 到 2000 字。 */
+const ClarificationSchema = z.object({
+  note: z.string().max(2000).optional(),
 });
 
 const QuestionSchema = z.object({
@@ -66,7 +73,17 @@ const QuestionSchema = z.object({
       note: z.string(),
     })
     .nullable(),
-  group: z.enum(['pending', 'answered', 'processed']),
+  group: z.enum(['pending', 'awaiting', 'answered', 'processed']),
+  clarifications: z.array(
+    z.object({
+      note: z.string(),
+      at: z.string(),
+      answeredAt: z.string().nullable(),
+    }),
+  ),
+  explanations: z.array(
+    z.object({ at: z.string(), asked: z.string(), text: z.string() }),
+  ),
 });
 
 const SnapshotSchema = z.object({
@@ -94,6 +111,15 @@ function badRequest(reason: string): ApiError {
     reason,
     domain: 'devTools',
     message: 'The answer is not valid.',
+  });
+}
+
+function badClarification(reason: string): ApiError {
+  return new ApiError({
+    status: 'INVALID_ARGUMENT',
+    reason,
+    domain: 'devTools',
+    message: 'The clarification request is not valid.',
   });
 }
 
@@ -202,6 +228,50 @@ export function createConfirmationsRoutes(): AppApiRouteContribution<Application
           if (error instanceof InvalidConfirmationAnswer) {
             throw badRequest(error.reason);
           }
+          if (error instanceof ConfirmationsUnavailable) throw unavailable(error);
+          throw error;
+        }
+      },
+    );
+
+    router.post(
+      '/dev/confirmations/:id/clarifications',
+      describeRoute({
+        tags: ['Dev tools'],
+        summary: 'Ask for a clarification on a pending confirmation',
+        description:
+          'Development builds only, administrators only. Appends a clarification request; the question waits for an explanation from the main session.',
+        operationId: 'postDevConfirmationClarification',
+        responses: {
+          '201': dataResponse(SnapshotSchema),
+          '400': apiErrorResponse(400),
+          '401': apiErrorResponse(401),
+          '403': apiErrorResponse(403),
+          '503': apiErrorResponse(503),
+        },
+      }),
+      apiValidator('json', ClarificationSchema),
+      async (context) => {
+        // 和答复端点一样：先认管理员，再读清单，403 的响应里不带任何题目文本。
+        await requireAdmin(context, authz);
+        const id = context.req.param('id');
+        const note = context.req.valid('json').note ?? '';
+        try {
+          const questions = await readQuestions();
+          const question = questions.find((item) => item.id === id);
+          if (question === undefined)
+            throw new InvalidConfirmationClarification('UNKNOWN_ID');
+          if (note.length > 2000)
+            throw new InvalidConfirmationClarification('TOO_LONG');
+          const at = new Date().toISOString();
+          const state = await mutateState((current) => {
+            const next = appendClarification(current, id, note, at);
+            return { state: next, result: next };
+          });
+          return context.json({ data: buildSnapshot(questions, state) }, 201);
+        } catch (error) {
+          if (error instanceof InvalidConfirmationClarification)
+            throw badClarification(error.reason);
           if (error instanceof ConfirmationsUnavailable) throw unavailable(error);
           throw error;
         }

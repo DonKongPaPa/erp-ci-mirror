@@ -582,6 +582,7 @@ if [ "$STAGE" = "fast" ]; then
   pnpm exec vitest run --maxWorkers="$GATE_VITEST_WORKERS" --reporter=default --reporter=json \
     --outputFile.json="$CI_DIR/vitest-fast-guards.json" \
     tests/project/frontend-style-guard.test.ts \
+    tests/project/frontend-layout-gates.test.ts \
     "${guards[@]+"${guards[@]}"}" 9>&- \
     || fast_ok=0
   # 合并两份计数，避免 verdict 从旧文件读到假的 811。

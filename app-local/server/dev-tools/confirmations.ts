@@ -6,9 +6,14 @@
  */
 
 export type ConfirmationStatus = 'landed' | 'followup' | 'withdrawn';
-export type ConfirmationGroup = 'pending' | 'answered' | 'processed';
+export type ConfirmationGroup =
+  | 'pending'
+  | 'awaiting'
+  | 'answered'
+  | 'processed';
 export type AnswerErrorReason = 'UNKNOWN_ID' | 'EMPTY' | 'TOO_LONG' | 'NOT_IN_OPTIONS';
 export type ProcessErrorReason = 'UNKNOWN_ID' | 'INVALID_STATUS' | 'MISSING_REF' | 'MISSING_NOTE';
+export type ClarificationErrorReason = 'UNKNOWN_ID' | 'TOO_LONG';
 
 export interface ConfirmationQuestion {
   readonly id: string;
@@ -18,6 +23,30 @@ export interface ConfirmationQuestion {
   readonly options?: readonly string[];
   readonly source: string;
   readonly closed?: boolean;
+  /** 主会话在文档轮用 `confirmations.mjs explain` 写入；一条问题可有多条，按写入先后排。 */
+  readonly explanations?: readonly ConfirmationExplanation[];
+}
+
+/** 主会话查清后写进问题清单的一条说明（入库文件，由脚本维护）。 */
+export interface ConfirmationExplanation {
+  readonly at: string;
+  readonly asked: string;
+  readonly text: string;
+}
+
+/** 用户的一次补充说明请求，存在不入库的 state.json；解释到来后补 answeredAt。 */
+export interface ConfirmationClarification {
+  readonly id: string;
+  readonly note: string;
+  readonly at: string;
+  readonly answeredAt?: string;
+}
+
+/** 端点带回的一条请求历史：去掉 id（它已在问题条目上），answeredAt 统一成可空。 */
+export interface ViewClarification {
+  readonly note: string;
+  readonly at: string;
+  readonly answeredAt: string | null;
 }
 
 export interface ConfirmationAnswer {
@@ -38,12 +67,16 @@ export interface ProcessedConfirmation {
 export interface ConfirmationState {
   readonly answers: readonly ConfirmationAnswer[];
   readonly processed: Readonly<Record<string, ProcessedConfirmation>>;
+  /** 只追加；老状态文件没有这个字段，读的时候按空处理。 */
+  readonly clarifications?: readonly ConfirmationClarification[];
 }
 
 export interface ConfirmationItem extends ConfirmationQuestion {
   readonly latestAnswer: ConfirmationAnswer | null;
   readonly processed: ProcessedConfirmation | null;
   readonly group: ConfirmationGroup;
+  readonly clarifications: readonly ViewClarification[];
+  readonly explanations: readonly ConfirmationExplanation[];
 }
 
 export interface ConfirmationSnapshot {
@@ -85,12 +118,32 @@ export class InvalidConfirmationProcess extends Error {
   }
 }
 
+export class InvalidConfirmationClarification extends Error {
+  constructor(readonly reason: ClarificationErrorReason) {
+    super(`补充说明请求无效：${reason}`);
+    this.name = 'InvalidConfirmationClarification';
+  }
+}
+
 function nonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
 function isStringArray(value: unknown): value is readonly string[] {
   return Array.isArray(value) && value.every(nonEmptyString);
+}
+
+function asExplanation(value: unknown): ConfirmationExplanation | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const item = value as Record<string, unknown>;
+  if (
+    !nonEmptyString(item.at) ||
+    !nonEmptyString(item.asked) ||
+    typeof item.text !== 'string'
+  ) {
+    return undefined;
+  }
+  return { at: item.at, asked: item.asked, text: item.text };
 }
 
 /** 清单必须是对象数组、`id` 不重复且字段齐全；一处坏就整块不认，不静默跳过。 */
@@ -129,6 +182,18 @@ export function parseQuestionList(raw: string): readonly ConfirmationQuestion[] 
     if (item.closed !== undefined && typeof item.closed !== 'boolean') {
       throw new InvalidConfirmationList(`${item.id} 的 closed 不是布尔值。`);
     }
+    let explanations: readonly ConfirmationExplanation[] | undefined;
+    if (item.explanations !== undefined) {
+      if (
+        !Array.isArray(item.explanations) ||
+        item.explanations.some((entry) => asExplanation(entry) === undefined)
+      ) {
+        throw new InvalidConfirmationList(`${item.id} 的 explanations 格式不对。`);
+      }
+      explanations = item.explanations.map(
+        (entry) => asExplanation(entry) as ConfirmationExplanation,
+      );
+    }
     return {
       id: item.id,
       topic: item.topic,
@@ -137,6 +202,7 @@ export function parseQuestionList(raw: string): readonly ConfirmationQuestion[] 
       source: item.source,
       ...(item.options !== undefined ? { options: item.options } : {}),
       ...(item.closed !== undefined ? { closed: item.closed } : {}),
+      ...(explanations !== undefined ? { explanations } : {}),
     };
   });
 }
@@ -180,6 +246,26 @@ function asProcessed(value: unknown): ProcessedConfirmation | undefined {
   };
 }
 
+function asClarification(value: unknown): ConfirmationClarification | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const item = value as Record<string, unknown>;
+  if (
+    !nonEmptyString(item.id) ||
+    !nonEmptyString(item.note) ||
+    !nonEmptyString(item.at)
+  ) {
+    return undefined;
+  }
+  return {
+    id: item.id,
+    note: item.note,
+    at: item.at,
+    ...(typeof item.answeredAt === 'string' && item.answeredAt.length > 0
+      ? { answeredAt: item.answeredAt }
+      : {}),
+  };
+}
+
 /** 状态文件读坏了就按空起步：它只是本机状态，丢一条坏记录不该让整页打不开。 */
 export function normalizeConfirmationState(value: unknown): ConfirmationState {
   if (typeof value !== 'object' || value === null) return emptyConfirmationState();
@@ -197,7 +283,18 @@ export function normalizeConfirmationState(value: unknown): ConfirmationState {
       if (valid?.id === id) processed[id] = valid;
     }
   }
-  return { answers, processed };
+  // 老状态文件没有 clarifications：不补一个空字段，保持它读出来还是原来的形状。
+  const clarifications = Array.isArray(item.clarifications)
+    ? item.clarifications.flatMap((entry) => {
+        const valid = asClarification(entry);
+        return valid ? [valid] : [];
+      })
+    : undefined;
+  return {
+    answers,
+    processed,
+    ...(clarifications !== undefined ? { clarifications } : {}),
+  };
 }
 
 export function parseStateFile(raw: string): ConfirmationState {
@@ -218,14 +315,75 @@ export function latestAnswer(
   return null;
 }
 
-/** 已处理优先于已答复；关掉且没答复的不进任何一组。 */
+/** 数组只追加，最后一条就是最近一次请求。 */
+export function latestClarification(
+  state: ConfirmationState,
+  id: string,
+): ConfirmationClarification | null {
+  const all = state.clarifications ?? [];
+  for (let index = all.length - 1; index >= 0; index -= 1) {
+    if (all[index]?.id === id) return all[index] ?? null;
+  }
+  return null;
+}
+
+/** 「等补充」= 最近一次请求还没有 answeredAt；说明到来后由脚本补上。 */
+export function isAwaitingClarification(
+  state: ConfirmationState,
+  id: string,
+): boolean {
+  const latest = latestClarification(state, id);
+  return latest !== null && latest.answeredAt === undefined;
+}
+
+/** note 可空；非空时 1 到 2000 字。 */
+export function clarificationError(note: string): ClarificationErrorReason | null {
+  if (typeof note !== 'string') return 'TOO_LONG';
+  return note.length > MAX_ANSWER_LENGTH ? 'TOO_LONG' : null;
+}
+
+/** 只追加一条请求；新请求没有 answeredAt，因此这条问题进入「等补充」。 */
+export function appendClarification(
+  state: ConfirmationState,
+  id: string,
+  note: string,
+  at: string,
+): ConfirmationState {
+  return {
+    ...state,
+    clarifications: [
+      ...(state.clarifications ?? []),
+      { id, note, at },
+    ],
+  };
+}
+
+/** 主会话写完说明后，把这条问题所有未答的请求标上同一时刻。 */
+export function markClarificationsAnswered(
+  state: ConfirmationState,
+  id: string,
+  at: string,
+): ConfirmationState {
+  return {
+    ...state,
+    clarifications: (state.clarifications ?? []).map((entry) =>
+      entry.id === id && entry.answeredAt === undefined
+        ? { ...entry, answeredAt: at }
+        : entry,
+    ),
+  };
+}
+
+/** 已处理优先于已答复；关掉且没答复的不进任何一组；最近一次请求没答的进「等补充」。 */
 export function groupFor(
   question: ConfirmationQuestion,
   state: ConfirmationState,
 ): ConfirmationGroup | null {
   if (state.processed[question.id] !== undefined) return 'processed';
   if (latestAnswer(state, question.id) !== null) return 'answered';
-  return question.closed === true ? null : 'pending';
+  if (question.closed === true) return null;
+  if (isAwaitingClarification(state, question.id)) return 'awaiting';
+  return 'pending';
 }
 
 /** 单选必须落在 options 里（含页面追加的「其他」）；填空去空白后 1 到 2000 字。 */
@@ -289,6 +447,15 @@ export function buildSnapshot(
       latestAnswer: latestAnswer(state, question.id),
       processed: state.processed[question.id] ?? null,
       group: groupFor(question, state) as ConfirmationGroup,
+      // 数组即时间升序（只追加），页面据此把「新的在上」倒过来显示。
+      clarifications: (state.clarifications ?? [])
+        .filter((entry) => entry.id === question.id)
+        .map((entry) => ({
+          note: entry.note,
+          at: entry.at,
+          answeredAt: entry.answeredAt ?? null,
+        })),
+      explanations: question.explanations ?? [],
     }))
     .sort(
       (left, right) =>

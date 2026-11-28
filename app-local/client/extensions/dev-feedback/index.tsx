@@ -256,17 +256,19 @@ function FeedbackBoard({
         ))}
       </div>
       <Sheet open={chosen !== null} onOpenChange={(next) => !next && setSelected(null)}>
-        <SheetContent className='w-full max-w-xl overflow-y-auto'>
+        <SheetContent className='w-full max-w-xl'>
           <SheetHeader>
             <SheetTitle>{chosen?.id ?? ''}</SheetTitle>
             <SheetDescription>{t('devTools.feedback.detail')}</SheetDescription>
           </SheetHeader>
-          {chosen ? (
-            <FeedbackDetail item={chosen} onNote={(text) => submitNote(chosen.id, text)} />
-          ) : null}
-          {chosen && busy === chosen.id ? (
-            <p className='text-xs'>{t('devTools.feedback.submitting')}</p>
-          ) : null}
+          <div className='min-h-0 flex-1 overflow-y-auto px-4'>
+            {chosen ? (
+              <FeedbackDetail item={chosen} onNote={(text) => submitNote(chosen.id, text)} />
+            ) : null}
+            {chosen && busy === chosen.id ? (
+              <p className='text-xs'>{t('devTools.feedback.submitting')}</p>
+            ) : null}
+          </div>
         </SheetContent>
       </Sheet>
     </div>

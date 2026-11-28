@@ -1,7 +1,17 @@
 import { Check, CircleCheck, Info, Pencil } from 'lucide-react';
 import { cn } from 'cn';
 import { useTranslation } from '@nocobase/i18n/client';
-import { useId, type ReactElement, type RefObject } from 'react';
+import {
+  memo,
+  useCallback,
+  useId,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type ReactElement,
+  type Ref,
+  type RefObject,
+} from 'react';
 
 import { StatusBadge } from '#components/status-badge';
 import { Badge } from '#components/ui/badge';
@@ -33,20 +43,28 @@ import {
 import {
   OTHER,
   choicesOf,
+  emptyDraft,
+  explanationBlocks,
   firstSentence,
+  hasExplanation,
   toneOf,
   type Choice,
   type ConfirmationItem,
   type Draft,
+  type Explanation,
   isAnswered,
   type TopicTone,
 } from './model.js';
+import { noteCardRender } from './perf.js';
 
 /**
  * 待确认事项页的三块：没答的问题卡（选项磁贴 + 输入框 + 操作行）、答过的收成一行、带计数的编号徽章。
  * 选项磁贴照 shadcn 官方示例 `field-choice-card` 的结构写（FieldLabel 包 Field，里面放
  * RadioGroupItem 与文字），选中的描边、底色用 FieldLabel 自带的 `has-data-checked`；
  * 单选原语本身只留读屏与焦点（`sr-only`），选中态靠边框、底色与对勾表达。
+ *
+ * R-083 性能：草稿（选中的选项与「自己写」的文字）归卡片自己持有，页面上不放它的 state。
+ * 这样打字只重渲染这一张卡；页面通过下面的命令式句柄在提交时读当前草稿，数字键也经它选磁贴。
  */
 
 const STATUS_LABEL: Readonly<Record<string, string>> = {
@@ -59,6 +77,27 @@ const STATUS_TONE: Readonly<Record<string, TopicTone>> = {
   followup: 'warning',
   withdrawn: 'neutral',
 };
+
+/** 页面对一张卡的两个动作：数字键选磁贴、提交时读草稿。 */
+export interface QuestionCardHandle {
+  readonly pick: (index: number) => void;
+  readonly getDraft: () => Draft;
+}
+
+export interface QuestionCardProps {
+  readonly item: ConfirmationItem;
+  readonly busy: boolean;
+  /** 当前范围里答完还有下一道：按钮写「提交并看下一条」。 */
+  readonly hasNext: boolean;
+  readonly cardRef: (node: HTMLElement | null) => void;
+  readonly onActivate: (id: string) => void;
+  readonly onSubmit: () => void;
+  readonly onSkip: () => void;
+  /** 发出一条补充说明请求；note 可空，页面负责 POST 与刷新快照。 */
+  readonly onClarify: (note: string) => void;
+  /** React 19 的 ref 当普通 prop 传；页面据此在提交时读草稿、数字键选磁贴。 */
+  readonly ref?: Ref<QuestionCardHandle>;
+}
 
 export function SourceLink({
   item,
@@ -190,37 +229,62 @@ function Overflow({
   );
 }
 
-export function QuestionCard({
-  item,
-  draft,
-  busy,
-  hasNext,
-  cardRef,
-  onActivate,
-  onChange,
-  onSubmit,
-  onSkip,
+/** 一条说明：时刻 + 多段纯文本。空行分段，「- 」开头的连续行收成列表，HTML 原样当文字。 */
+function ExplanationView({
+  explanation,
 }: {
-  readonly item: ConfirmationItem;
-  readonly draft: Draft;
-  readonly busy: boolean;
-  /** 当前范围里答完还有下一道：按钮写「提交并看下一条」。 */
-  readonly hasNext: boolean;
-  readonly cardRef: (node: HTMLElement | null) => void;
-  readonly onActivate: (id: string) => void;
-  readonly onChange: (draft: Draft) => void;
-  readonly onSubmit: () => void;
-  readonly onSkip: () => void;
+  readonly explanation: Explanation;
 }): ReactElement {
   const { t } = useTranslation();
-  const groupId = useId();
-  const choices = choicesOf(item);
-  const usingOther = draft.answer === OTHER;
-  const pending = item.group === 'pending';
+  return (
+    <div
+      data-testid='explanation-block'
+      className='flex min-w-0 flex-col gap-2 rounded-lg border border-border bg-muted/40 p-3'
+    >
+      <p className='text-xs text-muted-foreground'>
+        {t('devTools.confirmations.explanationAt', { at: explanation.at })}
+      </p>
+      {explanationBlocks(explanation.text).map((block) =>
+        block.kind === 'list' ? (
+          <ul
+            key={`list:${block.items.join('\n')}`}
+            className='ms-4 list-disc break-words text-sm'
+          >
+            {block.items.map((item) => (
+              <li key={item} className='break-words'>
+                {item}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p
+            key={`para:${block.text}`}
+            className='whitespace-pre-line break-words text-sm'
+          >
+            {block.text}
+          </p>
+        ),
+      )}
+    </div>
+  );
+}
+
+/** 等补充的卡：留着题与出处，显示请求历史（新的在上）与说明空位，不给提交通道。 */
+function AwaitingCard({
+  item,
+  cardRef,
+  onActivate,
+}: {
+  readonly item: ConfirmationItem;
+  readonly cardRef: (node: HTMLElement | null) => void;
+  readonly onActivate: (id: string) => void;
+}): ReactElement {
+  const { t } = useTranslation();
+  const history = [...item.clarifications].reverse();
   return (
     <article
       ref={cardRef}
-      data-testid={pending ? `pending-${item.id}` : `editing-${item.id}`}
+      data-testid={`awaiting-${item.id}`}
       data-question-card={item.id}
       tabIndex={-1}
       onFocus={() => onActivate(item.id)}
@@ -239,7 +303,150 @@ export function QuestionCard({
         </h3>
         <SourceLink item={item} />
       </div>
+      <div data-testid={`clarify-history-${item.id}`} className='flex flex-col gap-1'>
+        {history.map((entry) => (
+          <p key={`${entry.at}-${entry.note}`} className='text-sm text-muted-foreground'>
+            {t('devTools.confirmations.awaitingLabel', {
+              at: entry.at,
+              note:
+                entry.note.length > 0
+                  ? entry.note
+                  : t('devTools.confirmations.noClarifyNote'),
+            })}
+          </p>
+        ))}
+      </div>
+      <div
+        data-testid={`explanation-placeholder-${item.id}`}
+        className='rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground'
+      >
+        {t('devTools.confirmations.awaitingPlaceholder')}
+      </div>
+    </article>
+  );
+}
+
+function QuestionCardBase({
+  item,
+  busy,
+  hasNext,
+  cardRef,
+  onActivate,
+  onSubmit,
+  onSkip,
+  onClarify,
+  ref,
+}: QuestionCardProps): ReactElement {
+  noteCardRender(item.id);
+  const { t } = useTranslation();
+  const groupId = useId();
+  // 草稿只在这张卡里：打字重渲染止于本卡，页面不参与。
+  const [draft, setDraft] = useState<Draft>(emptyDraft);
+  const draftRef = useRef(draft);
+  const change = useCallback((next: Draft) => {
+    draftRef.current = next;
+    setDraft(next);
+  }, []);
+  useImperativeHandle(
+    ref,
+    () => ({
+      pick(index: number) {
+        const choice = choicesOf(item)[index];
+        if (!choice) return;
+        change({ ...draftRef.current, answer: choice.value });
+      },
+      getDraft: () => draftRef.current,
+    }),
+    [item, change],
+  );
+  const choices = choicesOf(item);
+  const usingOther = draft.answer === OTHER;
+  const pending = item.group === 'pending';
+  // 补充请求的草稿同样只在这张卡里，打字不惊动页面；发出后收起并清空。
+  const [clarifyOpen, setClarifyOpen] = useState(false);
+  const [clarifyNote, setClarifyNote] = useState('');
+  const sendClarify = (): void => {
+    onClarify(clarifyNote);
+    setClarifyOpen(false);
+    setClarifyNote('');
+  };
+
+  if (item.group === 'awaiting')
+    return (
+      <AwaitingCard item={item} cardRef={cardRef} onActivate={onActivate} />
+    );
+
+  return (
+    <article
+      ref={cardRef}
+      data-testid={pending ? `pending-${item.id}` : `editing-${item.id}`}
+      data-question-card={item.id}
+      tabIndex={-1}
+      onFocus={() => onActivate(item.id)}
+      className='flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-card p-4 outline-none focus-visible:ring-3 focus-visible:ring-ring/50'
+    >
+      <div className='flex items-start gap-3'>
+        <StatusBadge
+          tone={toneOf(item.topic)}
+          size='sm'
+          className='mt-0.5 shrink-0'
+        >
+          {item.id}
+        </StatusBadge>
+        {hasExplanation(item) ? (
+          <Badge variant='secondary' className='mt-0.5 shrink-0'>
+            {t('devTools.confirmations.explainedBadge')}
+          </Badge>
+        ) : null}
+        <h3 className='min-w-0 max-w-3xl flex-1 text-base font-semibold break-words'>
+          {item.question}
+        </h3>
+        <SourceLink item={item} />
+      </div>
+      {item.explanations.map((explanation) => (
+        <ExplanationView
+          key={`${explanation.at}-${explanation.text}`}
+          explanation={explanation}
+        />
+      ))}
       <DefaultHint text={item.default} />
+
+      {clarifyOpen && pending ? (
+        <div
+          data-testid={`clarify-form-${item.id}`}
+          className='flex flex-col gap-2 rounded-lg border border-border p-3'
+        >
+          <Textarea
+            aria-label={t('devTools.confirmations.clarifyPlaceholder')}
+            placeholder={t('devTools.confirmations.clarifyPlaceholder')}
+            rows={2}
+            value={clarifyNote}
+            onChange={(event) => setClarifyNote(event.target.value)}
+            onKeyDown={(event) => {
+              if (
+                event.key === 'Enter' &&
+                (event.ctrlKey || event.metaKey) &&
+                !event.nativeEvent.isComposing
+              ) {
+                // 这里的 Ctrl/⌘+Enter 发补充请求，不是提交答复；别冒泡到页面。
+                event.preventDefault();
+                event.stopPropagation();
+                sendClarify();
+              }
+            }}
+          />
+          <div className='flex justify-end'>
+            <Button
+              type='button'
+              size='sm'
+              disabled={busy}
+              onClick={sendClarify}
+            >
+              {t('devTools.confirmations.clarifySend')}
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       <div
         className='flex flex-col gap-3'
@@ -249,8 +456,8 @@ export function QuestionCard({
           <RadioGroup
             value={draft.answer}
             onValueChange={(value: unknown) =>
-              onChange({
-                ...draft,
+              change({
+                ...draftRef.current,
                 answer: typeof value === 'string' ? value : '',
               })
             }
@@ -275,7 +482,7 @@ export function QuestionCard({
             rows={2}
             value={draft.note}
             onChange={(event) =>
-              onChange({ ...draft, note: event.target.value })
+              change({ ...draftRef.current, note: event.target.value })
             }
           />
         ) : null}
@@ -288,6 +495,17 @@ export function QuestionCard({
               onClick={onSkip}
             >
               {t('devTools.confirmations.skip')}
+            </Button>
+          ) : null}
+          {pending ? (
+            <Button
+              type='button'
+              variant='outline'
+              disabled={busy}
+              aria-expanded={clarifyOpen}
+              onClick={() => setClarifyOpen((open) => !open)}
+            >
+              {t('devTools.confirmations.askClarify')}
             </Button>
           ) : null}
           <Button
@@ -308,6 +526,8 @@ export function QuestionCard({
     </article>
   );
 }
+
+export const QuestionCard = memo(QuestionCardBase);
 
 /**
  * 答过的收成一行：编号、问题、已答内容（超出省略，悬停看全文与细节）、处理状态、行尾「改」。

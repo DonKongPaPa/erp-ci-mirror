@@ -1,6 +1,6 @@
 import { useApiClient, useToaster } from '@nocobase/app-client';
 import { useTranslation } from '@nocobase/i18n/client';
-import { ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import {
   useCallback,
   useEffect,
@@ -33,25 +33,38 @@ import { Kbd } from '#components/ui/kbd';
  *   - 提交后这道收成一行留在原位，焦点自动落到下一道未答的（Ctrl/⌘+Enter 提交）；
  *   - 分组用带计数的芯片筛，状态用分段按钮切，不再用原生下拉。
  * 数据、答复的存储格式与端点语义都没变。
+ *
+ * R-083 性能：清单一次取回，但首屏只挂第一页（PAGE_SIZE 张）；草稿归卡片自己持有，
+ * 页面上没有随打字变化的状态，卡片记忆化后 props 不变就不重渲染。页头计数、芯片计数
+ * 与「已答 / 共」仍按整份清单算，分页只影响挂载多少张卡。
  */
 
 import {
   answeredCount,
   answerPayload,
+  awaitingCount,
   byTopic,
-  choicesOf,
   emptyDraft,
+  explainedFirst,
   isAnswered,
   topicCounts,
   type ConfirmationItem,
   type ConfirmationSnapshot,
   type Draft,
 } from './model.js';
-import { AllDone, AnsweredRow, QuestionCard } from './question-card.js';
+import {
+  AllDone,
+  AnsweredRow,
+  QuestionCard,
+  type QuestionCardHandle,
+} from './question-card.js';
 import { Progress, ProgressLabel } from './progress.js';
 import { ToggleGroup, ToggleGroupItem } from './toggle-group.js';
 
-type StatusFilter = 'pending' | 'answered' | 'all';
+type StatusFilter = 'pending' | 'awaiting' | 'answered' | 'all';
+
+/** 每页挂载的卡片数：首屏不超过 15 张，多了就页尾「加载更多」。 */
+const PAGE_SIZE = 12;
 
 /** 提交或跳过之后焦点要去的地方。 */
 type FocusTarget =
@@ -64,6 +77,7 @@ const STATUS_OPTIONS: readonly {
   readonly label: string;
 }[] = [
   { value: 'pending', label: 'devTools.confirmations.pending' },
+  { value: 'awaiting', label: 'devTools.confirmations.awaiting' },
   { value: 'answered', label: 'devTools.confirmations.answered' },
   { value: 'all', label: 'devTools.confirmations.all' },
 ];
@@ -75,6 +89,71 @@ function percent(answered: number, total: number): number {
   return total === 0 ? 0 : Math.round((answered / total) * 100);
 }
 
+/**
+ * 一张卡的宿主：把页面级的稳定回调绑到这一道题上，卡片才可能在页面重渲染时比例不变、
+ * 被 memo 挡住。草稿不经过这里 —— 提交时从卡片的命令式句柄读。
+ */
+function QuestionCardSlot({
+  item,
+  busy,
+  hasNext,
+  registerCard,
+  registerHandle,
+  onActivate,
+  submit,
+  skipToNext,
+  clarify,
+}: {
+  readonly item: ConfirmationItem;
+  readonly busy: boolean;
+  readonly hasNext: boolean;
+  readonly registerCard: (id: string, node: HTMLElement | null) => void;
+  readonly registerHandle: (
+    id: string,
+    handle: QuestionCardHandle | null,
+  ) => void;
+  readonly onActivate: (id: string) => void;
+  readonly submit: (item: ConfirmationItem, draft: Draft) => void;
+  readonly skipToNext: (item: ConfirmationItem) => void;
+  readonly clarify: (item: ConfirmationItem, note: string) => void;
+}): ReactElement {
+  // React 19 的 ref 可以作为普通 prop 传；ref 仍只绑这一道题，回调身份稳定。
+  const handleRef = useRef<QuestionCardHandle | null>(null);
+  const setHandle = useCallback(
+    (next: QuestionCardHandle | null) => {
+      handleRef.current = next;
+      registerHandle(item.id, next);
+    },
+    [item.id, registerHandle],
+  );
+  const setNode = useCallback(
+    (node: HTMLElement | null) => registerCard(item.id, node),
+    [item.id, registerCard],
+  );
+  const submitHere = useCallback(
+    () => submit(item, handleRef.current?.getDraft() ?? emptyDraft),
+    [item, submit],
+  );
+  const skipHere = useCallback(() => skipToNext(item), [item, skipToNext]);
+  const clarifyHere = useCallback(
+    (note: string) => clarify(item, note),
+    [item, clarify],
+  );
+  return (
+    <QuestionCard
+      ref={setHandle}
+      item={item}
+      busy={busy}
+      hasNext={hasNext}
+      cardRef={setNode}
+      onActivate={onActivate}
+      onSubmit={submitHere}
+      onSkip={skipHere}
+      onClarify={clarifyHere}
+    />
+  );
+}
+
 export default function ConfirmationsPage(): ReactElement {
   const api = useApiClient();
   const toaster = useToaster();
@@ -82,9 +161,10 @@ export default function ConfirmationsPage(): ReactElement {
   const [snapshot, setSnapshot] = useState<ConfirmationSnapshot | null>(null);
   const [failed, setFailed] = useState(false);
   const [submitFailed, setSubmitFailed] = useState(false);
+  const [clarifyFailed, setClarifyFailed] = useState(false);
   const [status, setStatus] = useState<StatusFilter>('pending');
   const [topic, setTopic] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<Readonly<Record<string, Draft>>>({});
+  const [page, setPage] = useState(1);
   // 本次打开页面后答过的：在「待确认」里留在原位收成一行，刷新后归到「已答复」。
   const [recent, setRecent] = useState<ReadonlySet<string>>(() => new Set());
   const [editing, setEditing] = useState<string | null>(null);
@@ -92,6 +172,7 @@ export default function ConfirmationsPage(): ReactElement {
   const [focusTarget, setFocusTarget] = useState<FocusTarget | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const cardsRef = useRef(new Map<string, HTMLElement>());
+  const handlesRef = useRef(new Map<string, QuestionCardHandle>());
   const rowsRef = useRef(new Map<string, HTMLElement>());
   const doneRef = useRef<HTMLDivElement | null>(null);
 
@@ -113,11 +194,11 @@ export default function ConfirmationsPage(): ReactElement {
 
   useEffect(() => load(), [load]);
 
-  /** 答完或跳过之后，把焦点交给下一道卡并滚过去（jsdom 没有 scrollIntoView，所以先判有再调）。 */
   /**
    * 答完或跳过之后，把焦点交给目标并滚过去：下一道未答的卡；到了末尾交给完成态，
    * 这个范围没有完成态就交给刚答完的那一行（刚提交的卡已经从页面上拿掉，
-   * 不接住的话焦点会掉回 body）。jsdom 没有 scrollIntoView，所以先判有再调。
+   * 不接住的话焦点会掉回 body）。下一道可能在还没加载的页里，所以 page 也进依赖，
+   * 等它挂载之后再聚焦。jsdom 没有 scrollIntoView，所以先判有再调。
    */
   useEffect(() => {
     if (!focusTarget) return;
@@ -129,45 +210,65 @@ export default function ConfirmationsPage(): ReactElement {
     node.focus();
     node.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
     setFocusTarget(null);
-  }, [focusTarget, snapshot]);
+  }, [focusTarget, snapshot, page]);
 
   const answered = answeredCount(snapshot);
   const total = snapshot?.questions.length ?? 0;
   // 「待确认」里本次答过的也列出来（收成一行），其余状态只列当前状态自己的；保持清单的次序。
   const scoped = useMemo(() => {
     const all = snapshot?.questions ?? [];
-    return all.filter((item) =>
-      status === 'all'
-        ? true
-        : status === 'pending'
-          ? item.group === 'pending' || recent.has(item.id)
-          : item.group !== 'pending',
-    );
+    return all.filter((item) => {
+      if (status === 'all') return true;
+      if (status === 'pending')
+        return (
+          item.group === 'pending' ||
+          item.group === 'awaiting' ||
+          recent.has(item.id)
+        );
+      if (status === 'awaiting') return item.group === 'awaiting';
+      // 「已答复」只看真正答过的；等补充的题还是未答，不算进来。
+      return item.group === 'answered' || item.group === 'processed';
+    });
   }, [snapshot, status, recent]);
   const visible = useMemo(
     () =>
-      topic === null ? scoped : scoped.filter((item) => item.topic === topic),
+      explainedFirst(
+        topic === null ? scoped : scoped.filter((item) => item.topic === topic),
+      ),
     [scoped, topic],
   );
+  // 下一道按整个当前范围算，不受分页影响 —— 这样答完第一页末尾能跳到第二页。
   const openCards = useMemo(
     () => visible.filter((item) => item.group === 'pending'),
     [visible],
   );
+  // 首屏只挂第一页；页头与芯片的计数仍来自整份 snapshot。
+  const paged = useMemo(
+    () => visible.slice(0, page * PAGE_SIZE),
+    [visible, page],
+  );
+  const hasMore = paged.length < visible.length;
   // 画面上展开成卡的：没答的，加上正在「改」的那一道（它可能是已答复或已处理）。
   const cards = useMemo(
     () =>
-      visible.filter((item) => item.group === 'pending' || editing === item.id),
-    [visible, editing],
+      paged.filter(
+        (item) =>
+          item.group === 'pending' ||
+          item.group === 'awaiting' ||
+          editing === item.id,
+      ),
+    [paged, editing],
   );
   // 答过的收成一行；「待确认」里只列本次答过的，其余状态列全部。
   const rows = useMemo(
     () =>
-      visible.filter(
+      paged.filter(
         (item) =>
           item.group !== 'pending' &&
+          item.group !== 'awaiting' &&
           (status !== 'pending' || recent.has(item.id)),
       ),
-    [visible, status, recent],
+    [paged, status, recent],
   );
   const topics = topicCounts(snapshot);
   const chipTopics = topics
@@ -177,62 +278,122 @@ export default function ConfirmationsPage(): ReactElement {
       count: entry.total,
     }))
     .filter((entry) => entry.count > 0);
-  const sections = byTopic(visible);
+  const sections = byTopic(paged);
 
   /** 当前范围里，某道之后的下一道未答的；到末尾就绕回第一道。 */
-  const nextOpenAfter = (id: string): string | null => {
-    if (openCards.length <= 1) return null;
-    const index = openCards.findIndex((item) => item.id === id);
-    return openCards[(index + 1) % openCards.length]?.id ?? null;
-  };
+  const nextOpenAfter = useCallback(
+    (id: string): string | null => {
+      if (openCards.length <= 1) return null;
+      const index = openCards.findIndex((item) => item.id === id);
+      return openCards[(index + 1) % openCards.length]?.id ?? null;
+    },
+    [openCards],
+  );
 
-  const submit = (item: ConfirmationItem): void => {
-    const draft = drafts[item.id] ?? emptyDraft;
-    if (busy !== null || !isAnswered(draft)) return;
-    // 答完去哪儿：没答的卡去下一道；改的是已答复/已处理的卡，去当前范围第一道未答的。
-    const next =
-      item.group === 'pending'
-        ? nextOpenAfter(item.id)
-        : (openCards[0]?.id ?? null);
-    setBusy(item.id);
-    setSubmitFailed(false);
-    // 「其他（自己写）」按固定的 OTHER 选项提交，自写内容进备注，仍满足单选校验。
-    const { answer, note } = answerPayload(item, draft);
-    void api
-      .request<{ data: ConfirmationSnapshot }>({
-        path: `/dev/confirmations/${item.id}/answers`,
-        method: 'POST',
-        json: { answer, note },
-      })
-      .then((body) => {
-        // 端点返回提交后的整份快照，直接用它，不再多发一次读取。
-        setSnapshot(body.data);
-        setDrafts((current) => ({ ...current, [item.id]: emptyDraft }));
-        setRecent((current) => new Set(current).add(item.id));
-        setEditing(null);
-        setBusy(null);
-        toaster.show({
-          type: 'success',
-          title: t('devTools.confirmations.submitted', { id: item.id }),
+  /** 下一道若不在已加载的页里，需要的页码（从 1 起）。 */
+  const pageOf = useCallback(
+    (id: string): number => {
+      const index = visible.findIndex((item) => item.id === id);
+      return index < 0 ? 1 : Math.floor(index / PAGE_SIZE) + 1;
+    },
+    [visible],
+  );
+
+  const registerCard = useCallback(
+    (id: string, node: HTMLElement | null): void => {
+      if (node) cardsRef.current.set(id, node);
+      else cardsRef.current.delete(id);
+    },
+    [],
+  );
+  const registerHandle = useCallback(
+    (id: string, handle: QuestionCardHandle | null): void => {
+      if (handle) handlesRef.current.set(id, handle);
+      else handlesRef.current.delete(id);
+    },
+    [],
+  );
+
+  const submit = useCallback(
+    (item: ConfirmationItem, draft: Draft): void => {
+      if (busy !== null || !isAnswered(draft)) return;
+      // 答完去哪儿：没答的卡去下一道；改的是已答复/已处理的卡，去当前范围第一道未答的。
+      const next =
+        item.group === 'pending'
+          ? nextOpenAfter(item.id)
+          : (openCards[0]?.id ?? null);
+      const neededPage = next ? pageOf(next) : 1;
+      setBusy(item.id);
+      setSubmitFailed(false);
+      // 「其他（自己写）」按固定的 OTHER 选项提交，自写内容进备注，仍满足单选校验。
+      const { answer, note } = answerPayload(item, draft);
+      void api
+        .request<{ data: ConfirmationSnapshot }>({
+          path: `/dev/confirmations/${item.id}/answers`,
+          method: 'POST',
+          json: { answer, note },
+        })
+        .then((body) => {
+          // 端点返回提交后的整份快照，直接用它，不再多发一次读取。
+          setSnapshot(body.data);
+          setRecent((current) => new Set(current).add(item.id));
+          setEditing(null);
+          setBusy(null);
+          toaster.show({
+            type: 'success',
+            title: t('devTools.confirmations.submitted', { id: item.id }),
+          });
+          // 下一道还没挂载就先加载它所在的页，等它出现再聚焦。
+          setPage((current) => Math.max(current, neededPage));
+          setFocusTarget(
+            next ? { kind: 'card', id: next } : { kind: 'end', id: item.id },
+          );
+        })
+        .catch(() => {
+          setBusy(null);
+          setSubmitFailed(true);
         });
-        setFocusTarget(
-          next ? { kind: 'card', id: next } : { kind: 'end', id: item.id },
-        );
-      })
-      .catch(() => {
-        setBusy(null);
-        setSubmitFailed(true);
-      });
-  };
+    },
+    [api, busy, nextOpenAfter, openCards, pageOf, toaster, t],
+  );
 
-  const pick = (item: ConfirmationItem, index: number): void => {
-    const choice = choicesOf(item)[index];
-    if (!choice) return;
-    setDrafts((current) => ({
-      ...current,
-      [item.id]: { ...(current[item.id] ?? emptyDraft), answer: choice.value },
-    }));
-  };
+  const skipToNext = useCallback(
+    (item: ConfirmationItem): void => {
+      const next = nextOpenAfter(item.id);
+      if (!next) return;
+      setPage((current) => Math.max(current, pageOf(next)));
+      setFocusTarget({ kind: 'card', id: next });
+    },
+    [nextOpenAfter, pageOf],
+  );
+
+  /** 追加一条补充说明请求：端点回整份快照，这道题随即进「等补充」。 */
+  const clarify = useCallback(
+    (item: ConfirmationItem, note: string): void => {
+      if (busy !== null) return;
+      setBusy(item.id);
+      setClarifyFailed(false);
+      void api
+        .request<{ data: ConfirmationSnapshot }>({
+          path: `/dev/confirmations/${item.id}/clarifications`,
+          method: 'POST',
+          json: { note },
+        })
+        .then((body) => {
+          setSnapshot(body.data);
+          setBusy(null);
+          toaster.show({
+            type: 'success',
+            title: t('devTools.confirmations.clarifySent', { id: item.id }),
+          });
+        })
+        .catch(() => {
+          setBusy(null);
+          setClarifyFailed(true);
+        });
+    },
+    [api, busy, toaster, t],
+  );
 
   /** 数字键 1–9 选中当前这道卡的第 N 块磁贴；Ctrl/⌘+Enter 提交它。 */
   const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
@@ -243,20 +404,22 @@ export default function ConfirmationsPage(): ReactElement {
         ?.getAttribute('data-question-card') ??
       activeId ??
       cards[0]?.id;
-    // 在展开的卡里找（包括正在「改」的已答复 / 已处理条目），不限没答的。
-    const item = cards.find((candidate) => candidate.id === cardId);
+    if (!cardId) return;
+    const handle = handlesRef.current.get(cardId);
+    if (!handle) return;
+    const item = visible.find((candidate) => candidate.id === cardId);
     if (!item) return;
     const command = event.ctrlKey || event.metaKey;
     if (event.key === 'Enter' && command && !event.nativeEvent.isComposing) {
       event.preventDefault();
-      submit(item);
+      submit(item, handle.getDraft());
       return;
     }
     if (command || event.altKey || target?.closest?.(TEXT_INPUT)) return;
     const digit = Number(event.key);
     if (!Number.isInteger(digit) || digit < 1 || digit > 9) return;
     event.preventDefault();
-    pick(item, digit - 1);
+    handle.pick(digit - 1);
   };
 
   if (failed) {
@@ -283,6 +446,11 @@ export default function ConfirmationsPage(): ReactElement {
       key: 'pending',
       label: t('devTools.confirmations.pending'),
       value: snapshot.counts.pending,
+    },
+    {
+      key: 'awaiting',
+      label: t('devTools.confirmations.awaiting'),
+      value: awaitingCount(snapshot),
     },
     {
       key: 'answered',
@@ -337,7 +505,7 @@ export default function ConfirmationsPage(): ReactElement {
             {progressText}
           </ProgressLabel>
         </Progress>
-        <div className='grid grid-cols-3 gap-3'>
+        <div className='grid grid-cols-2 gap-3 md:grid-cols-4'>
           {tiles.map((tile) => (
             <div
               key={tile.key}
@@ -366,7 +534,10 @@ export default function ConfirmationsPage(): ReactElement {
             size='sm'
             variant={topic === null ? 'secondary' : 'outline'}
             aria-pressed={topic === null}
-            onClick={() => setTopic(null)}
+            onClick={() => {
+              setTopic(null);
+              setPage(1);
+            }}
           >
             {t('devTools.confirmations.all')}{' '}
             <span className='tabular-nums text-muted-foreground'>{total}</span>
@@ -378,7 +549,10 @@ export default function ConfirmationsPage(): ReactElement {
               size='sm'
               variant={topic === entry.topic ? 'secondary' : 'outline'}
               aria-pressed={topic === entry.topic}
-              onClick={() => setTopic(entry.topic)}
+              onClick={() => {
+                setTopic(entry.topic);
+                setPage(1);
+              }}
             >
               {entry.topic}{' '}
               <span className='tabular-nums text-muted-foreground'>
@@ -391,8 +565,15 @@ export default function ConfirmationsPage(): ReactElement {
           value={[status]}
           onValueChange={(value) => {
             const next = value[0];
-            if (next === 'pending' || next === 'answered' || next === 'all')
+            if (
+              next === 'pending' ||
+              next === 'awaiting' ||
+              next === 'answered' ||
+              next === 'all'
+            ) {
               setStatus(next);
+              setPage(1);
+            }
           }}
           aria-label={t('devTools.confirmations.statusFilter')}
         >
@@ -407,6 +588,9 @@ export default function ConfirmationsPage(): ReactElement {
       {submitFailed ? (
         <p role='alert'>{t('devTools.confirmations.submitFailed')}</p>
       ) : null}
+      {clarifyFailed ? (
+        <p role='alert'>{t('devTools.confirmations.clarifyFailed')}</p>
+      ) : null}
 
       {/* 当前范围（整份清单或某个分组）刚答完：显示完成态；一进来就没有的，只说一句没有。 */}
       {nothingLeftInView &&
@@ -416,6 +600,11 @@ export default function ConfirmationsPage(): ReactElement {
       {nothingLeftInView && snapshot.counts.pending > 0 && rows.length === 0 ? (
         <p className='text-sm text-muted-foreground'>
           {t('devTools.confirmations.noPendingInTopic')}
+        </p>
+      ) : null}
+      {status === 'awaiting' && visible.length === 0 ? (
+        <p className='text-sm text-muted-foreground'>
+          {t('devTools.confirmations.noAwaiting')}
         </p>
       ) : null}
 
@@ -465,33 +654,26 @@ export default function ConfirmationsPage(): ReactElement {
             </div>
             <CollapsibleContent className='flex min-w-0 flex-col gap-3'>
               {section.items.map((item) => {
-                if (item.group === 'pending' || editing === item.id) {
+                if (
+                  item.group === 'pending' ||
+                  item.group === 'awaiting' ||
+                  editing === item.id
+                ) {
                   return (
-                    <QuestionCard
+                    <QuestionCardSlot
                       key={item.id}
                       item={item}
-                      draft={drafts[item.id] ?? emptyDraft}
                       busy={busy === item.id}
                       hasNext={
                         item.group === 'pending' &&
                         nextOpenAfter(item.id) !== null
                       }
-                      cardRef={(node) => {
-                        if (node) cardsRef.current.set(item.id, node);
-                        else cardsRef.current.delete(item.id);
-                      }}
+                      registerCard={registerCard}
+                      registerHandle={registerHandle}
                       onActivate={setActiveId}
-                      onChange={(draft) =>
-                        setDrafts((current) => ({
-                          ...current,
-                          [item.id]: draft,
-                        }))
-                      }
-                      onSubmit={() => submit(item)}
-                      onSkip={() => {
-                        const next = nextOpenAfter(item.id);
-                        if (next) setFocusTarget({ kind: 'card', id: next });
-                      }}
+                      submit={submit}
+                      skipToNext={skipToNext}
+                      clarify={clarify}
                     />
                   );
                 }
@@ -511,6 +693,25 @@ export default function ConfirmationsPage(): ReactElement {
           </Collapsible>
         );
       })}
+
+      {hasMore ? (
+        <div className='flex flex-col items-center gap-2 border-t border-border pt-4'>
+          <span className='text-xs text-muted-foreground tabular-nums'>
+            {t('devTools.confirmations.showing', {
+              shown: paged.length,
+              total: visible.length,
+            })}
+          </span>
+          <Button
+            type='button'
+            variant='outline'
+            onClick={() => setPage((current) => current + 1)}
+          >
+            <ChevronDown data-icon='inline-start' />
+            {t('devTools.confirmations.loadMore')}
+          </Button>
+        </div>
+      ) : null}
     </PageContainer>
   );
 }

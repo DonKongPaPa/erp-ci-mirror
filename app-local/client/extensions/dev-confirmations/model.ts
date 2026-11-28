@@ -3,7 +3,11 @@
  * 只读响应 + 提交答复，不改清单；状态由主会话的脚本写（见 `scripts/dev/confirmations.mjs`）。
  */
 
-export type ConfirmationGroup = 'pending' | 'answered' | 'processed';
+export type ConfirmationGroup =
+  | 'pending'
+  | 'awaiting'
+  | 'answered'
+  | 'processed';
 export type ConfirmationStatus = 'landed' | 'followup' | 'withdrawn';
 
 /** 「自己写」按这个固定的选项值提交，自写内容进备注（服务端校验单选必须落在 options 里）。 */
@@ -38,6 +42,20 @@ export interface ProcessedConfirmation {
   readonly note: string;
 }
 
+/** 一次补充请求：note 可空；answeredAt 为 null 表示主会话还没写说明。 */
+export interface Clarification {
+  readonly note: string;
+  readonly at: string;
+  readonly answeredAt: string | null;
+}
+
+/** 主会话写进清单的一条说明；text 是纯文本，页面不渲染 HTML。 */
+export interface Explanation {
+  readonly at: string;
+  readonly asked: string;
+  readonly text: string;
+}
+
 export interface ConfirmationItem {
   readonly id: string;
   readonly topic: string;
@@ -49,6 +67,8 @@ export interface ConfirmationItem {
   readonly latestAnswer: ConfirmationAnswer | null;
   readonly processed: ProcessedConfirmation | null;
   readonly group: ConfirmationGroup;
+  readonly clarifications: readonly Clarification[];
+  readonly explanations: readonly Explanation[];
 }
 
 export interface ConfirmationSnapshot {
@@ -218,6 +238,70 @@ export function topicCounts(
     (left, right) =>
       right.total - left.total || left.topic.localeCompare(right.topic),
   );
+}
+
+/** 「等补充」只在页头单列一块，不进快照的 counts（那三块仍是待确认/已答复/已处理）。 */
+export function awaitingCount(snapshot: ConfirmationSnapshot | null): number {
+  return (snapshot?.questions ?? []).filter(
+    (item) => item.group === 'awaiting',
+  ).length;
+}
+
+export function hasExplanation(item: ConfirmationItem): boolean {
+  return item.explanations.length > 0;
+}
+
+/** 拿到说明的题回到「待确认」后排在最前；其余保持清单次序。 */
+export function explainedFirst(
+  items: readonly ConfirmationItem[],
+): readonly ConfirmationItem[] {
+  const first: ConfirmationItem[] = [];
+  const rest: ConfirmationItem[] = [];
+  for (const item of items) {
+    if (item.group === 'pending' && hasExplanation(item)) first.push(item);
+    else rest.push(item);
+  }
+  return [...first, ...rest];
+}
+
+/** 说明正文的一块：普通段落按空行分段，以「- 」开头的连续行收成一个列表。 */
+export type ExplanationBlock =
+  | { readonly kind: 'paragraph'; readonly text: string }
+  | { readonly kind: 'list'; readonly items: readonly string[] };
+
+export function explanationBlocks(text: string): readonly ExplanationBlock[] {
+  const blocks: ExplanationBlock[] = [];
+  let paragraph: string[] = [];
+  let list: string[] = [];
+  const flushParagraph = (): void => {
+    if (paragraph.length > 0) {
+      blocks.push({ kind: 'paragraph', text: paragraph.join('\n') });
+      paragraph = [];
+    }
+  };
+  const flushList = (): void => {
+    if (list.length > 0) {
+      blocks.push({ kind: 'list', items: [...list] });
+      list = [];
+    }
+  };
+  for (const line of text.split(/\r?\n/u)) {
+    if (line.trim().length === 0) {
+      flushList();
+      flushParagraph();
+      continue;
+    }
+    if (line.startsWith('- ')) {
+      flushParagraph();
+      list.push(line.slice(2));
+    } else {
+      flushList();
+      paragraph.push(line);
+    }
+  }
+  flushList();
+  flushParagraph();
+  return blocks;
 }
 
 /** 主题的固定色：由名字算出，同一个主题每次都是同一色。只用 StatusBadge 的四种语义色。 */

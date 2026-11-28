@@ -4,8 +4,14 @@ import { describe, expect, it } from 'vitest';
 import ConfirmationsPage from '../../client/extensions/dev-confirmations/index.js';
 import type { ConfirmationSnapshot } from '../../client/extensions/dev-confirmations/model.js';
 import {
+  cardRenderCount,
+  resetCardRenderCounts,
+} from '../../client/extensions/dev-confirmations/perf.js';
+import {
   appendAnswer,
+  appendClarification,
   buildSnapshot,
+  type ConfirmationQuestion,
   type ConfirmationState,
 } from '../../server/dev-tools/confirmations.js';
 import { FIXTURE_QUESTIONS, FIXTURE_STATE } from '../fixtures/confirmations.js';
@@ -39,8 +45,12 @@ interface Posted {
   readonly body: { answer: string; note?: string };
 }
 
-async function renderConfirmations(initial: ConfirmationSnapshot = SNAPSHOT) {
-  let state = FIXTURE_STATE;
+async function renderConfirmations(
+  initial: ConfirmationSnapshot = SNAPSHOT,
+  questions: readonly ConfirmationQuestion[] = FIXTURE_QUESTIONS,
+  baseState: ConfirmationState = FIXTURE_STATE,
+) {
+  let state = baseState;
   let current = initial;
   const posted: Posted[] = [];
   await renderClient(<ConfirmationsPage />, {
@@ -58,7 +68,7 @@ async function renderConfirmations(initial: ConfirmationSnapshot = SNAPSHOT) {
         const id = match[1] ?? '';
         posted.push({ id, body });
         state = appendAnswer(state, id, body.answer, body.note ?? '', NOW);
-        current = snapshotOf(state);
+        current = snapshotOf(state, questions);
         return json(current, 201);
       }
       return response;
@@ -69,11 +79,27 @@ async function renderConfirmations(initial: ConfirmationSnapshot = SNAPSHOT) {
 
 function snapshotOf(
   state: ConfirmationState = FIXTURE_STATE,
+  questions: readonly ConfirmationQuestion[] = FIXTURE_QUESTIONS,
 ): ConfirmationSnapshot {
-  return buildSnapshot(FIXTURE_QUESTIONS, state, NOW);
+  return buildSnapshot(questions, state, NOW);
 }
 
 const SNAPSHOT = snapshotOf();
+
+/** 40 道待确认的夹具（编号用 QA-xx，不冒充真实需求编号）：用来量首屏挂载数与分页行为。 */
+const MANY_QUESTIONS: readonly ConfirmationQuestion[] = Array.from(
+  { length: 40 },
+  (_, index) => ({
+    id: `QA-${String(index + 10).padStart(2, '0')}`,
+    topic: index % 2 === 0 ? 'ALPHA' : 'BETA',
+    question: `夹具：第 ${index + 1} 道题`,
+    default: '按默认',
+    options: ['甲', '乙', '其他'],
+    source: 'HANDOFF/tasks/waiting-on-user.md',
+  }),
+);
+const MANY_EMPTY_STATE: ConfirmationState = { answers: [], processed: {} };
+const MANY_SNAPSHOT = snapshotOf(MANY_EMPTY_STATE, MANY_QUESTIONS);
 
 const checked = (scope: HTMLElement): number =>
   scope.querySelectorAll('[role=radio][aria-checked=true]').length;
@@ -714,5 +740,353 @@ describe('待确认事项页：答过的一行', () => {
     ).toBeInTheDocument();
     // 答复时刻与去处不在行里撑高度，收进悬停全文。
     expect(within(row).queryByText(/Answered at/u)).not.toBeInTheDocument();
+  });
+});
+
+describe('待确认事项页：性能（打字只重渲染当前卡、首屏只挂一页）', () => {
+  it('在一张卡的输入框里打字，其它卡的渲染次数不增加', async () => {
+    await renderConfirmations();
+    await screen.findByTestId('pending-QA-01', {}, { timeout: 15_000 });
+    const card = screen.getByTestId('pending-QA-01');
+    const own = await openOwn(within(card).getByTestId('answer-form-QA-01'));
+    resetCardRenderCounts();
+    fireEvent.change(own, { target: { value: '甲' } });
+    fireEvent.change(own, { target: { value: '甲乙' } });
+    await waitFor(() => {
+      expect(cardRenderCount('QA-01')).toBeGreaterThan(0);
+    });
+    // 页面级草稿会让每敲一个字整页重渲染；现在别的卡一次都不渲染。
+    expect(cardRenderCount('QA-02')).toBe(0);
+  });
+
+  it('40 道待确认：首屏只挂一页（≤15 张卡），页头与芯片仍是全量数字', async () => {
+    await renderConfirmations(MANY_SNAPSHOT, MANY_QUESTIONS, MANY_EMPTY_STATE);
+    await screen.findByTestId('pending-QA-10', {}, { timeout: 15_000 });
+    const mounted = document.querySelectorAll('[data-question-card]');
+    expect(mounted.length).toBeGreaterThan(0);
+    expect(mounted.length).toBeLessThanOrEqual(15);
+    expect(screen.getByTestId('count-pending')).toHaveTextContent('40');
+    expect(
+      screen.getByRole('button', { name: 'ALPHA 20' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'BETA 20' })).toBeInTheDocument();
+    // 没加载的页不挂载。
+    expect(screen.queryByTestId('pending-QA-34')).not.toBeInTheDocument();
+  });
+
+  it('页尾「加载更多」是常规按钮：每点一次多挂一页，加载完按钮消失', async () => {
+    await renderConfirmations(MANY_SNAPSHOT, MANY_QUESTIONS, MANY_EMPTY_STATE);
+    await screen.findByTestId('pending-QA-10', {}, { timeout: 15_000 });
+    const cards = () => document.querySelectorAll('[data-question-card]');
+    expect(cards()).toHaveLength(12);
+    const more = await screen.findByRole(
+      'button',
+      { name: /load more/i },
+      { timeout: 15_000 },
+    );
+    expect(more).toHaveAttribute('type', 'button');
+    fireEvent.click(more);
+    await waitFor(() => expect(cards()).toHaveLength(24));
+    fireEvent.click(screen.getByRole('button', { name: /load more/i }));
+    await waitFor(() => expect(cards()).toHaveLength(36));
+    fireEvent.click(screen.getByRole('button', { name: /load more/i }));
+    await waitFor(() => expect(cards()).toHaveLength(40));
+    expect(
+      screen.queryByRole('button', { name: /load more/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('切分组芯片与状态分段按钮都回到第一页', async () => {
+    await renderConfirmations(MANY_SNAPSHOT, MANY_QUESTIONS, MANY_EMPTY_STATE);
+    await screen.findByTestId('pending-QA-10', {}, { timeout: 15_000 });
+    fireEvent.click(
+      await screen.findByRole(
+        'button',
+        { name: /load more/i },
+        { timeout: 15_000 },
+      ),
+    );
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-question-card]')).toHaveLength(
+        24,
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'ALPHA 20' }));
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-question-card]')).toHaveLength(
+        12,
+      ),
+    );
+    expect(screen.getByTestId('pending-QA-10')).toBeInTheDocument();
+    expect(screen.queryByTestId('pending-QA-11')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^All$/ }));
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-question-card]')).toHaveLength(
+        12,
+      ),
+    );
+  });
+
+  it('提交后「下一道」在还没加载的页里：自动加载到那一页再聚焦', async () => {
+    const posted = await renderConfirmations(
+      MANY_SNAPSHOT,
+      MANY_QUESTIONS,
+      MANY_EMPTY_STATE,
+    );
+    await screen.findByTestId('pending-QA-10', {}, { timeout: 15_000 });
+    expect(document.querySelectorAll('[data-question-card]')).toHaveLength(12);
+    // 第一页最后一道是 QA-32；下一道 QA-34 在第二页，提交时要先加载。
+    const card = screen.getByTestId('pending-QA-32');
+    fireEvent.click(within(card).getByText('甲'));
+    fireEvent.click(
+      within(card).getByRole('button', { name: /submit and go to next/i }),
+    );
+    const next = await screen.findByTestId(
+      'pending-QA-34',
+      {},
+      { timeout: 15_000 },
+    );
+    await waitFor(() => expect(document.activeElement).toBe(next));
+    expect(posted).toEqual([{ id: 'QA-32', body: { answer: '甲', note: '' } }]);
+  });
+});
+
+/**
+ * R-083 补充说明：请求写进 state.json 的 clarifications，说明由主会话写进清单的 explanations。
+ * 这一组用例把 POST /clarifications 也拦下来，用与真端点同样的 buildSnapshot 算出新快照。
+ * 夹具用 QA-xx，不冒充真实需求编号。
+ */
+interface ClarifyPosted {
+  readonly id: string;
+  readonly body: { note?: string };
+}
+
+const EXPLANATION = {
+  at: '2026-11-28T04:00:00+08:00',
+  asked: '为什么？',
+  text: '第一段。\n\n第二段。\n- 要点一\n- 要点二\n<b>不是标签</b>',
+};
+const EXPLAINED_QUESTIONS: readonly ConfirmationQuestion[] =
+  FIXTURE_QUESTIONS.map((item) =>
+    item.id === 'QA-02' ? { ...item, explanations: [EXPLANATION] } : item,
+  );
+const AWAITING_STATE: ConfirmationState = {
+  ...FIXTURE_STATE,
+  clarifications: [
+    { id: 'QA-02', note: '为什么？', at: '2026-11-28T03:30:00+08:00' },
+  ],
+};
+const ANSWERED_CLARIFICATION_STATE: ConfirmationState = {
+  ...FIXTURE_STATE,
+  clarifications: [
+    {
+      id: 'QA-02',
+      note: '为什么？',
+      at: '2026-11-28T03:30:00+08:00',
+      answeredAt: EXPLANATION.at,
+    },
+  ],
+};
+const AWAITING_SNAPSHOT = snapshotOf(AWAITING_STATE, FIXTURE_QUESTIONS);
+const EXPLAINED_SNAPSHOT = snapshotOf(
+  ANSWERED_CLARIFICATION_STATE,
+  EXPLAINED_QUESTIONS,
+);
+
+async function renderClarifyScenario(
+  initial: ConfirmationSnapshot,
+  questions: readonly ConfirmationQuestion[],
+  baseState: ConfirmationState,
+) {
+  let state = baseState;
+  let current = initial;
+  const answers: Posted[] = [];
+  const clarifications: ClarifyPosted[] = [];
+  await renderClient(<ConfirmationsPage />, {
+    afterResponse: async (request, response) => {
+      const pathname = new URL(request.url).pathname;
+      if (request.method === 'GET' && pathname.endsWith('/dev/confirmations'))
+        return json(current);
+      const clarify = /\/dev\/confirmations\/([^/]+)\/clarifications$/u.exec(
+        pathname,
+      );
+      if (request.method === 'POST' && clarify) {
+        const body = (await request.clone().json()) as { note?: string };
+        const id = clarify[1] ?? '';
+        clarifications.push({ id, body });
+        state = appendClarification(state, id, body.note ?? '', NOW);
+        current = snapshotOf(state, questions);
+        return json(current, 201);
+      }
+      const answer = /\/dev\/confirmations\/([^/]+)\/answers$/u.exec(pathname);
+      if (request.method === 'POST' && answer) {
+        const body = (await request.clone().json()) as {
+          answer: string;
+          note?: string;
+        };
+        const id = answer[1] ?? '';
+        answers.push({ id, body });
+        state = appendAnswer(
+          state,
+          id,
+          body.answer,
+          body.note ?? '',
+          NOW,
+        );
+        current = snapshotOf(state, questions);
+        return json(current, 201);
+      }
+      return response;
+    },
+  });
+  return { answers, clarifications };
+}
+
+async function openClarify(card: HTMLElement): Promise<HTMLElement> {
+  fireEvent.click(
+    within(card).getByRole('button', { name: /ask for clarification/i }),
+  );
+  return await within(card).findByRole(
+    'textbox',
+    { name: /what do you want to know/i },
+    { timeout: 15_000 },
+  );
+}
+
+describe('待确认事项页：请求补充说明', () => {
+  it('点「请补充说明」发送后，卡片进「等补充」且不显示提交通道', async () => {
+    const { answers, clarifications } = await renderClarifyScenario(
+      SNAPSHOT,
+      FIXTURE_QUESTIONS,
+      FIXTURE_STATE,
+    );
+    const card = await screen.findByTestId(
+      'pending-QA-01',
+      {},
+      { timeout: 15_000 },
+    );
+    const input = await openClarify(card);
+    fireEvent.change(input, { target: { value: '上限是多少？' } });
+    fireEvent.click(within(card).getByRole('button', { name: /^send$/i }));
+    await waitFor(() => {
+      expect(clarifications).toEqual([
+        { id: 'QA-01', body: { note: '上限是多少？' } },
+      ]);
+    });
+    const awaiting = await screen.findByTestId(
+      'awaiting-QA-01',
+      {},
+      { timeout: 15_000 },
+    );
+    expect(awaiting).toHaveTextContent('Asked for clarification');
+    expect(awaiting).toHaveTextContent('上限是多少？');
+    expect(awaiting).toHaveTextContent(
+      'The main session will write the explanation here',
+    );
+    expect(within(awaiting).queryByRole('radio')).not.toBeInTheDocument();
+    expect(
+      within(awaiting).queryByRole('button', { name: /submit/i }),
+    ).not.toBeInTheDocument();
+    expect(answers).toEqual([]);
+  });
+
+  it('补充说明输入框里数字键不触发选项，Ctrl+Enter 发送请求但不提交答复', async () => {
+    const { answers, clarifications } = await renderClarifyScenario(
+      SNAPSHOT,
+      FIXTURE_QUESTIONS,
+      FIXTURE_STATE,
+    );
+    const card = await screen.findByTestId(
+      'pending-QA-01',
+      {},
+      { timeout: 15_000 },
+    );
+    const input = await openClarify(card);
+    fireEvent.change(input, { target: { value: '请说清上限' } });
+    fireEvent.keyDown(input, { key: '2' });
+    await waitFor(() => expect(checked(card)).toBe(0));
+    expect(within(card).getAllByRole('radio')[1]).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+    fireEvent.keyDown(input, {
+      key: 'Enter',
+      code: 'Enter',
+      ctrlKey: true,
+    });
+    await waitFor(() => expect(clarifications).toHaveLength(1));
+    expect(clarifications[0]?.body.note).toBe('请说清上限');
+    expect(answers).toEqual([]);
+    expect(
+      await screen.findByTestId('awaiting-QA-01', {}, { timeout: 15_000 }),
+    ).toBeInTheDocument();
+  });
+
+  it('有了说明后回到待确认、排最前、带标记并显示分段与列表正文（不渲染 HTML）', async () => {
+    await renderClarifyScenario(
+      EXPLAINED_SNAPSHOT,
+      EXPLAINED_QUESTIONS,
+      ANSWERED_CLARIFICATION_STATE,
+    );
+    const shown = await screen.findByTestId(
+      'pending-QA-02',
+      {},
+      { timeout: 15_000 },
+    );
+    expect(shown).toHaveTextContent('Explained');
+    expect(shown).toHaveTextContent(EXPLANATION.at);
+    expect(within(shown).getByText('第一段。')).toBeInTheDocument();
+    expect(within(shown).getByText('第二段。')).toBeInTheDocument();
+    const items = within(shown).getAllByRole('listitem');
+    expect(items.map((node) => node.textContent)).toEqual(['要点一', '要点二']);
+    expect(shown.textContent).toContain('<b>不是标签</b>');
+    expect(within(shown).queryByText('不是标签')).not.toBeInTheDocument();
+    const firstCard = document.querySelector('[data-question-card]');
+    expect(firstCard).toHaveAttribute('data-question-card', 'QA-02');
+  });
+
+  it('再要一次说明时历史按时间全留，新的在上', async () => {
+    const { clarifications } = await renderClarifyScenario(
+      EXPLAINED_SNAPSHOT,
+      EXPLAINED_QUESTIONS,
+      ANSWERED_CLARIFICATION_STATE,
+    );
+    const card = await screen.findByTestId(
+      'pending-QA-02',
+      {},
+      { timeout: 15_000 },
+    );
+    const input = await openClarify(card);
+    fireEvent.change(input, { target: { value: '再问一次' } });
+    fireEvent.click(within(card).getByRole('button', { name: /^send$/i }));
+    await waitFor(() => expect(clarifications).toHaveLength(1));
+    const awaiting = await screen.findByTestId(
+      'awaiting-QA-02',
+      {},
+      { timeout: 15_000 },
+    );
+    expect(awaiting).toHaveTextContent('再问一次');
+    expect(awaiting).toHaveTextContent('为什么？');
+    const text = awaiting.textContent ?? '';
+    expect(text.indexOf('再问一次')).toBeLessThan(text.indexOf('为什么？'));
+  });
+
+  it('页头加「等补充」计数、分段按钮加一项；芯片把等补充算进未关闭问题', async () => {
+    await renderClarifyScenario(AWAITING_SNAPSHOT, FIXTURE_QUESTIONS, AWAITING_STATE);
+    await screen.findByTestId('awaiting-QA-02', {}, { timeout: 15_000 });
+    expect(screen.getByTestId('count-awaiting')).toHaveTextContent('1');
+    expect(screen.getByTestId('count-pending')).toHaveTextContent('1');
+    expect(screen.getByTestId('count-answered')).toHaveTextContent('1');
+    expect(screen.getByTestId('count-processed')).toHaveTextContent('1');
+    expect(screen.getByRole('button', { name: 'BETA 1' })).toBeInTheDocument();
+    const segmented = screen.getByRole('button', {
+      name: /awaiting clarification/i,
+    });
+    expect(segmented).toBeInTheDocument();
+    fireEvent.click(segmented);
+    expect(
+      await screen.findByTestId('awaiting-QA-02', {}, { timeout: 15_000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('pending-QA-01')).not.toBeInTheDocument();
   });
 });
