@@ -3,6 +3,7 @@ import { useTranslation } from '@nocobase/i18n/client';
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
 
 import { Badge } from '#components/ui/badge';
+import { Button } from '#components/ui/button';
 import { Checkbox } from '#components/ui/checkbox';
 import { Input } from '#components/ui/input';
 import {
@@ -66,9 +67,10 @@ function BoardCard({
       data-testid={`card-${item.id}`}
       className='rounded-md border border-border bg-card p-3 text-left text-sm'
     >
-      <button
+      <Button
         type='button'
-        className='w-full cursor-pointer text-left'
+        variant='ghost'
+        className='h-auto w-full shrink justify-start px-0 py-0 text-left font-normal whitespace-normal'
         aria-label={t('devTools.requirementsBoard.openDetail', { name: item.id })}
         onClick={() => onOpen(item)}
       >
@@ -91,7 +93,7 @@ function BoardCard({
             ))}
           </span>
         ) : null}
-      </button>
+      </Button>
     </article>
   );
 }
