@@ -45,6 +45,7 @@ import {
   WarehouseListSchema,
 } from './inventory-schemas.js';
 import { DocFileRuleError } from '../providers/doc-files.js';
+import { IqcRuleError } from '../providers/iqc.js';
 import {
   StockRuleError,
   stockMutationsToken,
@@ -157,6 +158,18 @@ function inventoryApiError(
       domain: 'docFiles',
       message: error.message,
       ...(status === 'FAILED_PRECONDITION' ? { httpStatus: 422 as const } : {}),
+      cause: error,
+    });
+  }
+  if (error instanceof IqcRuleError) {
+    return new ApiError({
+      status: 'FAILED_PRECONDITION',
+      reason: error.code === 'iqc-releasable-exceed'
+        ? 'IQC_RELEASABLE_EXCEED' : 'IQC_NOT_RELEASABLE',
+      domain: 'inspectionOrders',
+      message: error.message,
+      metadata: error.detail === undefined ? undefined : { reason: error.detail },
+      httpStatus: 422,
       cause: error,
     });
   }

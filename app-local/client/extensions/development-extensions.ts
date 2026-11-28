@@ -1,5 +1,8 @@
 import type { ClientApplication } from '@nocobase/app-client';
-import { defineClientPlugin } from '@nocobase/app-client/plugins';
+import {
+  defineAppRoutes,
+  defineClientPlugin,
+} from '@nocobase/app-client/plugins';
 import { ServiceProvider } from '@nocobase/service-provider';
 
 /**
@@ -26,6 +29,21 @@ const developmentExtensions = /* @__PURE__ */ defineClientPlugin({
   // 这个入口归应用自己所有，不是安装的包，所以用应用的包名。
   packageName: 'app-local',
   serviceProviders: () => [DevelopmentExtensionsProvider],
+  // R-082：看板的路由也只在开发构建里存在。框架没有运行时加路由的入口，所以在这个生产常驻的
+  // 插件上声明；`import.meta.env.DEV` 在生产构建里是常量假，整段分支（含 componentLoader 的
+  // 动态引入）一起被摇掉 —— 不是「进了包只是没登记」，是模块图里没有（R-073）。
+  routes: () => {
+    if (!import.meta.env.DEV) return defineAppRoutes([]);
+    return defineAppRoutes([
+      {
+        name: 'devRequirementsBoard',
+        path: '/dev/requirements-board',
+        auth: 'required',
+        authz: 'unrestricted',
+        componentLoader: () => import('./dev-requirements-board/index.js'),
+      },
+    ]);
+  },
 });
 
 export default developmentExtensions;

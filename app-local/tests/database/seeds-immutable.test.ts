@@ -47,6 +47,9 @@ const EXECUTED_SEED_HASHES: Readonly<Record<string, string>> = {
   // R-022 波 2：报价单页面授权的新种子，排在 015 之后；随本片入库后同样不可改。
   '202611280016_seed_quotation_page_grants.ts':
     'decc8433ac042d6fad58dae1bfeb3b769cf5c1990234d60f0b2451b0bf923d0a',
+  // R-070 IQC：来料检验授权的新种子，随本片入库后同样不可改。
+  '202611280021_seed_iqc_grants.ts':
+    '134b9e56c9bd5635848378c7b5b9ab3ca4f6eabc51f639ef4b5921bb2dd0e765',
 };
 
 const RULE =

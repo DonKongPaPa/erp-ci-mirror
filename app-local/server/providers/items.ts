@@ -88,6 +88,8 @@ export interface ItemRecord {
   readonly auxUnitCode: string | null;
   readonly unitRatio: number | null;
   readonly purchaseLeadDays: number | null;
+  /** R-070：来料必检开关，默认关；只记录，不拦没有检验单的入库。 */
+  readonly inspectionRequired: boolean;
 }
 
 export interface UnitRecord {
@@ -266,6 +268,7 @@ function viewItem(row: ItemRecord): ItemRecord {
     auxUnitCode: row.auxUnitCode ?? null,
     unitRatio: numberOrNull(row.unitRatio),
     purchaseLeadDays: numberOrNull(row.purchaseLeadDays),
+    inspectionRequired: Boolean(row.inspectionRequired),
   };
 }
 

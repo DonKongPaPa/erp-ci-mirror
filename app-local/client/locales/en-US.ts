@@ -3,6 +3,7 @@ import type { LocaleResource } from '@nocobase/i18n';
 
 import systemEnUS from './system/en-US.js';
 import devTools from '../extensions/dev-account-switcher/locales/en-US.js';
+import requirementsBoard from '../extensions/dev-requirements-board/locales/en-US.js';
 
 const enUS = {
   // The template's own copy: the shell, the sign-in pages, shared components and the homepage. Keep it in
@@ -2298,10 +2299,12 @@ const enUS = {
       warehouseInactive: 'That warehouse is inactive. Choose another one.',
     },
   },
-  // R-037: the development-only account switch in the avatar menu. R-073: merged only by a development
-  // build — `import.meta.env.DEV` is a constant false in a production build, so the spread and the module
-  // it imports are dropped together, and check-dist.sh asserts the locale bundle carries none of it.
-  ...(import.meta.env.DEV ? { devTools } : {}),
+  // R-037 / R-082: the development-only account switch and requirements board. R-073: merged only by a
+  // development build — `import.meta.env.DEV` is a constant false in a production build, so the spread
+  // and the modules it imports are dropped together, and check-dist.sh asserts the locale bundle carries none of it.
+  ...(import.meta.env.DEV
+    ? { devTools: { ...devTools, ...requirementsBoard } }
+    : {}),
   // R-032 / R-034: the account menu, the two API key pages and the notification log page.
   account: {
     ...systemEnUS.account,

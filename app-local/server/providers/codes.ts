@@ -37,6 +37,8 @@ export const CODE_PREFIXES = {
   // R-066：请款单与报销单的占位前缀（旧系统编号清单的原字，随 R-016 待裁一并定）。
   financePaymentRequest: 'QK',
   financeExpenseClaim: 'BX',
+  // R-070：采购检验单号的占位前缀（随 R-016 待裁一并定）。
+  inspection: 'JY',
 } as const;
 
 /** 计数器行的周期：按日重置存 yyyymmdd（列宽 8 正好），不带日期存空串。 */

@@ -38,6 +38,7 @@ import {
   customers as customersResource,
   suppliers as suppliersResource,
 } from '../partner-resources.js';
+import { IQC_COLLECTIONS, inspectionOrders as inspectionOrdersResource } from '../iqc-resources.js';
 import { ITEM_COLLECTIONS, items as itemsResource } from '../items-resources.js';
 import {
   ORDER_COLLECTIONS,
@@ -120,6 +121,8 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
       ...STOCKTAKING_COLLECTIONS,
       ...TRANSFER_COLLECTIONS,
       ...PURCHASE_REQUEST_COLLECTIONS,
+      // R-070：采购检验单头与明细。
+      ...IQC_COLLECTIONS,
     ]) {
       authz.database.collections.add(collection);
     }
@@ -159,6 +162,8 @@ export default class AuthorizationResourcesProvider extends ServiceProvider<AppP
     authz.compositeResources.define(purchaseRequestsResource);
     // R-066：请款单资源只声明、不 ui.place；staff 通过「仅本人」范围键收窄。
     authz.compositeResources.define(financeRequestsResource);
+    // R-070 IQC：只声明资源与六个动作，不做 ui.place（本片没有页面）。
+    authz.compositeResources.define(inspectionOrdersResource);
     // R-076：三类打印单据各两个动作（print / printPrice）；表沿用 inventory 已登记的
     // stockDocs / stockDocLines，不重复登记，也不做页面目录（打印视图按 docType 自检动作）。
     for (const resource of DOC_PRINT_RESOURCES) authz.compositeResources.define(resource);

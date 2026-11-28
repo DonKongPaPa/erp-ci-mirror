@@ -47,6 +47,14 @@ import financeRequestPageGrantsSeed, {
   financeRequestPagePermissionSets,
   persistFinanceRequestPageGrants,
 } from '../../database/main/seeds/202611280018_seed_finance_request_page_grants.js';
+import iqcGrantsSeed, {
+  iqcPermissionSets,
+  inspectorIqcGrant,
+  managerIqcGrant,
+  persistIqcGrants,
+  purchaseIqcGrant,
+  warehouseIqcGrant,
+} from '../../database/main/seeds/202611280021_seed_iqc_grants.js';
 import purchaseRequestGrantsSeed, {
   planningPurchaseRequestGrant,
   purchasePurchaseRequestGrant,
@@ -505,6 +513,13 @@ const expectedFinanceRequestPageGrants = {
   staff: [financeRequestPageGrant],
   finance: [financeRequestPageGrant],
 } as const;
+/** R-070：021 排在 018 之后，四个现成角色各追加一条检验授权；别的角色一份没有。 */
+const expectedIqcAdditions = {
+  quality_inspector: [inspectorIqcGrant],
+  quality_manager: [managerIqcGrant],
+  purchase: [purchaseIqcGrant],
+  warehouse: [warehouseIqcGrant],
+} as const;
 /** R-020 波 1：盘点与调拨授权只在补丁种子里声明，原种子一份都不带。 */
 const warehouseStocktakingGrants = warehouseStocktakingTransferGrants;
 const expectedStocktakingGrantsByRole = {
@@ -596,6 +611,95 @@ test('R-066: the new seed declares only finance-request grants for staff and fin
       expect(grant.resource.id, `${set.key} 不该在原种子拿到请款单授权`).not.toBe('financeRequests');
     }
   }
+});
+
+/** R-070：021 只声明四个角色的本片授权，原种子一份不带；动作按角色收窄。 */
+test('R-070: the new seed declares only IQC grants for the four roles', () => {
+  expect(iqcGrantsSeed.name).toBe('202611280021_seed_iqc_grants');
+  expect(typeof iqcGrantsSeed.run).toBe('function');
+  expect(iqcPermissionSets.map((set) => set.key)).toEqual([
+    'quality_inspector', 'quality_manager', 'purchase', 'warehouse',
+  ]);
+  expect(iqcPermissionSets.map((set) => set.grants)).toEqual([
+    [inspectorIqcGrant], [managerIqcGrant], [purchaseIqcGrant], [warehouseIqcGrant],
+  ]);
+  expect(inspectorIqcGrant.actions.map((entry) => entry.action)).toEqual([
+    'view', 'create', 'update', 'complete',
+  ]);
+  expect(managerIqcGrant.actions.map((entry) => entry.action)).toEqual(['view', 'void']);
+  expect(purchaseIqcGrant.actions.map((entry) => entry.action)).toEqual(['view']);
+  expect(warehouseIqcGrant.actions.map((entry) => entry.action)).toEqual(['receiveView']);
+  for (const set of businessPermissionSets) {
+    for (const grant of set.grants) {
+      expect(grant.resource.id, `${set.key} 不该在原种子拿到检验授权`).not.toBe('inspectionOrders');
+    }
+  }
+});
+
+/** R-070：幂等只看本条授权在不在；带着别的种子加的授权也照常补，重跑不写。 */
+test('R-070: the IQC seed fills its own grants beside other grants and re-runs write nothing', async () => {
+  const makeQuery = (rows: ReadonlyMap<string, string>) => {
+    const stored = new Map(rows);
+    const writes: { key: string; grants: string }[] = [];
+    const query = {
+      selectFrom: () => ({
+        select: () => ({
+          where: (_column: string, _op: string, key: string) => ({
+            executeTakeFirst: async () => {
+              const value = stored.get(key);
+              return value === undefined ? undefined : { key, grants: value };
+            },
+          }),
+        }),
+      }),
+      updateTable: () => ({
+        set: (value: { grants: string }) => ({
+          where: (_column: string, _op: string, key: string) => ({
+            execute: async () => {
+              writes.push({ key, grants: value.grants });
+              stored.set(key, value.grants);
+            },
+          }),
+        }),
+      }),
+    } as unknown as QueryAdapter;
+    return { query, writes, stored };
+  };
+  const otherGrant: PermissionGrant = {
+    resource: { type: 'page', id: 'quotations' },
+    actions: [{ action: 'access' }],
+  };
+  const partial: PermissionGrant = {
+    resource: { type: 'composite', id: 'inspectionOrders' },
+    actions: [inspectorIqcGrant.actions[0]!],
+  };
+  const state = makeQuery(new Map([
+    ['quality_inspector', JSON.stringify([otherGrant, partial])],
+    ['quality_manager', JSON.stringify([otherGrant])],
+    ['purchase', JSON.stringify([otherGrant])],
+    ['warehouse', JSON.stringify([otherGrant])],
+  ]));
+  expect(await persistIqcGrants(state.query)).toEqual({
+    granted: ['quality_inspector', 'quality_manager', 'purchase', 'warehouse'],
+    skipped: [],
+  });
+  const inspectorGrants = JSON.parse(state.stored.get('quality_inspector') ?? '[]') as PermissionGrant[];
+  expect(inspectorGrants.slice(0, 2)).toEqual([otherGrant, partial]);
+  const inspectorActions = inspectorGrants
+    .filter((grant) => grant.resource.id === 'inspectionOrders')
+    .flatMap((grant) => grant.actions.map((entry) => entry.action));
+  expect(inspectorActions).toEqual(['view', 'create', 'update', 'complete']);
+  expect(await persistIqcGrants(state.query)).toEqual({
+    granted: [],
+    skipped: ['quality_inspector', 'quality_manager', 'purchase', 'warehouse'],
+  });
+  expect(state.writes, '重跑不写').toHaveLength(4);
+  const missing = makeQuery(new Map());
+  expect(await persistIqcGrants(missing.query)).toEqual({
+    granted: [],
+    skipped: ['quality_inspector', 'quality_manager', 'purchase', 'warehouse'],
+  });
+  expect(missing.writes, '不建新角色').toHaveLength(0);
 });
 
 /**
@@ -948,6 +1052,7 @@ test('R-013: the seed creates the designed roles', async ({ app }) => {
       ...(key === 'sales' ? expectedQuotationPageGrants : []),
       ...(expectedFinanceRequestAdditions[key as keyof typeof expectedFinanceRequestAdditions] ?? []),
       ...(expectedFinanceRequestPageGrants[key as keyof typeof expectedFinanceRequestPageGrants] ?? []),
+      ...(expectedIqcAdditions[key as keyof typeof expectedIqcAdditions] ?? []),
     ]);
   }
 });
@@ -1034,6 +1139,7 @@ test('R-064 页面片 / R-021 波 2 / R-022 波 2: 015 先于 016 执行，sales
       ...(expectedStocktakingPageGrants[key as keyof typeof expectedStocktakingPageGrants] ?? []),
       ...(expectedFinanceRequestAdditions[key as keyof typeof expectedFinanceRequestAdditions] ?? []),
       ...(expectedFinanceRequestPageGrants[key as keyof typeof expectedFinanceRequestPageGrants] ?? []),
+      ...(expectedIqcAdditions[key as keyof typeof expectedIqcAdditions] ?? []),
     ]);
   }
 });

@@ -100,6 +100,7 @@ import { apiRoutes as docPrintRoutes } from '../../server/routes/doc-print.js';
 import { apiRoutes as importRoutes } from '../../server/routes/import-tool.js';
 import { apiRoutes as purchaseRequestRoutes } from '../../server/routes/purchase-requests.js';
 import { apiRoutes as orderReviewRoutes } from '../../server/routes/order-reviews.js';
+import { apiRoutes as iqcRoutes } from '../../server/routes/iqc.js';
 import ApprovalsProvider from '../../server/approvals-service.js';
 import ApprovalNotificationsProvider from '../../server/providers/approval-notifications.js';
 import ApprovalTimeoutProvider from '../../server/providers/approval-timeout.js';
@@ -108,6 +109,7 @@ import ImportToolProvider from '../../server/providers/import-tool.js';
 import PurchaseRequestsProvider from '../../server/providers/purchase-requests.js';
 import OrderReviewsProvider from '../../server/providers/order-reviews.js';
 import OrderLedgerProvider from '../../server/providers/order-ledger.js';
+import IqcProvider from '../../server/providers/iqc.js';
 import serverPlugins from '../../server/plugins.ts';
 import {
   createStandaloneServer,
@@ -332,6 +334,7 @@ describe('app server', () => {
       importRoutes,
       purchaseRequestRoutes,
       orderReviewRoutes,
+      iqcRoutes,
     ];
     for (const route of expectedRoutes) {
       expect(appRuntime.routes).toContain(route);
@@ -345,6 +348,7 @@ describe('app server', () => {
       PurchaseRequestsProvider,
       OrderReviewsProvider,
       OrderLedgerProvider,
+      IqcProvider,
     ];
     for (const provider of expectedProviders) {
       expect(appRuntime.serviceProviders).toContain(provider);

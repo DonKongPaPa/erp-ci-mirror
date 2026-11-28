@@ -13,6 +13,8 @@ import {
 import { randomUUID } from 'node:crypto';
 import type { Knex } from 'knex';
 
+import { IqcRuleError, reserveInspection } from './iqc.js';
+
 import { CODE_PREFIXES, codeServiceToken, type CodeService } from './codes.js';
 import {
   AmountRuleError,
@@ -162,6 +164,8 @@ export interface StockDocRecord {
   /** 回链列只在生成单据上出现；普通单据的响应与波 0 加片前一致。 */
   readonly stocktakingId?: string;
   readonly transferDocId?: string;
+  /** R-070：带检验单建的入库单才带这个键；普通单据的响应与加片前一致。 */
+  readonly inspectionId?: string;
   readonly files?: readonly DocFileView[];
   readonly lines: readonly StockDocLineRecord[];
 }
@@ -245,6 +249,8 @@ export interface StockLineInput {
   readonly taxIncludedPrice?: number | null;
   readonly taxExcludedPrice?: number | null;
   readonly taxRate?: number | null;
+  /** R-070：带检验单建采购入库时指到检验明细行；普通入库不传。 */
+  readonly inspectionLineId?: string;
   readonly productionDate?: string | null;
   readonly expiryDate?: string | null;
   readonly note?: string | null;
@@ -264,6 +270,8 @@ interface DocExtraInput {
   readonly fileIds?: readonly string[];
   readonly stocktakingId?: string;
   readonly transferDocId?: string;
+  /** R-070：只在带该可选键建单时写入，普通入库没有这个键。 */
+  readonly inspectionId?: string;
 }
 export interface CreateDocInput extends DocExtraInput {
   readonly docType: DocType;
@@ -382,6 +390,7 @@ interface DocRow {
   payable_total: string | number | null;
   stocktaking_id: string | null;
   transfer_doc_id: string | null;
+  inspection_id: string | null;
 }
 interface LineRow {
   id: string;
@@ -535,6 +544,9 @@ function docView(
     totalQty: nullableNum(row.total_qty),
     ...(row.stocktaking_id === null ? {} : { stocktakingId: row.stocktaking_id }),
     ...(row.transfer_doc_id === null ? {} : { transferDocId: row.transfer_doc_id }),
+    ...(row.inspection_id === null || row.inspection_id === undefined
+      ? {}
+      : { inspectionId: row.inspection_id }),
     ...(withPrice
       ? {
           discountAmount: num(row.discount_amount ?? 0),
@@ -1020,6 +1032,11 @@ export class DatabaseStockMutations implements StockMutations {
       await assertItemsActive(knex, input.lines.map((line) => line.itemId));
       await assertPartnerReason(knex, input.reason, input.partnerId);
       await assertSourceRules(knex, input);
+      await reserveInspection(knex, {
+        inspectionId: input.inspectionId,
+        sourceId: input.sourceType === 'purchase_order' ? input.sourceId : undefined,
+        lines: input.lines,
+      });
       await assertStockDicts(tx, input.projectCode);
       let handlerUserId: string | null = null;
       if (input.handlerUserId !== undefined && input.handlerUserId !== null) {
@@ -1070,6 +1087,7 @@ export class DatabaseStockMutations implements StockMutations {
         payable_total: totals.payableTotal,
         stocktaking_id: input.stocktakingId ?? null,
         transfer_doc_id: input.transferDocId ?? null,
+        inspection_id: input.inspectionId ?? null,
         created_at: now,
         updated_at: now,
       });
@@ -1099,6 +1117,20 @@ export class DatabaseStockMutations implements StockMutations {
         ? (current.source_type ?? undefined) as SourceType | undefined
         : input.sourceType;
       const effectiveSourceId = input.sourceId === undefined ? (current.source_id ?? undefined) : input.sourceId;
+      // R-070：带检验单的草稿按新行重新校验可入库余额；算占用时排除本单原行。
+      // 请求里带了 inspectionId 且与库里不一致就是试图换检验单，显式拒绝，不静默忽略。
+      const storedInspectionId = current.inspection_id;
+      if (input.inspectionId !== undefined && input.inspectionId !== storedInspectionId) {
+        throw new IqcRuleError('iqc-not-releasable', 'inspectionId cannot be changed');
+      }
+      if (storedInspectionId !== null && storedInspectionId !== undefined) {
+        await reserveInspection(knex, {
+          inspectionId: storedInspectionId,
+          sourceId: effectiveSourceType === 'purchase_order' ? effectiveSourceId : undefined,
+          lines: input.lines,
+          excludeDocId: id,
+        });
+      }
       await assertPartnerReason(knex, effectiveReason,
         input.partnerId === undefined ? current.partner_id : input.partnerId);
       await assertSourceRules(

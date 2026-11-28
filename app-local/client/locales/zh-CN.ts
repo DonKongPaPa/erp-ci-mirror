@@ -2,6 +2,7 @@ import fileUi from '../extensions/nocobase-file-component-ui/locales/zh-CN.js';
 import type { AppResource } from './en-US.js';
 import systemZhCN from './system/zh-CN.js';
 import devTools from '../extensions/dev-account-switcher/locales/zh-CN.js';
+import requirementsBoard from '../extensions/dev-requirements-board/locales/zh-CN.js';
 
 const zhCN: AppResource = {
   // The template's own copy; see `./en-US.ts`.
@@ -2171,9 +2172,11 @@ const zhCN: AppResource = {
       warehouseInactive: '这个仓库已停用，请换一个。',
     },
   },
-  // R-037：头像菜单里那段开发环境专用的账户切换。R-073：只在开发构建里并入 —— 生产构建把
-  // `import.meta.env.DEV` 换成常量假，这个展开连同它引入的词条表一起被摇掉；check-dist.sh 再对语言包断言一次。
-  ...(import.meta.env.DEV ? { devTools } : {}),
+  // R-037 / R-082：头像菜单的账户切换与需求池看板，都是开发环境专用。R-073：只在开发构建里并入 ——
+  // 生产构建把 `import.meta.env.DEV` 换成常量假，这个展开连同它引入的词条表一起被摇掉；check-dist.sh 再断言一次。
+  ...(import.meta.env.DEV
+    ? { devTools: { ...devTools, ...requirementsBoard } }
+    : {}),
   // R-032 / R-034：账号菜单、两个 API 密钥页面与通知记录页。
   account: {
     ...systemZhCN.account,

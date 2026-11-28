@@ -341,6 +341,23 @@ const enUS = {
       partnerInvalid: 'The supplier on the selected order is inactive or unavailable; choose another order.',
     },
   },
+  // R-070：来料检验规则码文案。
+  iqc: {
+    errors: {
+      iqcNotFound: 'That inspection does not exist.',
+      iqcNotPending: 'Only a pending inspection can be changed, completed or voided.',
+      iqcDuplicateItem: 'An item can appear only once on an inspection.',
+      iqcQtyInvalid: 'The inspection quantities are invalid: received, inspected, qualified and sampled quantities must follow their limits.',
+      iqcReceivedExceed: 'The received quantity exceeds the remainder of the purchase order line.',
+      iqcNotReleasable: 'The inspection is not releasable for this purchase order.',
+      iqcReleasableExceed: 'The receipt quantity exceeds what the inspection line still allows.',
+      iqcOrderInvalid: 'The purchase order does not exist, is still a draft or was cancelled.',
+      iqcPersonInvalid: 'The inspector is not an active employee.',
+      itemNotFound: 'That item does not exist.',
+      itemInactive: 'That item is inactive.',
+      documentNotFound: 'That attachment does not exist.',
+    },
+  },
 } as const;
 
 export type AppServerResource = LocaleResource<typeof enUS>;

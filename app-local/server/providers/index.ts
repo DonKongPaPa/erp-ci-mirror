@@ -17,6 +17,7 @@ import FeedbackReminderProvider from './feedback-reminder.js';
 import ImportToolProvider from './import-tool.js';
 import InventoryProvider from './inventory.js';
 import ItemsProvider from './items.js';
+import IqcProvider from './iqc.js';
 import KnowledgeAccessProvider from './knowledge-access.js';
 import LifecycleProvider from './lifecycles.js';
 import NotificationManagementProvider from './notification-management.js';
@@ -66,6 +67,8 @@ const serviceProviders: readonly ApplicationServiceProviderConstructor[] = [
   ItemsProvider,
   // R-020：仓库、单据、现存量与流水的读服务与写服务；过账在写服务里取行锁。
   InventoryProvider,
+  // R-070：采购检验单的读写服务；入库挂点在库存写服务里按需调用，顺序无关。
+  IqcProvider,
   // R-020 波 1：盘点与调拨复用库存过账，登记顺序无关。
   StocktakingProvider,
   TransferProvider,

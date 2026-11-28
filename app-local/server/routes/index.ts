@@ -20,6 +20,7 @@ import { apiRoutes as orderReviewRoutes } from './order-reviews.js';
 import { apiRoutes as salesOrderRoutes } from './sales-orders.js';
 import { apiRoutes as quotationRoutes } from './quotations.js';
 import { apiRoutes as itemRoutes } from './items.js';
+import { apiRoutes as iqcRoutes } from './iqc.js';
 import { apiRoutes as stocktakingRoutes } from './stocktaking.js';
 import { apiRoutes as transferRoutes } from './transfer.js';
 import { apiRoutes as unitRoutes } from './units.js';
@@ -53,6 +54,8 @@ const routes: readonly AppRouteContribution<Application>[] = [
   // R-022 复刻波 1：报价单七条端点；路径不与订单冲突。
   quotationRoutes,
   itemRoutes,
+  // R-070：/inspections/receivable-options 是静态段，Hono 会先于 /inspections/:id 匹配。
+  iqcRoutes,
   unitRoutes,
   itemCategoryRoutes,
   // R-068：/imports/:kind/* 是工程工具，放在业务路由之后；没有删除端点。

@@ -1369,6 +1369,8 @@ test('R-013: booting the authorization resources provider twice registers once',
     // R-021 波 1 加片：请购单头表与明细表。
     'purchaseRequests',
     'purchaseRequestLines',
+    // R-070：采购检验单头与明细。
+    'inspectionOrders', 'inspectionLines',
   ]);
   expect(registered.composites.map((composite) => composite.name)).toContain(
     'fqc',
@@ -1434,6 +1436,25 @@ test('R-065: financeView 只登记在采购订单资源上，销售订单的动�
   ]);
   expect(actionsOf('purchaseOrders')).toContain('financeView');
   expect(actionsOf('salesOrders'), '销售订单不该有借采购授权的 financeView').not.toContain('financeView');
+});
+
+/** R-070 IQC：六个动作逐一登记，两张表不登记删除，不进角色编辑器目录。 */
+test('R-070: registers inspectionOrders with six actions and no delete', async ({ app }) => {
+  const authz = app.container.resolve(authorizationToken);
+  const actionsOf = (id: string): readonly string[] =>
+    authz.compositeResources.list()
+      .find((resource) => resource.name === id)
+      ?.actions.map((action) => action.name)
+      .sort() ?? [];
+  expect(actionsOf('inspectionOrders')).toEqual([
+    'complete', 'create', 'receiveView', 'update', 'view', 'void',
+  ]);
+  for (const table of ['inspectionOrders', 'inspectionLines']) {
+    const definition = authz.database.collections.list().find((entry) => entry.name === table);
+    expect(definition, `${table} 没有登记`).toBeDefined();
+    expect(definition?.actions, `${table} 不该登记删除`).toEqual(['read', 'create', 'update']);
+  }
+  expect(authz.ui.placementOf({ type: 'composite', id: 'inspectionOrders' })).toBeUndefined();
 });
 
 test('R-065: 每个集合只登记一次，重复的清单不会写第二遍', async () => {

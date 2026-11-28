@@ -57,6 +57,8 @@ const ITEM_READ_FIELDS = [
   'auxUnitCode',
   'unitRatio',
   'purchaseLeadDays',
+  // R-070：来料必检开关默认关；打开只影响建入库单时的提示，不拦。
+  'inspectionRequired',
 ] as const;
 const ITEM_PURCHASE_PRICE_READ_FIELDS = [
   ...ITEM_READ_FIELDS,

@@ -4,6 +4,7 @@ import type { AppRuntimeContext } from '@nocobase/app-server/runtime';
 import devToolsConfig from '../config/dev-tools.js';
 import DevAccountSwitcherProvider from '../providers/dev-account-switcher.js';
 import { apiRoutes as devAccountSwitcherRoutes } from '../routes/dev-account-switcher.js';
+import { apiRoutes as devRequirementsBoardRoutes } from '../routes/dev-requirements-board.js';
 
 /**
  * 开发工具的登记入口（R-073）。
@@ -25,4 +26,5 @@ export function registerDevTools(
   if (rules) runtime.config.defineSections(new Map([['devTools', rules]]));
   app.addServiceProvider(DevAccountSwitcherProvider);
   app.addRoutes(devAccountSwitcherRoutes);
+  app.addRoutes(devRequirementsBoardRoutes);
 }

@@ -5,8 +5,9 @@ import {
 } from '@nocobase/app-client';
 import { useAuthentication } from '@nocobase/app-plugin-authentication/client';
 import { useTranslation } from '@nocobase/i18n/client';
-import { Check } from 'lucide-react';
+import { Check, ClipboardList } from 'lucide-react';
 import { useEffect, useState, type ReactElement } from 'react';
+import { Link } from 'react-router';
 
 import {
   DropdownMenuItem,
@@ -106,6 +107,14 @@ function EnabledDevAccountSwitcher(): ReactElement {
           {t('devTools.accountSwitcher.developmentOnly')}
         </p>
       </div>
+      <DropdownMenuItem
+        className='gap-2'
+        closeOnClick
+        render={<Link to='/dev/requirements-board' />}
+      >
+        <ClipboardList className='size-4' />
+        {t('devTools.requirementsBoard.menuEntry')}
+      </DropdownMenuItem>
       {accounts.map((account) => (
         <DropdownMenuItem
           key={account.id}

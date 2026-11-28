@@ -36,6 +36,8 @@ const headerExtras = {
   takerUserId: z.string().min(1).max(64).nullable().optional(),
   discountAmount: z.number().optional(),
   fileIds: FileIdsSchema,
+  // R-070：可选挂点。不带这个键的建单请求逐字节照旧。
+  inspectionId: z.string().min(1).max(64).optional(),
 } as const;
 
 export const WarehouseListQuery = z.object({
@@ -71,6 +73,8 @@ export const StockLineBody = z.object({
   warehouseId: z.string().min(1).max(64),
   batchNo: z.string().max(64).optional(),
   qty: z.number(),
+  // R-070：只对带 inspectionId 的采购入库生效，服务端校验后不落明细列。
+  inspectionLineId: z.string().min(1).max(64).optional(),
   taxIncludedPrice: z.number().nullable().optional(),
   taxExcludedPrice: z.number().nullable().optional(),
   taxRate: z.number().nullable().optional(),

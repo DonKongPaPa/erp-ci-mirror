@@ -24,6 +24,7 @@ import AuthzUpgradeR064 from './upgrade-r064.js';
 import AuthzUpgradeR072 from './upgrade-r072.js';
 import AuthzUpgradeR025 from './upgrade-r025.js';
 import AuthzUpgradeR076 from './upgrade-r076.js';
+import AuthzUpgradeR070Iqc from './upgrade-r070-iqc.js';
 
 /**
  * `authz export` / `authz import`（R-013 验收第 8 条）。
@@ -83,6 +84,8 @@ const authzCli = defineCliPlugin({
     'upgrade-r022-quotation': AuthzUpgradeR022Quotation,
     // R-076：给已有环境的仓管、采购、销售补三类单据的打印授权（仓管不给价格）。可单独跑、可重跑。
     'upgrade-r076': AuthzUpgradeR076,
+    // R-070：给四个现成角色补检验单动作，可单独跑、可重跑。
+    'upgrade-r070-iqc': AuthzUpgradeR070Iqc,
   },
 });
 

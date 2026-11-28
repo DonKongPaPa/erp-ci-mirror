@@ -29,7 +29,10 @@ DEV_TOOLS_DIST_MODULES=(
   dist/server/dev-tools/demo-accounts
   dist/server/dev-tools/register
   dist/server/dev-tools/settings
+  dist/server/dev-tools/requirements-board
+  dist/server/dev-tools/requirements-board-files
   dist/server/routes/dev-account-switcher
+  dist/server/routes/dev-requirements-board
   dist/server/providers/dev-account-switcher
   dist/server/config/dev-tools
 )

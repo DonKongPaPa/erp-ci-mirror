@@ -48,20 +48,25 @@ const isDevToolServerSource = (file: string): boolean =>
   file.startsWith('server/dev-tools/') ||
   [
     'server/routes/dev-account-switcher.ts',
+    'server/routes/dev-requirements-board.ts',
     'server/providers/dev-account-switcher.ts',
     'server/config/dev-tools.ts',
   ].includes(file);
 
 const isDevToolClientSource = (file: string): boolean =>
-  file.startsWith('client/extensions/dev-account-switcher/');
+  file.startsWith('client/extensions/dev-account-switcher/') ||
+  file.startsWith('client/extensions/dev-requirements-board/');
 
 /** 服务端开发工具模块的引入路径（源码里写的是 `.js`）。 */
 const DEV_TOOL_SERVER_MODULE =
-  /\/dev-tools\/|\/dev-account-switcher\.js$|\/config\/dev-tools\.js$/u;
+  /\/dev-tools\/|\/dev-account-switcher\.js$|\/dev-requirements-board\.js$|\/config\/dev-tools\.js$/u;
 
 /** 切换器的代码模块；它的词条表不在此列，语言包那一条另有测试。 */
 const SWITCHER_CODE_MODULE =
   /\/dev-account-switcher\/(?:plugin|section|index)\.js$/u;
+
+/** 看板的代码模块；词条表同样只由语言包在开发构建里并入。 */
+const BOARD_CODE_MODULE = /\/dev-requirements-board\/(?:index|model)\.js$/u;
 
 /**
  * `check-dist.sh` 对 `dist/server` 全文断言零命中的标记。源码里带着它们的注释会被原样编进产物
@@ -70,6 +75,8 @@ const SWITCHER_CODE_MODULE =
 const SERVER_ARTIFACT_MARKERS = [
   'switch-account',
   'dev-account-switcher',
+  'dev/requirements-board',
+  'requirements-board',
   'demo.quality_manager',
   'demo.quality_inspector',
   'demo.dept_manager',
@@ -161,6 +168,30 @@ describe('R-073 部署产物里没有开发与演示功能（源码守门）', (
     }
   });
 
+  it('the board page is reached only by a dynamic import behind the development constant', () => {
+    const loader = 'client/extensions/development-extensions.ts';
+    const source = read(loader);
+    const gate = source.indexOf('if (!import.meta.env.DEV) return defineAppRoutes([]);');
+    const dynamicImport = source.search(
+      /componentLoader:\s*\(\)\s*=>\s*import\(\s*['"]\.\/dev-requirements-board\/index\.js['"]/u,
+    );
+    expect(
+      gate,
+      '看板路由没有「非开发构建直接返回空」这道门。',
+    ).toBeGreaterThan(-1);
+    expect(dynamicImport, '看板路由的页面不是动态引入的。').toBeGreaterThan(
+      gate,
+    );
+    for (const file of clientSources) {
+      expect(
+        staticImportSpecifiers(read(file)).filter((specifier) =>
+          BOARD_CODE_MODULE.test(specifier),
+        ),
+        `${file} 静态引入了看板的代码模块：静态引入会把它带进生产构建的模块图。`,
+      ).toEqual([]);
+    }
+  });
+
   it('the switcher locale entries are merged only by a development-guarded spread', () => {
     for (const locale of ['en-US', 'zh-CN']) {
       const source = read(`client/locales/${locale}.ts`);
@@ -172,18 +203,35 @@ describe('R-073 部署产物里没有开发与演示功能（源码守门）', (
       );
       expect(
         source,
-        `client/locales/${locale}.ts 并入 devTools 词条时没有用 import.meta.env.DEV 挡：生产构建的语言包会带上「切换账户」这些文案。`,
-      ).toMatch(/\.\.\.\(import\.meta\.env\.DEV \? \{ devTools \} : \{\}\),/u);
+        `client/locales/${locale}.ts 没有引入看板的词条表。`,
+      ).toContain(
+        `import requirementsBoard from '../extensions/dev-requirements-board/locales/${locale}.js';`,
+      );
+      expect(
+        source,
+        `client/locales/${locale}.ts 并入 devTools 词条时没有用 import.meta.env.DEV 挡：生产构建的语言包会带上「切换账户」「需求池看板」这些文案。`,
+      ).toMatch(
+        /\.\.\.\(\s*import\.meta\.env\.DEV\s*\?\s*\{\s*devTools:\s*\{\s*\.\.\.devTools,\s*\.\.\.requirementsBoard\s*\}\s*\}\s*:\s*\{\}\s*\),/u,
+      );
     }
     for (const file of clientSources.filter(
       (file) => !file.startsWith('client/locales/'),
     )) {
+      const specifiers = staticImportSpecifiers(read(file));
       expect(
-        staticImportSpecifiers(read(file)),
+        specifiers,
         `${file} 引入了切换器的词条表：词条只能由两份语言包并入。`,
       ).toEqual(
         expect.not.arrayContaining([
           expect.stringMatching(/dev-account-switcher\/locales\//u),
+        ]),
+      );
+      expect(
+        specifiers,
+        `${file} 引入了看板的词条表：词条只能由两份语言包并入。`,
+      ).toEqual(
+        expect.not.arrayContaining([
+          expect.stringMatching(/dev-requirements-board\/locales\//u),
         ]),
       );
     }

@@ -337,7 +337,23 @@ const zhCN: AppServerResource = {
       partnerInvalid: '选中的订单所用供应商已停用或不可用，请换一张订单。',
     },
   },
-
+  // R-070：来料检验规则码文案。
+  iqc: {
+    errors: {
+      iqcNotFound: '这张检验单不存在。',
+      iqcNotPending: '只有待检验的检验单可以修改、完成或作废。',
+      iqcDuplicateItem: '同一物料在检验单里只能加一行。',
+      iqcQtyInvalid: '检验数量不合法：收货、检验、合格与抽检数量都要满足各自的上下限。',
+      iqcReceivedExceed: '收货数量超过了采购订单行的剩余数量。',
+      iqcNotReleasable: '这张检验单不能用于该采购订单入库。',
+      iqcReleasableExceed: '入库数量超过了检验行尚可入库的数量。',
+      iqcOrderInvalid: '采购订单不存在，或者还是草稿、已经取消。',
+      iqcPersonInvalid: '检验人不是在职员工。',
+      itemNotFound: '物料不存在。',
+      itemInactive: '物料已经停用。',
+      documentNotFound: '附件不存在。',
+    },
+  },
 };
 
 export default zhCN;

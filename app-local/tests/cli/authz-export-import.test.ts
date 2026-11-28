@@ -26,6 +26,7 @@ import AuthzUpgradeR076 from '../../cli/authz/upgrade-r076.js';
 import AuthzUpgradeR026 from '../../cli/authz/upgrade-r026.js';
 import AuthzUpgradeR065 from '../../cli/authz/upgrade-r065.js';
 import AuthzUpgradeR066 from '../../cli/authz/upgrade-r066.js';
+import AuthzUpgradeR070Iqc from '../../cli/authz/upgrade-r070-iqc.js';
 import AuthzUpgradeR064 from '../../cli/authz/upgrade-r064.js';
 import AuthzUpgradeR072 from '../../cli/authz/upgrade-r072.js';
 import cliPlugins from '../../cli/plugins.js';
@@ -69,6 +70,7 @@ test('R-013: the authz commands are registered under their own topic', () => {
     'upgrade-r064',
     'upgrade-r065',
     'upgrade-r066',
+    'upgrade-r070-iqc',
     'upgrade-r072',
     'upgrade-r076',
   ]);
@@ -86,6 +88,9 @@ test('R-013: the authz commands are registered under their own topic', () => {
   // R-076 的升级步骤：给三个角色补打印授权，可单独跑、可重跑。
   expect(plugin!.commands['upgrade-r076']).toBe(AuthzUpgradeR076);
   expect(AuthzUpgradeR076.description).toContain('printPrice');
+  // R-070 的升级步骤：给四个现成角色补检验动作，可单独跑、可重跑。
+  expect(plugin!.commands['upgrade-r070-iqc']).toBe(AuthzUpgradeR070Iqc);
+  expect(AuthzUpgradeR070Iqc.description).toContain('inspectionOrders');
   // R-020 的升级步骤：给已有环境的 warehouse 补库存授权，可单独跑、可重跑。
   expect(plugin!.commands['upgrade-r014']).toBe(AuthzUpgradeR014);
   expect(plugin!.commands['upgrade-r014-page']).toBe(AuthzUpgradeR014Page);
